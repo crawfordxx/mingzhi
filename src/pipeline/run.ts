@@ -4,7 +4,8 @@ import type { AppConfig } from '../config.js';
 import { transcribeWav } from '../asr/local-asr.js';
 import { burnSubtitles } from '../captions/burn.js';
 import { toAss } from '../captions/ass.js';
-import { keptIndices, polishCaptions, timeCaptions, type TimedCaption } from '../captions/lines.js';
+import { keptIndices, timeCaptions, type TimedCaption } from '../captions/lines.js';
+import { polishCaptions, type PolishResult } from '../captions/polish.js';
 import { detectCuts, type Cut } from '../cut/llm-cuts.js';
 import { buildEditPlan, cutsToRanges, type EditPlan } from '../cut/plan.js';
 import { renderCut } from '../cut/render-cut.js';
@@ -16,6 +17,9 @@ export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render
 export interface ProgressEvent { step: PipelineStep; message: string }
 export interface PipelineArgs { input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; onProgress?: (e: ProgressEvent) => void }
 export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[] }
+
+/** 字幕校对结果的一句话说明，例如「字幕校对：48/52 行采用模型结果…」 */
+const polishSummary = (p: PolishResult): string => p.warning ?? `字幕校对：${p.lines.length}/${p.lines.length} 行采用模型结果`;
 
 const fmtSec = (s: number): string => {
   const total = Math.round(s);
@@ -50,11 +54,11 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   await renderCut(input, plan.keep, cutPath, cfg);
   report('render', '剪切完成');
 
-  const lines = await polishCaptions(llm, transcript.tokens, keptIndices(transcript.tokens.length, cuts));
-  const captions = timeCaptions(lines, transcript.tokens, plan.keep);
+  const polished = await polishCaptions(llm, transcript.tokens, keptIndices(transcript.tokens.length, cuts));
+  const captions = timeCaptions(polished.lines, transcript.tokens, plan.keep);
   const assPath = join(workDir, 'captions.ass');
   writeFileSync(assPath, toAss(captions, media));
-  report('captions', `${captions.length} 行字幕`);
+  report('captions', `${captions.length} 行字幕 · ${polishSummary(polished)}`);
 
   await burnSubtitles(cutPath, assPath, output, cfg);
   report('burn', '字幕已烧录');

@@ -23,12 +23,12 @@ const SYSTEM_PROMPT = `你是专业口播剪辑师。输入是逐字识别稿，
 绝不删除有信息量的正文；拿不准就不删。
 只输出 JSON：{"cuts":[{"from":起始下标,"to":结束下标(含),"type":"filler|repeat|slip|false_start","reason":"一句话原因"}]}`;
 
-/** 每个 token 前标下标；token 之间间隔超过 0.3 秒视为停顿并换行，帮助模型理解语气 */
-export function formatTokensForLlm(tokens: Token[]): string {
-  return tokens
-    .map((t, i) => {
-      const gap = i > 0 ? t.start - tokens[i - 1].end : 0;
-      return `${i > 0 && gap > LINE_BREAK_GAP ? '\n' : ''}[${i}]${t.text}`;
+/** 每个 token 前标下标，只列 indices 里的下标（默认全部）；相邻两项间隔超过 0.3 秒视为停顿并换行，帮助模型理解语气 */
+export function formatTokensForLlm(tokens: Token[], indices: number[] = tokens.map((_, i) => i)): string {
+  return indices
+    .map((idx, k) => {
+      const gap = k > 0 ? tokens[idx].start - tokens[indices[k - 1]].end : 0;
+      return `${k > 0 && gap > LINE_BREAK_GAP ? '\n' : ''}[${idx}]${tokens[idx].text}`;
     })
     .join('');
 }

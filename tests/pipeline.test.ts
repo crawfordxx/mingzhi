@@ -8,7 +8,7 @@ import { loadConfig } from '../src/config.js';
 import type { LlmClient } from '../src/llm/kexiang.js';
 import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
-import { runPipeline } from '../src/pipeline/run.js';
+import { runPipeline, type ProgressEvent } from '../src/pipeline/run.js';
 import { hasModels } from './helpers/models.js';
 
 describe('burnSubtitles', () => {
@@ -32,8 +32,8 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('样片：删掉停顿与「嗯」，输出成片、ASS 和 project.json', async () => {
-    // 假模型返回的字幕结果非法，会触发兜底分行的告警；这里静音并断言它确实发生
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // 假模型返回的字幕结果非法，会走兜底分行；告警应通过 onProgress 告知，而不是打控制台
+    const warn = vi.spyOn(console, 'warn');
     const cfg = loadConfig({});
     const work = mkdtempSync(join(tmpdir(), 'mz-'));
     // 假模型：剪掉文字为「嗯」的 token；字幕返回非法结果以走兜底分行
@@ -46,13 +46,13 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
         return { lines: [] };
       },
     };
-    const steps: string[] = [];
+    const events: ProgressEvent[] = [];
     const input = join(import.meta.dirname, 'fixtures', 'talk.mp4');
-    const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, onProgress: (e) => steps.push(e.step) });
+    const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, onProgress: (e) => events.push(e) });
     const src = await probe(input, cfg);
     const out = await probe(res.output, cfg);
     expect(out.durationSec).toBeLessThan(src.durationSec - 1.0);
-    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'burn', 'done']);
+    expect(events.map((e) => e.step)).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'burn', 'done']);
     // 兜底分行按字数换行，「高性价比」可能被拆到相邻两行，所以拼接所有字幕行再断言
     const assText = readFileSync(join(work, 'captions.ass'), 'utf8').split('\n')
       .filter((l) => l.startsWith('Dialogue:')).map((l) => l.split(',').slice(9).join(',')).join('');
@@ -62,6 +62,7 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(project.version).toBe(1);
     expect(project.transcript.tokens.length).toBeGreaterThan(20);
     expect(existsSync(join(work, 'cut.mp4'))).toBe(true);
-    expect(warn).toHaveBeenCalledWith('字幕校对结果不合法，改用自动分行');
+    expect(events.find((e) => e.step === 'captions')?.message).toContain('改用自动分行');
+    expect(warn).not.toHaveBeenCalled();
   }, 120_000);
 });
