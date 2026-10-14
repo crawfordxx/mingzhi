@@ -1,0 +1,1245 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<!--
+================================================================================
+ 明知AI剪辑 · 第三轮 · D 方向「工业硬件」—— 出片机 MZ-02
+================================================================================
+ form 来自内容的哪里：
+   用户只录「一条」口播 = 一卷磁带。产品因此被做成一台「出片机」：
+   核心读数是磁带计数器 03:42 → 01:57；被剪掉的气口在转录里被信号橙的切刀划掉、
+   合拢，只留下一道橙色「切口」——切口是全界面唯一的彩色。
+   18 段成片 = 18 个步进键（OP-Z 式），版本 = 旋钮档位，对比 = 拨杆，自检 = 电平表。
+
+ 设计系统：
+   色彩  暖灰机身 #E2DED5 / 纸面 #F4F2EC / 碳黑脊条 #1D1C19 / LCD 灰绿 #C2C8AE
+         唯一彩色：信号橙 #FF5A1A（只做填充、LED、切口；橙底配墨字 5.6:1）
+         通过灯用小面积绿 LED，仅出现在「已完成」指示上
+   字体  IBM Plex Mono（标签/数字，全部 tabular-nums）+ 思源黑体 Noto Sans SC（中文）
+         DSEG7 Classic（仅 LCD 计数器，带 88:88 残影段）
+   形状  0–3px 圆角、1px 发丝线分区、按键是唯一有体积的东西（底边 3px 模拟键程）
+
+ 参考清单（WebFetch / curl 实际打开过的，及其落地位置）：
+   1. styles.refero.design · teenage engineering design system
+      （WebFetch 两次 300s 超时，改用 curl 抓到全文）
+      借：0 圆角/无阴影/1px 发丝线分区；五个中性色 + 只有一个彩色音符；
+          #0f0e12 式的深色带当「展柜墙」
+      用在：最左碳黑项目栏（深色带）、全局发丝线分区、信号橙作为唯一彩色
+   2. blakecrosley.com/guides/design/teenage-engineering（由 refero 搜索结果延伸）
+      借：大写等宽标签 0.1em 字距、tabular 数字、1px 缝隙黑底 spec grid、
+          「四旋钮固定映射、任何功能两步内可达」
+      用在：设置卡 bento（1px 缝隙网格）、所有数字读数、版本旋钮与对比拨杆常驻顶部
+   3. 60fps.design
+      借：Revolut「交易数」计数动效 → 气口/口误机械计数轮（odometer）；
+          Sudoku 音效滑杆 / Claude effort 选择 → 旋钮与拨杆的弹簧手感；
+          Uber 搜索框边框高亮 → 输入框聚焦时信号橙描边；
+          Platen 打字机引导 → 剪辑直播里转录逐行「打印」
+   4. motion.dev/docs/react-scroll-animations
+      借：whileInView + viewport.root 指定自定义滚动容器；useScroll + useSpring
+      用在：对话流条目进入（root = 对话流容器）、对话流右侧「磁带位置」标尺
+   5. navbar.gallery
+      实际只抓到 13 个站点名（Cloudflare / Browserbase / Asana…），无结构描述。
+      借鉴有限：顶部做成无图标的「印刷铭牌」——左项目名、右余额与设置
+   6. cta.gallery（含 /cta/lockerland 详情页）
+      只抓到名称与分类（Button / Agency / Light），无视觉细节。
+      落地的只有原则：主 CTA（发送 / 开始出片 / 导出）做成带键程与 LED 的实体键
+   7. bentogrids.com
+      正文为 JS 渲染，curl 只拿到条目名（Chroma / Tuple / Neon / Dovetail…）。
+      借：不等宽单元、图与数据混排 → 设置卡 5 格 bento
+   8. jiro.build
+      抓到组件库描述：「monospace menus pushed to opposite edges」「industrial footer」
+      用在：输入区底栏左右两端等宽小字（本轮预估 / 快捷键）
+   9. footer.design
+      只拿到筛选项（Small Type / Grid / Typographic）与站点名。
+      用在：输入框底部「小字铭牌」式收尾
+  10. prompt-motion.com —— WebFetch 403、curl 被 Cloudflare 拦截，未参考
+  11. unsection.com     —— WebFetch 403、curl 被 Cloudflare 拦截，未参考
+================================================================================
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明知AI剪辑 · 出片机</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+@font-face{
+  font-family:'DSEG7';
+  src:url('https://cdn.jsdelivr.net/npm/dseg@0.46.0/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2') format('woff2');
+  font-weight:700; font-display:block;
+}
+:root{
+  --shell:#E2DED5; --paper:#F4F2EC; --face:#E2DED5; --recess:#D5D0C5;
+  --ink:#1A1916; --ink2:#46433D; --ink3:#625E56;
+  --hair:#CEC8BC; --hair2:#B4AD9F;
+  --carbon:#1D1C19; --carbon2:#2C2B27;
+  --orange:#FF5A1A; --orange-d:#B33905; --green:#2FB457;
+  --lcd:#C2C8AE; --lcd-ink:#1C2114;
+  --mono:'IBM Plex Mono', ui-monospace, monospace;
+  --sans:'Noto Sans SC', 'PingFang SC', sans-serif;
+  --spring:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--shell);color:var(--ink);overflow:hidden}
+body{font:400 14px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+img{display:block}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.lbl{font:500 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink3)}
+
+/* ---------- 总骨架：脊条 56 | 对话 592 | 机身 ---------- */
+.app{display:grid;grid-template-columns:56px 592px 1fr;height:100vh;min-height:860px}
+
+/* ---------- 实体按键（全局唯一有体积的东西） ---------- */
+.key{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  font:500 13px/1 var(--mono);letter-spacing:.04em;color:var(--ink);
+  background:linear-gradient(#F8F6F1,#E8E4DB);border:1px solid var(--hair2);border-bottom-width:3px;border-radius:3px;
+  padding:9px 12px 8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.8);white-space:nowrap;
+  transition:background .15s, border-color .15s}
+.key:hover{background:linear-gradient(#FFFDF8,#EDE9E0);border-color:#9E9789}
+.key.zh{font-family:var(--sans);font-weight:500;letter-spacing:0}
+.key-o{background:var(--orange);border-color:#C4450D;border-bottom-color:#9C3305;color:var(--ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+.key-o:hover{background:#FF6A2E;border-color:#B5400B}
+.key-d{background:linear-gradient(#34332E,#262521);border-color:#0E0D0B;color:#F4F2EC;box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.key-d:hover{background:linear-gradient(#3C3B35,#2B2A26)}
+.key[disabled]{opacity:.55;cursor:not-allowed}
+
+.led{display:inline-block;width:7px;height:7px;border-radius:50%;background:#B9B2A5;box-shadow:inset 0 1px 1px rgba(0,0,0,.35);flex:none}
+.led.on{background:var(--orange);box-shadow:0 0 0 2px rgba(255,90,26,.16),0 0 8px rgba(255,90,26,.75)}
+.led.ok{background:var(--green);box-shadow:0 0 0 2px rgba(47,180,87,.14),0 0 6px rgba(47,180,87,.6)}
+.led.blink{animation:blink 1s steps(2,start) infinite}
+@keyframes blink{to{visibility:hidden}}
+
+/* ---------- 左：碳黑脊条（项目栏） ---------- */
+.rail{background:var(--carbon);color:#F4F2EC;display:flex;flex-direction:column;align-items:center;padding:16px 0 14px;position:relative;z-index:30;border-right:1px solid #000}
+.rail-mark{display:flex;flex-direction:column;align-items:center;gap:2px;font:900 15px/1.05 var(--sans);letter-spacing:0}
+.rail-mark .led{margin-top:8px}
+.rail-sep{width:24px;height:1px;background:#3A3934;margin:18px 0 14px}
+.proj{position:relative;width:36px;margin-bottom:14px;display:flex;flex-direction:column;align-items:center;gap:5px}
+.proj img{width:36px;height:64px;object-fit:cover;border-radius:2px;outline:1px solid #3A3934;filter:grayscale(.35) brightness(.8);transition:filter .2s}
+.proj.on img{filter:none;outline:2px solid var(--orange);outline-offset:2px}
+.proj:hover img{filter:none}
+.proj span{font:500 12px/1 var(--mono);color:#A9A498}
+.proj.on span{color:#F4F2EC}
+.rail-fly{position:absolute;left:52px;top:0;white-space:nowrap;background:var(--carbon);color:#F4F2EC;padding:7px 10px;border-radius:2px;font:500 13px/1.3 var(--sans);pointer-events:none;border:1px solid #3A3934}
+.rail-fly .mono{display:block;font-size:12px;color:#A9A498;margin-top:2px}
+.rail-new{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:6px}
+.rail-new .key{width:36px;height:36px;padding:0;font-size:18px;font-weight:400}
+.rail-new span{font:500 12px/1 var(--sans);color:#A9A498}
+
+/* ---------- 中：对话流（纸面打印记录） ---------- */
+.chat{background:var(--paper);display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--ink);position:relative}
+.chat-head{height:64px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 20px 0 24px;border-bottom:1px solid var(--ink)}
+.chat-head h1{font:700 17px/1.25 var(--sans);letter-spacing:.01em}
+.chat-head .sub{font:400 12px/1 var(--mono);color:var(--ink3);margin-bottom:6px;letter-spacing:.06em}
+.head-r{display:flex;align-items:center;gap:12px}
+.bal{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.bal b{font:600 15px/1 var(--mono);font-variant-numeric:tabular-nums}
+.bal span{font:400 12px/1 var(--sans);color:var(--ink3)}
+
+.stream-wrap{flex:1;min-height:0;position:relative}
+.stream{position:absolute;inset:0;overflow-y:auto;padding:20px 28px 28px 20px;scrollbar-width:none}
+.stream::-webkit-scrollbar{display:none}
+.ruler{position:absolute;right:0;top:0;bottom:0;width:14px;border-left:1px solid var(--hair);
+  background:repeating-linear-gradient(to bottom,transparent 0 11px,var(--hair2) 11px 12px) right 0 top 0/5px 100% no-repeat,
+             repeating-linear-gradient(to bottom,transparent 0 59px,var(--ink3) 59px 60px) right 0 top 0/9px 100% no-repeat}
+.ruler i{position:absolute;left:-1px;right:0;height:22px;background:var(--orange);display:block}
+
+.entry{display:grid;grid-template-columns:52px 1fr;gap:0 12px;margin-bottom:22px}
+.gutter{padding-top:3px;display:flex;flex-direction:column;gap:5px;border-right:1px solid var(--hair);padding-right:10px}
+.gutter .io{font:600 12px/1 var(--mono);letter-spacing:.08em}
+.gutter .io-n{font:400 12px/1 var(--mono);color:var(--ink3)}
+.entry.in .gutter .io{color:var(--ink)}
+.entry.out .gutter .io{color:var(--ink3)}
+.entry-body{min-width:0}
+
+/* IN：碳黑压印标签（Dymo 带） */
+.tape{display:inline-block;text-wrap:pretty;max-width:100%;background:var(--carbon);color:#F4F2EC;padding:11px 14px 12px;border-radius:2px;font:400 15px/1.6 var(--sans);position:relative}
+.tape:before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:repeating-linear-gradient(to bottom,#3A3934 0 3px,transparent 3px 6px)}
+.tape .tag{margin-right:8px;vertical-align:1px}
+
+/* OUT：纸面印刷 */
+.say{font:400 15px/1.7 var(--sans);color:var(--ink);text-wrap:pretty}
+.say + .say{margin-top:6px}
+.say b{font-weight:700}
+.unit{border:1px solid var(--ink);background:#FBFAF6;border-radius:2px}
+.unit-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-bottom:1px solid var(--hair)}
+.unit-h .t{display:flex;align-items:center;gap:8px;font:500 14px/1 var(--sans)}
+
+.tag{display:inline-flex;align-items:center;gap:6px;background:var(--orange);color:var(--ink);font:500 12px/1 var(--mono);padding:5px 7px 4px;border-radius:2px;white-space:nowrap}
+.tag em{font-style:normal;font-family:var(--sans);font-weight:500}
+.tag button{font:400 13px/1 var(--mono);margin-left:2px;opacity:.7}
+.tag button:hover{opacity:1}
+
+/* 设置卡 bento：1px 缝隙黑底网格 */
+.setup-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;text-align:left;font-size:14px}
+.setup-row .chev{margin-left:auto;font:400 13px/1 var(--mono);color:var(--ink3)}
+.setup-row .dot{color:var(--hair2)}
+.bento{display:grid;grid-template-columns:1.25fr 1fr 1fr;grid-template-rows:auto auto;gap:1px;background:var(--ink);border-top:1px solid var(--ink)}
+.bento > div{background:#FBFAF6;padding:12px;min-width:0}
+.bento .lbl{display:block;margin-bottom:10px}
+.b-file{grid-row:span 2;display:flex;flex-direction:column}
+.b-file .name{font:500 15px/1.35 var(--mono);word-break:break-all}
+.b-file .meta{font:400 12px/1.6 var(--mono);color:var(--ink3);margin-top:6px}
+.b-file .wave{margin-top:auto;height:36px;display:flex;align-items:center;gap:2px}
+.b-file .wave i{flex:1;background:var(--ink);border-radius:1px}
+.b-bg{display:flex;gap:10px;align-items:flex-end}
+.b-bg img{width:56px;height:56px;object-fit:cover;border-radius:2px}
+.b-sub .pv{white-space:nowrap;font:900 17px/1.2 var(--sans);color:#fff;-webkit-text-stroke:5px var(--ink);paint-order:stroke fill;letter-spacing:.02em}
+.b-sub .pv span{color:var(--orange)}
+.b-sub .nm{font:400 12px/1 var(--sans);color:var(--ink3);margin-top:8px}
+.b-cost .v{font:600 22px/1 var(--mono)}
+.b-cost .cap2{font:400 12px/1.4 var(--sans);color:var(--ink3);margin-top:8px}
+.b-go{display:flex;flex-direction:column;justify-content:space-between;gap:8px}
+.b-go .key{align-self:flex-start;transform:translateY(2px);border-bottom-width:1px}
+.b-go .when{font:400 12px/1 var(--mono);color:var(--ink3)}
+
+/* 剪辑直播模块 */
+.live-stages{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--hair)}
+.stg{padding:10px 0 9px 10px;border-right:1px solid var(--hair);min-width:0}
+.stg:last-child{border-right:0}
+.stg .n{display:flex;align-items:center;gap:6px;font:500 12px/1 var(--sans);color:var(--ink2);white-space:nowrap}
+.stg .tm{font:500 12px/1 var(--mono);color:var(--ink);margin-top:7px;font-variant-numeric:tabular-nums}
+.stg.wait .tm,.stg.wait .n{color:var(--ink3)}
+.live-read{display:grid;grid-template-columns:auto 1fr;gap:16px;padding:14px 12px;align-items:center;border-bottom:1px solid var(--hair)}
+.lcd{position:relative;background:var(--lcd);color:var(--lcd-ink);border-radius:3px;padding:9px 12px 8px;
+  box-shadow:inset 0 2px 3px rgba(0,0,0,.28),inset 0 0 0 1px rgba(0,0,0,.22),0 1px 0 rgba(255,255,255,.7);
+  font:700 26px/1 'DSEG7',var(--mono);letter-spacing:.02em;white-space:nowrap}
+.lcd .num{position:relative;display:inline-block}
+.lcd .ghost{position:absolute;left:0;top:0;color:rgba(28,33,20,.075)}
+.lcd .seg-row{display:flex;align-items:baseline;gap:10px}
+.lcd .arrow{font:500 14px/1 var(--mono);opacity:.75;transform:translateY(-4px)}
+.lcd .cap{font:500 12px/1 var(--mono);letter-spacing:.08em;margin-top:7px;opacity:.78}
+.counters{display:flex;gap:18px;justify-content:flex-end}
+.ctr{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.ctr .zh{font:400 12px/1 var(--sans);color:var(--ink3)}
+.odo{display:inline-flex;background:var(--paper);border:1px solid var(--ink);border-radius:2px;padding:0 1px;font:600 20px/1 var(--mono)}
+.odo-col{display:block;height:1.3em;overflow:hidden;width:.68em;text-align:center;position:relative}
+.odo-col + .odo-col{border-left:1px solid var(--hair)}
+.odo-strip{display:block}
+.odo-strip span{display:block;height:1.3em;line-height:1.3em}
+.odo.cut{background:var(--orange)}
+
+.live-body{overflow:hidden}
+.printer{padding:12px 12px 4px;border-bottom:1px solid var(--hair);font:400 14px/1.75 var(--sans)}
+.pline{display:grid;grid-template-columns:44px 1fr;gap:8px;align-items:baseline}
+.pline .tc{font:400 12px/1 var(--mono);color:var(--ink3)}
+.cut{position:relative;display:inline-flex;align-items:baseline}
+.cut-txt{display:inline-block;overflow:hidden;white-space:nowrap;vertical-align:bottom}
+.cut-inner{position:relative;display:inline-block}
+.cut-bar{position:absolute;left:-1px;right:-1px;top:54%;height:2px;background:var(--orange);transform-origin:0 50%;display:block}
+.cut-mark{display:inline-block;width:3px;height:1.05em;background:var(--orange);margin:0 2px;transform-origin:50% 100%;vertical-align:-2px;cursor:help;position:relative}
+.cut-mark:hover:after{content:attr(data-c);position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);background:var(--carbon);color:#F4F2EC;font:400 12px/1 var(--sans);padding:6px 8px;border-radius:2px;white-space:nowrap;z-index:5}
+.board{padding:12px;border-bottom:1px solid var(--hair)}
+.board-grid{display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-top:10px}
+.slot{position:relative;aspect-ratio:9/16;background:var(--recess);border-radius:2px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.18)}
+.slot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.slot .no{position:absolute;left:3px;top:3px;font:500 12px/1 var(--mono);color:var(--ink3);z-index:0}
+.slot .b{position:absolute;right:2px;bottom:2px;background:var(--orange);color:var(--ink);font:600 12px/1 var(--mono);padding:2px 3px;border-radius:1px;z-index:2}
+.render{display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--hair)}
+.cells{flex:1;display:grid;grid-template-columns:repeat(30,1fr);gap:2px;height:10px}
+.cells i{background:#D2CCC0;border-radius:1px}
+.cells i.f{background:var(--ink)}
+.scores{display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;padding:12px}
+.score{display:grid;grid-template-columns:70px 1fr 34px;align-items:center;gap:10px}
+.score .k{font:400 13px/1 var(--sans);color:var(--ink2)}
+.score .v{font:600 14px/1 var(--mono);text-align:right}
+.bar10{display:grid;grid-template-columns:repeat(10,1fr);gap:2px;height:10px}
+.bar10 i{background:#D2CCC0;border-radius:1px;position:relative;overflow:hidden}
+.bar10 i b{position:absolute;inset:0;background:var(--ink);transform-origin:0 50%}
+.verdict{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;background:var(--carbon);color:#F4F2EC;font:500 14px/1.4 var(--sans)}
+.verdict .mono{font-size:13px}
+
+/* 版本卡 */
+.ver{display:grid;grid-template-columns:64px 1fr auto;gap:14px;padding:12px;align-items:center}
+.ver img{width:64px;height:114px;object-fit:cover;border-radius:2px;outline:1px solid var(--ink)}
+.ver .vn{font:600 30px/1 var(--mono);letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+.ver .vn .led{margin-top:2px}
+.ver .facts{display:flex;gap:16px;margin-top:12px}
+.ver .facts div{display:flex;flex-direction:column;gap:5px}
+.ver .facts b{font:600 15px/1 var(--mono);font-variant-numeric:tabular-nums}
+.ver .facts span{font:400 12px/1 var(--sans);color:var(--ink3)}
+.ver .note{font:400 13px/1.5 var(--sans);color:var(--ink2);margin-top:10px}
+.ver .acts{display:flex;flex-direction:column;gap:8px;align-self:stretch;justify-content:center}
+.up{color:var(--orange-d)}
+
+/* AI 回复：引用缩略 + 内联选项 */
+.cites{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 14px}
+.cite{display:grid;grid-template-columns:40px 1fr;gap:10px;align-items:start;border-top:1px solid var(--ink);padding-top:10px}
+.cite img{width:40px;height:71px;object-fit:cover;border-radius:2px}
+.cite .tag{margin-bottom:7px}
+.cite p{font:400 13px/1.55 var(--sans);color:var(--ink2)}
+.opts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.opt{position:relative;text-align:left;border:1px solid var(--hair2);border-radius:3px;background:#FBFAF6;padding:8px 8px 9px;transition:border-color .15s}
+.opt:hover{border-color:var(--ink)}
+.opt.sel{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.opt .pv{height:64px;background:#EFECE5;border-radius:2px;position:relative;overflow:hidden;margin-bottom:8px;display:flex;align-items:center;justify-content:center}
+.opt .on{display:flex;align-items:center;justify-content:space-between;font:500 13px/1.2 var(--sans)}
+.opt .on .mono{font-size:12px;color:var(--ink3)}
+.pv-a{display:flex;flex-direction:column;gap:7px;width:76%}
+.pv-a i{height:9px;background:var(--ink);display:block;border-radius:1px}
+.pv-a i.o{background:var(--orange)}
+.pv-b{display:flex;align-items:center;gap:10px}
+.ring{width:42px;height:42px;border-radius:50%;background:conic-gradient(var(--orange) 0 38%,#CFC9BD 38% 100%);position:relative}
+.ring:after{content:'';position:absolute;inset:9px;border-radius:50%;background:#EFECE5}
+.pv-b .ln{display:flex;flex-direction:column;gap:5px}
+.pv-b .ln i{display:block;height:5px;background:var(--ink);border-radius:1px}
+.pv-c{display:grid;grid-template-columns:repeat(10,5px);gap:3px}
+.pv-c i{width:5px;height:5px;border-radius:50%;background:#BDB6A9}
+.pv-c i.o{background:var(--orange)}
+.picked{display:flex;align-items:center;gap:8px;margin-top:10px;font:400 13px/1 var(--sans);color:var(--ink2)}
+
+/* 处理中 */
+.proc-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:12px 12px 0}
+.bgt{position:relative;border-radius:2px;overflow:hidden;background:var(--recess)}
+.bgt img{width:100%;height:54px;object-fit:cover;filter:saturate(.85)}
+.bgt .nm{display:flex;align-items:center;justify-content:space-between;font:400 12px/1 var(--sans);color:var(--ink2);padding:6px 1px 2px;background:#FBFAF6}
+.bgt.sel{outline:2px solid var(--orange);outline-offset:1px}
+.bgt.sel .nm{color:var(--ink);font-weight:500}
+.bgt .scan{position:absolute;left:0;right:0;top:0;height:54px;background:linear-gradient(to bottom,transparent,rgba(255,90,26,.35) 48%,rgba(255,90,26,.9) 50%,transparent 52%);background-size:100% 220%;animation:scan 1.8s linear infinite}
+@keyframes scan{from{background-position:0 100%}to{background-position:0 -20%}}
+.prog{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px}
+.prog .zh{font:500 14px/1 var(--sans)}
+.prog .pct{font:600 15px/1 var(--mono);min-width:44px;text-align:right}
+.cells40{display:grid;grid-template-columns:repeat(40,1fr);gap:2px;height:12px}
+.cells40 i{background:#D2CCC0;border-radius:1px}
+.cells40 i.f{background:var(--ink)}
+.cells40 i.h{background:var(--orange);animation:blink 0.7s steps(2,start) infinite}
+.proc-foot{display:flex;justify-content:space-between;padding:0 12px 11px;font:400 12px/1 var(--mono);color:var(--ink3)}
+
+/* 输入区 */
+.composer{flex:none;border-top:1px solid var(--ink);background:var(--paper);padding:12px 20px 10px 24px;position:relative}
+.box{border:1px solid var(--hair2);border-radius:3px;background:#FFFEFB;transition:border-color .2s,box-shadow .2s}
+.box.focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(255,90,26,.22)}
+.tagrow{display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px 0;min-height:8px}
+.box textarea{display:block;width:100%;resize:none;border:0;outline:0;background:transparent;font:400 15px/1.55 var(--sans);color:var(--ink);padding:8px 12px 6px;height:52px}
+.box textarea::placeholder{color:#7A766D}
+.box-foot{display:flex;align-items:center;gap:6px;padding:0 8px 8px 10px}
+.chip{font:400 13px/1 var(--sans);color:var(--ink2);border:1px solid var(--hair);border-radius:2px;padding:6px 8px;background:var(--paper);transition:border-color .15s,color .15s,background .15s}
+.chip:hover{border-color:var(--ink);color:var(--ink);background:#fff}
+.box-foot .key-o{margin-left:auto}
+.plate{display:flex;justify-content:space-between;margin-top:9px;font:400 12px/1 var(--mono);color:var(--ink3);letter-spacing:.04em}
+.plate b{color:var(--ink);font-weight:600}
+
+/* ---------- 右：机身 ---------- */
+.dev{position:relative;display:flex;flex-direction:column;min-width:0;background:
+  radial-gradient(120% 80% at 50% 0%,rgba(255,255,255,.35),transparent 60%),var(--face)}
+.dev-head{height:80px;flex:none;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 24px;border-bottom:1px solid var(--hair2)}
+.plate-l .lbl{display:block;margin-bottom:7px;color:var(--ink2)}
+.plate-l .st{display:flex;align-items:center;gap:8px;font:500 14px/1.2 var(--sans)}
+.plate-l .st .mono{font-size:12px;color:var(--ink2)}
+.knob-wrap{position:relative;width:150px;height:72px}
+.knob-lbl{position:absolute;font:600 13px/1 var(--mono);color:var(--ink2);display:flex;align-items:center;gap:5px;padding:4px;transform:translate(-50%,-50%)}
+.knob-lbl.cur{color:var(--ink)}
+.knob-lbl.cur:after{content:'';position:absolute;left:4px;right:4px;bottom:-2px;height:2px;background:var(--orange)}
+.knob-lbl[aria-disabled=true]{color:var(--ink3)}
+.knob{position:absolute;left:50%;top:44px;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;
+  background:radial-gradient(circle at 38% 30%,#FFFDF9,#E6E1D8 45%,#C9C2B5 100%);
+  box-shadow:0 2px 0 #A79F91,0 3px 6px rgba(0,0,0,.22),inset 0 -2px 3px rgba(0,0,0,.12);border:1px solid #9E9789}
+.knob i{position:absolute;left:50%;top:4px;width:3px;height:14px;margin-left:-1.5px;background:var(--orange);border-radius:1px}
+.knob:after{content:'';position:absolute;inset:11px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#F2EEE7,#DAD4C9);box-shadow:inset 0 1px 2px rgba(0,0,0,.15)}
+.ticks{position:absolute;left:50%;top:44px;width:76px;height:76px;margin:-38px 0 0 -38px;pointer-events:none}
+.head-r2{display:flex;justify-content:flex-end;align-items:center;gap:20px}
+.slide{display:flex;flex-direction:column;gap:6px;align-items:center}
+.slide .lbls{display:flex;justify-content:space-between;width:68px;font:400 12px/1 var(--sans);color:var(--ink3)}
+.slide .lbls .cur{color:var(--ink);font-weight:500}
+.slot-track{width:68px;height:24px;border-radius:3px;background:#C9C3B7;box-shadow:inset 0 2px 3px rgba(0,0,0,.3);padding:3px;display:flex}
+.slot-track.on{justify-content:flex-end}
+.slot-thumb{width:32px;height:18px;border-radius:2px;background:linear-gradient(#FBF9F4,#DCD6CB);box-shadow:0 1px 2px rgba(0,0,0,.35);border:1px solid #9E9789;position:relative}
+.slot-thumb:after{content:'';position:absolute;left:50%;top:3px;bottom:3px;width:2px;margin-left:-1px;background:#9E9789}
+.slot-track.on .slot-thumb:after{background:var(--orange)}
+.menu{position:absolute;right:24px;top:68px;z-index:40;width:250px;background:#FBFAF6;border:1px solid var(--ink);border-radius:2px;box-shadow:0 14px 30px -12px rgba(0,0,0,.35)}
+.menu .lbl{display:block;padding:10px 12px 8px;border-bottom:1px solid var(--hair)}
+.menu button{display:flex;width:100%;justify-content:space-between;align-items:center;padding:11px 12px;font:500 14px/1 var(--sans);border-bottom:1px solid var(--hair);text-align:left}
+.menu button:last-child{border-bottom:0}
+.menu button .mono{font-size:12px;color:var(--ink3)}
+.menu button:hover{background:#F0EDE6}
+
+.dev-main{flex:1;min-height:0;display:flex;align-items:stretch;justify-content:center;gap:20px;padding:16px 24px 8px}
+.col{width:176px;flex:none;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.col .lbl{display:block;margin-bottom:8px;color:var(--ink2)}
+.panel{border-top:1px solid var(--hair2);padding-top:10px}
+.seginfo .zh{font:500 14px/1.55 var(--sans);margin-top:8px;text-wrap:pretty}
+.seginfo .card{font:400 13px/1.4 var(--sans);color:var(--ink2);margin-top:6px;display:flex;justify-content:space-between}
+.mini-score{display:grid;grid-template-columns:1fr auto;gap:7px 10px;font:400 13px/1 var(--sans);color:var(--ink2)}
+.mini-score b{font:600 13px/1 var(--mono);color:var(--ink);text-align:right}
+.mini-score .tot{grid-column:1/-1;display:flex;justify-content:space-between;border-top:1px solid var(--hair2);padding-top:8px;margin-top:2px;color:var(--ink);font-weight:500}
+.mini-score .tot b{font-size:16px}
+.pipe{display:flex;flex-direction:column;gap:9px}
+.pipe div{display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center;font:400 13px/1 var(--sans);color:var(--ink2)}
+.pipe div b{font:500 12px/1 var(--mono);color:var(--ink)}
+.pipe div b.r{color:var(--ink3);font-weight:400}
+.vu{display:flex;gap:10px;align-items:flex-end}
+.vu-ch{display:flex;flex-direction:column-reverse;gap:2px}
+.vu-ch i{width:22px;height:5px;border-radius:1px;background:#CBC5B9}
+.vu-ch i.f{background:var(--ink)}
+.vu-ch i.p{background:var(--orange)}
+.vu-scale{display:flex;flex-direction:column;justify-content:space-between;height:105px;font:400 12px/1 var(--mono);color:var(--ink3)}
+.vu-lr{display:flex;gap:10px;font:500 12px/1 var(--mono);color:var(--ink2);margin-top:6px;padding-left:6px}
+.vu-lr span{width:22px;text-align:center}
+.checks{display:flex;flex-direction:column;gap:7px;font:400 13px/1 var(--sans);color:var(--ink2)}
+.checks div{display:flex;justify-content:space-between;align-items:center}
+.checks b{font:500 12px/1 var(--mono);color:var(--ink);display:flex;align-items:center;gap:6px}
+
+.stage{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}
+.screens{display:flex;gap:16px;align-items:flex-start;justify-content:center}
+.bezel{position:relative;background:var(--carbon);padding:9px;border-radius:5px;box-shadow:0 1px 0 rgba(255,255,255,.6),0 18px 30px -18px rgba(0,0,0,.55),inset 0 0 0 1px #000}
+.bezel:before{content:'';position:absolute;inset:-6px;border-radius:8px;box-shadow:inset 0 2px 4px rgba(0,0,0,.18);border:1px solid var(--hair2);pointer-events:none}
+.scr{position:relative;overflow:hidden;background:#000;cursor:crosshair;border-radius:1px}
+.scr img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scr .hud{position:absolute;left:8px;top:8px;display:flex;gap:6px;z-index:3;pointer-events:none}
+.scr .hud span{font:500 12px/1 var(--mono);color:#F4F2EC;background:rgba(20,19,17,.72);padding:4px 6px;border-radius:2px}
+.scr .hud .o{background:var(--orange);color:var(--ink)}
+.scr .hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font:500 12px/1 var(--sans);color:#F4F2EC;background:rgba(20,19,17,.78);padding:6px 9px;border-radius:2px;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap;z-index:3}
+.scr:hover .hint{opacity:1}
+.diff{display:flex;align-items:center;gap:8px;margin-top:12px;font:400 13px/1 var(--sans);color:var(--ink2)}
+.diff .tag{cursor:pointer}
+.diff .mono{font-size:12px;color:var(--ink);margin-left:4px}
+.scr-cap{display:flex;justify-content:space-between;width:100%;margin-top:9px;font:500 12px/1 var(--mono);color:var(--ink2);letter-spacing:.06em}
+
+.dev-foot{flex:none;display:grid;grid-template-columns:46px 608px;column-gap:16px;row-gap:12px;justify-content:center;align-items:end;padding:14px 24px 14px;border-top:1px solid var(--hair2)}
+.foot-side{display:flex;justify-content:center;align-items:flex-end;height:100%}
+.foot-side .lbl{writing-mode:vertical-rl;transform:rotate(180deg);color:var(--ink2);padding-bottom:2px}
+.tapes{position:relative}
+.tp-cap{display:flex;justify-content:space-between;font:400 12px/1 var(--mono);color:var(--ink2);margin-bottom:6px;letter-spacing:.04em}
+.tp-cap b,.fin-cap b{font-weight:600;color:var(--ink)}
+.track{position:relative;height:12px;border-radius:1px}
+.track.orig{background:var(--carbon);overflow:hidden}
+.track.orig i{position:absolute;top:0;bottom:0;background:var(--orange);display:block;transform-origin:50% 100%}
+.track.orig i.s{background:#FF8A55}
+.funnel{display:block;width:100%;height:14px;overflow:visible}
+.funnel line{stroke:var(--ink3);stroke-width:1;vector-effect:non-scaling-stroke;stroke-dasharray:2 2}
+.fin-row{display:flex;align-items:center;gap:10px}
+.track.fin{background:#2C2B27;cursor:pointer;flex:none}
+.track.fin .sg{position:absolute;top:0;bottom:0;border-right:1px solid var(--face)}
+.track.fin .sg.cur{background:#5A5750}
+.track.fin .sg.chg:before{content:'';position:absolute;left:0;right:0;top:-4px;height:2px;background:var(--orange)}
+.track.fin .head{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--orange);box-shadow:0 0 0 1px var(--face)}
+.fin-cap{font:400 12px/1 var(--mono);color:var(--ink2);white-space:nowrap;letter-spacing:.04em}
+.play{width:46px;height:46px;padding:0;font-size:15px}
+.steps-wrap{display:flex;flex-direction:column;gap:6px}
+.steps-legend{position:relative;height:16px;font:500 12px/1 var(--sans);color:var(--ink3)}
+.steps-legend span{position:absolute;bottom:0;display:flex;justify-content:center;white-space:nowrap;border-bottom:1px solid var(--ink3);padding-bottom:3px;height:16px}
+.steps-legend span:before,.steps-legend span:after{content:'';position:absolute;bottom:-1px;width:1px;height:5px;background:var(--ink3);left:0}
+.steps-legend span:after{left:auto;right:0}
+.steps{display:flex;gap:4px}
+.step{position:relative;width:30px;height:40px;padding:0;border-radius:3px;flex-direction:column;gap:5px;font:500 12px/1 var(--mono)}
+.step .led{width:5px;height:5px}
+.step.hook{background:linear-gradient(#34332E,#262521);border-color:#0E0D0B;color:#F4F2EC}
+.step.cur{transform:translateY(2px);border-bottom-width:1px}
+.step .chg{position:absolute;right:2px;top:2px;width:0;height:0;border-left:6px solid transparent;border-top:6px solid var(--orange)}
+.step-tip{position:absolute;bottom:calc(100% + 26px);left:50%;transform:translateX(-50%);background:var(--carbon);color:#F4F2EC;padding:8px 10px;border-radius:2px;font:400 13px/1.45 var(--sans);width:220px;text-align:left;pointer-events:none;z-index:20}
+.step-tip .mono{display:block;font-size:12px;color:#BDB8AD;margin-bottom:4px}
+
+.flyer{position:fixed;z-index:100;pointer-events:none}
+.toast{position:fixed;left:50%;bottom:22px;z-index:90;background:var(--carbon);color:#F4F2EC;padding:10px 14px;border-radius:2px;font:500 14px/1 var(--sans);display:flex;align-items:center;gap:10px}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/framer-motion@11.11.13/dist/framer-motion.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useLayoutEffect, useRef, Fragment } = React;
+const { motion, AnimatePresence, LayoutGroup, MotionConfig, useScroll, useSpring, useTransform } = Motion;
+
+/* ================= 真实内容 ================= */
+const F = n => `assets/frame_${n}.jpg`;
+// 18 段：起始秒、字幕原文、卡片模板、对应真实帧、自检分（v1 / v2）
+const SEGS = [
+  { s:0,   text:'吃抗氧化补剂的人，死亡率反而更高一些', card:'钩子卡 1/3 · 大数字', f:'003', sc:[9.2,9.2] },
+  { s:4,   text:'买双色球，每投 1 块钱，长期平均只能拿回五毛一', card:'钩子卡 2/3 · ¥0.51', f:'003', sc:[8.3,9.1], chg:true },
+  { s:8,   text:'帮人收钱取现的兼职，挣几百块，换一份案底', card:'钩子卡 3/3', f:'003', sc:[8.9,8.9] },
+  { s:13,  text:'我平时经常在 GitHub 上面去逛 AI 项目', card:'网页截图 B-roll', f:'022', sc:[9.0,9.0], broll:true },
+  { s:17,  text:'叫《高性价比人生指南》', card:'网页截图', f:'022', sc:[9.3,9.3], broll:true },
+  { s:21,  text:'这个项目里面一共讲了 650 条', card:'数字网格卡', f:'038', sc:[8.7,8.7] },
+  { s:26,  text:'怎么少花冤枉钱', card:'关键句字幕', f:'038', sc:[8.8,8.8] },
+  { s:30,  text:'每一条信息都告诉你你会失去什么', card:'知识卡', f:'038', sc:[9.1,9.1] },
+  { s:35,  text:'并且它每一条知识都是有证据来源的', card:'知识卡 · 证据等级 A', f:'047', sc:[9.0,9.0] },
+  { s:40,  text:'然后我就很好奇地让 AI 帮我把它读了一遍', card:'终端卡', f:'047', sc:[8.6,8.6] },
+  { s:47,  text:'第一点呢，它就建议我少喝饮料', card:'终端卡', f:'047', sc:[8.8,8.8] },
+  { s:52,  text:'每天喝两瓶饮料以上的人', card:'AI 生图 B-roll', f:'062', sc:[9.2,9.2], broll:true },
+  { s:58,  text:'每天喝两杯代糖饮料以上的', card:'对比条卡', f:'062', sc:[7.9,9.0], chg:true },
+  { s:65,  text:'从收入的角度来看，它还提醒我 / 但是要尽可能地减少无用的消费', card:'划线清单卡', f:'080', sc:[8.9,8.9] },
+  { s:80,  text:'我们这些做 AI 的人呢，那轮到自己的身体和存款', card:'纯人像', f:'114', sc:[9.0,9.0] },
+  { s:98,  text:'由于 GitHub 在国内可能不太方便打开', card:'加载动画卡', f:'101', sc:[8.7,8.7] },
+  { s:105, text:'想要的朋友呢，就在评论区留言', card:'评论卡', f:'101', sc:[8.8,8.8] },
+  { s:112, text:'自己该如何更高性价比地生活', card:'三连 CTA', f:'114', sc:[9.4,9.4] },
+];
+const TOTAL = 117; // 1:57
+const VERS = {
+  v1:{ total:8.8, cost:'3.84', dims:[['版式',9.1],['层级',8.8],['动效节奏',8.6],['品牌一致性',9.3]] },
+  v2:{ total:9.0, cost:'4.00', dims:[['版式',9.2],['层级',9.0],['动效节奏',8.7],['品牌一致性',9.3]] },
+};
+const STAGES = [
+  { k:'识别',   v1:14,  v2:null },
+  { k:'剪口误', v1:9,   v2:null },
+  { k:'换背景', v1:112, v2:null },
+  { k:'分镜',   v1:21,  v2:6 },
+  { k:'B-roll', v1:48,  v2:null },
+  { k:'渲染',   v1:96,  v2:24 },
+  { k:'自检',   v1:17,  v2:8 },
+];
+const BGS = [
+  ['01-study','书房'],['02-studio','极简工作室'],['03-cafe','咖啡馆'],['04-night-window','夜景落地窗'],['05-tech-dark','科技暗色'],
+  ['06-japanese','日式和室'],['07-balcony','绿植阳台'],['08-library','图书馆'],['09-rooftop','黄昏天台'],['10-concrete','水泥灰墙'],
+].map(([id,name]) => ({ id, name, src:`assets/bg/${id}.jpg` }));
+
+// 剪辑直播里「打印」的转录：cut 1 = 气口，2 = 口误/重复
+const TRANSCRIPT = [
+  { tc:'00:00', parts:[{t:'吃抗氧化补剂的人，'},{t:'呃，',cut:1},{t:'死亡率反而更高一些'}] },
+  { tc:'00:04', parts:[{t:'买双色球，'},{t:'就是那个，',cut:1},{t:'每投 1 块钱，长期平均只能拿回五毛一'}] },
+  { tc:'00:13', parts:[{t:'然后呢，嗯，',cut:1},{t:'我平时经常在 GitHub 上面去逛 AI 项目'}] },
+  { tc:'00:21', parts:[{t:'这个项目里面一共讲了 '},{t:'六百……',cut:2},{t:'650 条'}] },
+  { tc:'00:47', parts:[{t:'第一点呢，'},{t:'它就，',cut:2},{t:'它就建议我少喝饮料'}] },
+];
+
+// 原片 03:42 上的 49 道切口（37 气口 + 12 口误，共剪去约 1:45），种子固定，位置可复现
+const CUTS = (() => {
+  let seed = 11; const r = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+  const raw = Array.from({ length:49 }, (_, i) => { const slip = i % 4 === 1; return { slip, w: slip ? 3 + r() * 4 : .5 + r() * 1.5 }; });
+  const k = 105 / raw.reduce((a, c) => a + c.w, 0);
+  let x = 0; const out = raw.map(c => { x += 2.3 * (.5 + r()); const o = { x, w: c.w * k, slip: c.slip }; x += o.w; return o; });
+  const f = 219 / x; return out.map(o => ({ ...o, x: o.x * f, w: o.w * f }));
+})();
+
+/* ================= 剪辑直播时间表（秒） ================= */
+const ST = [0, 1.4, 4.4, 5.4, 6.9, 7.9, 8.9, 9.9];   // 7 个阶段的起止
+const REPLAY_END = 10.6;
+const clamp = (v, a=0, b=1) => Math.min(b, Math.max(a, v));
+const fmt = s => { s = Math.max(0, Math.round(s)); return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; };
+const fmtShort = s => `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,'0')}`;
+const segAt = t => { let i = 0; SEGS.forEach((g, k) => { if (t >= g.s) i = k; }); return i; };
+const SPRING = { type:'spring', stiffness:420, damping:32 };
+const SOFT = { type:'spring', stiffness:220, damping:30 };
+
+/* ================= 小部件 ================= */
+function Key({ className='', children, ...p }) {
+  return <motion.button whileTap={{ y:2 }} transition={SPRING} className={'key ' + className} {...p}>{children}</motion.button>;
+}
+// 机械计数轮
+function Odo({ value, digits=2, cut }) {
+  const s = String(Math.max(0, Math.round(value))).padStart(digits, '0');
+  return (
+    <span className={'odo' + (cut ? ' cut' : '')}>
+      {s.split('').map((d, i) => (
+        <span className="odo-col" key={i}>
+          <motion.span className="odo-strip" initial={false} animate={{ y: `${-d * 1.3}em` }} transition={{ type:'spring', stiffness:260, damping:26 }}>
+            {'0123456789'.split('').map(n => <span key={n}>{n}</span>)}
+          </motion.span>
+        </span>
+      ))}
+    </span>
+  );
+}
+function Num({ v }) { return <span className="num"><span className="ghost">88:88</span>{v}</span>; }
+function Lcd({ sub, children }) {
+  return (
+    <div className="lcd">
+      <div className="seg-row">{children}</div>
+      {sub && <div className="cap">{sub}</div>}
+    </div>
+  );
+}
+function Bar10({ v, p=1 }) {
+  return <span className="bar10">{Array.from({ length:10 }, (_, i) => {
+    const fill = clamp(v * p - i);
+    return <i key={i}><motion.b initial={false} animate={{ scaleX: fill }} transition={{ duration:.25 }} /></i>;
+  })}</span>;
+}
+
+/* ================= 左：脊条 ================= */
+function Rail() {
+  const [hov, setHov] = useState(null);
+  const projs = [
+    { n:'02', img:F('003'), name:'第 2 期 · 高性价比人生指南', meta:'1:57 · v3 生成中', on:true },
+    { n:'01', img:F('101'), name:'第 1 期', meta:'已导出' },
+  ];
+  return (
+    <nav className="rail" aria-label="项目">
+      <div className="rail-mark" title="明知AI剪辑"><span>明</span><span>知</span><span className="led ok" /></div>
+      <div className="rail-sep" />
+      {projs.map((p, i) => (
+        <button key={p.n} className={'proj' + (p.on ? ' on' : '')} onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)}>
+          <img src={p.img} alt="" /><span>{p.n}</span>
+          <AnimatePresence>{hov === i && (
+            <motion.div className="rail-fly" initial={{ opacity:0, x:-6 }} animate={{ opacity:1, x:0 }} exit={{ opacity:0, x:-4 }} transition={{ duration:.16 }}>
+              {p.name}<span className="mono">{p.meta}</span>
+            </motion.div>)}
+          </AnimatePresence>
+        </button>
+      ))}
+      <div className="rail-new"><Key className="key-d" aria-label="新建项目">+</Key><span>新建</span></div>
+    </nav>
+  );
+}
+
+/* ================= 对话条目外壳（whileInView，root = 对话流） ================= */
+function Entry({ io, n, root, children, id }) {
+  return (
+    <motion.section id={id} className={'entry ' + io} layout="position"
+      initial={{ opacity:0, y:14 }} whileInView={{ opacity:1, y:0 }}
+      viewport={{ root, once:true, amount:0.15 }} transition={SOFT}>
+      <div className="gutter"><span className="io">{io === 'in' ? 'IN' : 'OUT'}</span><span className="io-n">{n}</span></div>
+      <div className="entry-body">{children}</div>
+    </motion.section>
+  );
+}
+
+/* ---- 1 设置卡 ---- */
+function SetupCard() {
+  const [open, setOpen] = useState(false);
+  const wave = [6,14,22,12,28,18,9,24,32,16,8,20,30,14,6,18,26,12,22,10,4,16,28,20,12,24,8,14,30,18];
+  return (
+    <motion.div layout className="unit">
+      <button className="setup-row" onClick={() => setOpen(o => !o)} aria-expanded={open}>
+        <span className="lbl" style={{ color:'var(--ink)' }}>设置</span>
+        <span>第2期_口播.mov</span><span className="dot">/</span><span>书房</span><span className="dot">/</span><span>刀锋</span><span className="dot">/</span><span className="mono">¥3.84</span>
+        <span className="chev">{open ? '收起 −' : '展开 +'}</span>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div key="b" initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }} transition={SOFT} style={{ overflow:'hidden' }}>
+            <div className="bento">
+              <div className="b-file">
+                <span className="lbl">输入</span>
+                <div className="name">第2期_口播.mov</div>
+                <div className="meta">03:42 · 竖屏<br/>1080×1920<br/>本机 Paraformer 识别<br/>音频不出本机</div>
+                <div className="wave">{wave.map((h, i) => <i key={i} style={{ height:h }} />)}</div>
+              </div>
+              <div className="b-bg"><div><span className="lbl">背景</span><div style={{ fontSize:14, fontWeight:500 }}>书房</div></div><img src={BGS[0].src} alt="书房" /></div>
+              <div className="b-sub"><span className="lbl">字幕</span><div className="pv">怎么少花<span>冤枉钱</span></div><div className="nm">刀锋 · 思源黑体</div></div>
+              <div className="b-cost"><span className="lbl">预估花费</span><div className="v">¥3.84</div><div className="cap2">上限 ¥10</div></div>
+              <div className="b-go"><span className="lbl">启动</span><Key className="key-o zh" disabled style={{ opacity:1, cursor:'default' }}><span className="led ok" />开始出片</Key><span className="when">已按下 · 21:04</span></div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+/* ---- 2 剪辑直播（可重播，惊艳时刻） ---- */
+function CutWord({ text, struck, gone }) {
+  return (
+    <span className="cut">
+      <motion.span className="cut-txt" initial={false} animate={{ width: gone ? 0 : 'auto', opacity: gone ? 0 : 1 }} transition={{ type:'spring', stiffness:240, damping:30 }}>
+        <motion.span className="cut-inner" initial={false} animate={{ color: struck ? "#B33905" : "#1A1916" }} transition={{ duration:.2 }}>{text}<motion.i className="cut-bar" initial={false} animate={{ scaleX: struck ? 1 : 0 }} transition={{ duration:.26, ease:[.2,.8,.2,1] }} /></motion.span>
+      </motion.span>
+      <motion.i className="cut-mark" data-c={'已删：' + text} initial={false} animate={{ scaleY: gone ? 1 : 0, opacity: gone ? 1 : 0 }} transition={SPRING} />
+    </span>
+  );
+}
+
+function LiveCut({ rt, open, onReplay, onClose }) {
+  const fin = rt === null;                       // 非重播 = 终态
+  const p = (a, b) => fin ? 1 : clamp((rt - a) / (b - a));
+  const stageState = i => fin || rt >= ST[i+1] ? 'done' : rt >= ST[i] ? 'run' : 'wait';
+  const cutP = p(ST[1], ST[2]);
+  const tape = 222 - (222 - TOTAL) * cutP;
+  const filled = fin ? 18 : Math.floor(clamp((rt - ST[3]) / (ST[4] - ST[3] - .1)) * 18);
+  const brollOn = fin || rt >= ST[4] + .2;
+  const scoreP = p(ST[6], ST[7]);
+  return (
+    <motion.div layout className="unit" transition={SOFT}>
+      <div className="unit-h">
+        <div className="t"><span className={'led ' + (fin ? 'ok' : 'on blink')} />剪辑直播 <span className="mono" style={{ color:'var(--ink3)', fontSize:12 }}>{fin ? '已完成 · 5:17' : '运行中'}</span></div>
+        <div style={{ display:'flex', gap:8 }}>
+          {open && fin && <Key className="zh" onClick={onClose}>收起</Key>}
+          <Key className="key-d zh" onClick={onReplay} disabled={!fin}>{fin ? '▶ 重播剪辑过程' : '■ 播放中'}</Key>
+        </div>
+      </div>
+      <div className="live-stages">
+        {STAGES.map((g, i) => {
+          const s = stageState(i);
+          const shown = s === 'done' ? fmtShort(g.v1) : s === 'run' ? fmtShort(g.v1 * clamp((rt - ST[i]) / (ST[i+1] - ST[i]))) : '—';
+          return (
+            <div key={g.k} className={'stg ' + s}>
+              <div className="n"><span className={'led ' + (s === 'done' ? 'ok' : s === 'run' ? 'on' : '')} />{g.k}</div>
+              <div className="tm">{shown}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="live-read">
+        <Lcd sub="TAPE · 原片 → 成片"><Num v="03:42" /><span className="arrow">→</span><Num v={fmt(tape)} /></Lcd>
+        <div className="counters">
+          <div className="ctr"><Odo value={37 * cutP} cut /><span className="zh">气口</span></div>
+          <div className="ctr"><Odo value={12 * cutP} cut /><span className="zh">口误</span></div>
+          <div className="ctr"><Odo value={filled} /><span className="zh">分段</span></div>
+        </div>
+      </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div className="live-body" key="body" initial={{ height:0 }} animate={{ height:'auto' }} exit={{ height:0 }} transition={SOFT}>
+            <div className="printer">
+              <span className="lbl" style={{ display:'block', marginBottom:6 }}>转录 · 切口</span>
+              {TRANSCRIPT.map((ln, i) => {
+                const shownAt = .1 + i * .22;
+                const vis = fin || rt >= shownAt;
+                const cutAt = ST[1] + .2 + i * .5;
+                return (
+                  <motion.div key={i} className="pline" initial={false}
+                    animate={{ clipPath: vis ? 'inset(0 0% 0 0)' : 'inset(0 100% 0 0)', opacity: vis ? 1 : 0 }}
+                    transition={{ duration:.42, ease:[.3,.7,.2,1] }}>
+                    <span className="tc">{ln.tc}</span>
+                    <span>{ln.parts.map((pt, k) => pt.cut
+                      ? <CutWord key={k} text={pt.t} struck={fin || rt >= cutAt} gone={fin || rt >= cutAt + .62} />
+                      : <span key={k}>{pt.t}</span>)}</span>
+                  </motion.div>
+                );
+              })}
+            </div>
+            <div className="board">
+              <span className="lbl">分镜 · 18 段</span>
+              <div className="board-grid">
+                {SEGS.map((g, i) => (
+                  <div className="slot" key={i}>
+                    <span className="no">{String(i + 1).padStart(2, '0')}</span>
+                    <AnimatePresence>{i < filled && (
+                      <motion.img key="i" src={F(g.f)} alt="" initial={{ opacity:0, scale:1.25, y:-8 }} animate={{ opacity:1, scale:1, y:0 }} transition={SPRING} />
+                    )}</AnimatePresence>
+                    {g.broll && brollOn && <motion.span className="b" initial={{ scale:0 }} animate={{ scale:1 }} transition={SPRING}>B</motion.span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="render">
+              <span className="lbl" style={{ width:44 }}>渲染</span>
+              <span className="cells">{Array.from({ length:30 }, (_, i) => <i key={i} className={i < Math.round(p(ST[5], ST[6]) * 30) ? 'f' : ''} />)}</span>
+              <span className="mono" style={{ fontSize:12, width:36, textAlign:'right' }}>{Math.round(p(ST[5], ST[6]) * 100)}%</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="scores">
+        {VERS.v1.dims.map(([k, v], i) => {
+          const sp = clamp(scoreP * 4 - i * .6);
+          return (
+            <div className="score" key={k}><span className="k">{k}</span><Bar10 v={v} p={sp} /><span className="v">{sp > 0 ? (v * sp).toFixed(1) : '—'}</span></div>
+          );
+        })}
+      </div>
+      <motion.div className="verdict" initial={false} animate={{ opacity: fin || rt >= ST[7] ? 1 : .35 }}>
+        <span>删除 37 处气口 · 12 处口误</span>
+        <span className="mono">3:42 → 1:57 · 18 段</span>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/* ---- 版本卡 ---- */
+function VersionCard({ v, img, facts, note, active, onPreview, onExport }) {
+  return (
+    <div className="unit">
+      <div className="ver">
+        <img src={img} alt={v + ' 首帧'} />
+        <div>
+          <div className="vn">{v}<span className={'led ' + (active ? 'on' : 'ok')} /><span className="lbl" style={{ letterSpacing:'.06em' }}>{active ? '预览中' : '已完成'}</span></div>
+          <div className="facts">{facts.map(([b, s, cls]) => <div key={s}><b className={cls}>{b}</b><span>{s}</span></div>)}</div>
+          {note && <div className="note">{note}</div>}
+        </div>
+        <div className="acts">
+          <Key className="zh" onClick={onPreview}>预览</Key>
+          <Key className="zh" onClick={onExport}>导出 ▾</Key>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---- AI 回复：引用 + 内联选项 ---- */
+function AiReply({ choice, setChoice }) {
+  const opts = [
+    { n:'A', name:'双横条', pv:<div className="pv-a"><i style={{ width:'52%' }} /><i className="o" style={{ width:'88%' }} /></div> },
+    { n:'B', name:'环形占比', pv:<div className="pv-b"><span className="ring" /><span className="ln"><i style={{ width:34 }} /><i style={{ width:22 }} /><i style={{ width:28 }} /></span></div> },
+    { n:'C', name:'百人点阵', pv:<div className="pv-c">{Array.from({ length:30 }, (_, i) => <i key={i} className={i % 10 < 4 && i < 30 ? 'o' : ''} />)}</div> },
+  ];
+  return (
+    <>
+      <p className="say">明白。改两处，<b>只重渲这 2 段</b>，其余 16 段原样复用：</p>
+      <div className="cites">
+        <div className="cite"><img src={F('062')} alt="" /><div><span className="tag">@00:58<em>对比条卡</em></span><p>补上两组的具体比例，数字直接标在条上</p></div></div>
+        <div className="cite"><img src={F('003')} alt="" /><div><span className="tag">@00:04<em>钩子卡 2/3</em></span><p>「¥0.51」放大到 1.6 倍，其余文字收小一级</p></div></div>
+      </div>
+      <p className="say">对比条卡想要哪种版式？</p>
+      <LayoutGroup id="opts">
+        <div className="opts">
+          {opts.map((o, i) => (
+            <motion.button key={o.n} className={'opt' + (choice === i ? ' sel' : '')} onClick={() => setChoice(i)} whileHover={{ y:-2 }} whileTap={{ y:0 }} transition={SPRING}>
+              <div className="pv">{o.pv}</div>
+              <div className="on"><span>{o.name}</span><span className="mono">{o.n}</span></div>
+              {choice === i && <motion.span layoutId="optled" className="led on" style={{ position:'absolute', right:8, top:8 }} transition={SPRING} />}
+            </motion.button>
+          ))}
+        </div>
+      </LayoutGroup>
+      <div className="picked"><span className="led ok" />已选 {opts[choice].n} · {opts[choice].name}</div>
+    </>
+  );
+}
+
+/* ---- 处理中：换背景 ---- */
+function Processing() {
+  const [pct, setPct] = useState(62);
+  useEffect(() => { const id = setInterval(() => setPct(p => p >= 64 ? 62 : p + 1), 9000); return () => clearInterval(id); }, []);
+  const lit = Math.round(pct / 100 * 40);
+  return (
+    <div className="unit">
+      <div className="unit-h">
+        <div className="t"><span className="led on blink" />换背景 → 夜景落地窗</div>
+        <span className="mono" style={{ fontSize:12, color:'var(--ink3)' }}>v3 · 分镜与字幕复用</span>
+      </div>
+      <div className="proc-grid">
+        {BGS.map(b => {
+          const sel = b.id === '04-night-window', cur = b.id === '01-study';
+          return (
+            <div key={b.id} className={'bgt' + (sel ? ' sel' : '')}>
+              <img src={b.src} alt={b.name} />
+              {sel && <span className="scan" />}
+              <div className="nm"><span>{b.name}</span>{cur && <span className="mono" style={{ fontSize:12, color:'var(--ink3)' }}>v2</span>}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="prog">
+        <span className="zh">抠像合成中</span>
+        <span className="cells40">{Array.from({ length:40 }, (_, i) => <i key={i} className={i < lit ? 'f' : i === lit ? 'h' : ''} />)}</span>
+        <span className="pct">{pct}%</span>
+      </div>
+      <div className="proc-foot"><span>正在应用到人像 · 18 段</span><span>已用 0:41 · 预计 +¥0.21</span></div>
+    </div>
+  );
+}
+
+/* ================= 中：对话流 ================= */
+function Chat({ rt, liveOpen, onReplay, onCloseLive, version, setVersion, choice, setChoice, extra, onExport, composer, streamRef }) {
+  const { scrollYProgress } = useScroll({ container: streamRef });
+  const sp = useSpring(scrollYProgress, { stiffness:200, damping:30, restDelta:.001 });
+  const top = useTransform(sp, v => `calc(${v * 100}% - ${v * 22}px)`);
+  return (
+    <section className="chat">
+      <header className="chat-head">
+        <div><div className="sub">PROJECT 02 · 18 段 · 1:57</div><h1>第 2 期 · 高性价比人生指南</h1></div>
+        <div className="head-r">
+          <div className="bal"><b>¥36.27</b><span>可想 AI 余额</span></div>
+          <Key className="zh">设置</Key>
+        </div>
+      </header>
+      <div className="stream-wrap">
+        <div className="stream" ref={streamRef}>
+          <LayoutGroup>
+            <Entry io="in" n="01" root={streamRef}><SetupCard /></Entry>
+            <Entry io="out" n="01" root={streamRef} id="live"><LiveCut rt={rt} open={liveOpen} onReplay={onReplay} onClose={onCloseLive} /></Entry>
+            <Entry io="out" n="02" root={streamRef}>
+              <VersionCard v="v1" img={F('003')} active={version === 'v1'} onPreview={() => setVersion('v1')} onExport={onExport}
+                facts={[['1:57','时长'],['8.8','自检'],['¥3.84','花费']]} />
+            </Entry>
+            <Entry io="in" n="02" root={streamRef}>
+              <div className="tape"><span className="tag">@00:58<em>对比条卡</em></span>这张数据太弱了，加上具体比例，再把开头第二张钩子卡的 ¥0.51 放大</div>
+            </Entry>
+            <Entry io="out" n="03" root={streamRef}><AiReply choice={choice} setChoice={setChoice} /></Entry>
+            <Entry io="out" n="04" root={streamRef}>
+              <VersionCard v="v2" img={F('062')} active={version === 'v2'} onPreview={() => setVersion('v2')} onExport={onExport}
+                facts={[['2 段','重渲'],['0:38','耗时'],['+¥0.16','花费'],['9.0','自检 ↑0.2','up']]} />
+            </Entry>
+            <Entry io="in" n="03" root={streamRef}><div className="tape">背景换成夜景落地窗试试</div></Entry>
+            <Entry io="out" n="05" root={streamRef}><Processing /></Entry>
+            <AnimatePresence>
+              {extra.map((m, i) => (
+                <Entry key={i} io={m.io} n={m.n} root={streamRef}>
+                  {m.io === 'in'
+                    ? <div className="tape">{m.tags.map(t => <span key={t.label} className="tag">@{t.time}<em>{t.card}</em></span>)}{m.text}</div>
+                    : <p className="say">{m.text}</p>}
+                </Entry>
+              ))}
+            </AnimatePresence>
+          </LayoutGroup>
+        </div>
+        <div className="ruler" aria-hidden="true"><motion.i style={{ top }} /></div>
+      </div>
+      {composer}
+    </section>
+  );
+}
+
+/* ================= 输入区 ================= */
+function Composer({ tags, setTags, draft, setDraft, onSend, onChip, tagRowRef }) {
+  const [focus, setFocus] = useState(false);
+  const est = draft.trim() || tags.length ? '≈ ¥0.12' : '—';
+  return (
+    <div className="composer">
+      <div className={'box' + (focus ? ' focus' : '')}>
+        <div className="tagrow" ref={tagRowRef}>
+          <AnimatePresence>
+            {tags.map(t => (
+              <motion.span layout key={t.label} className="tag" initial={{ opacity:0, scale:.6 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:.6 }} transition={SPRING}>
+                @{t.time}<em>{t.card}</em><button aria-label="移除" onClick={() => setTags(ts => ts.filter(x => x.label !== t.label))}>×</button>
+              </motion.span>
+            ))}
+          </AnimatePresence>
+        </div>
+        <textarea value={draft} onChange={e => setDraft(e.target.value)} onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); } }}
+          placeholder="说一句话修改，例如「这张换成对比图」；点预览画面可插入 @时间" />
+        <div className="box-foot">
+          {['节奏再快一点', '换一张 B-roll', '字幕换成得意黑', '导出'].map(c => (
+            <motion.button key={c} className="chip" whileHover={{ y:-1 }} whileTap={{ y:1 }} transition={SPRING} onClick={() => onChip(c)}>{c}</motion.button>
+          ))}
+          <Key className="key-o zh" onClick={onSend}>发送 ⏎</Key>
+        </div>
+      </div>
+      <div className="plate"><span>本轮预估 <b>{est}</b> · 本项目已花 ¥4.00 / 上限 ¥10</span><span>MIT · 明知AI剪辑</span></div>
+    </div>
+  );
+}
+
+/* ================= 右：机身 ================= */
+function VersionKnob({ version, setVersion, onLocked }) {
+  const pos = { v1:-42, v2:0, v3:42 };
+  const lbl = { v1:[30, 46], v2:[75, 10], v3:[120, 46] };
+  return (
+    <div className="knob-wrap">
+      {['v1','v2','v3'].map(v => (
+        <button key={v} className={'knob-lbl' + (version === v ? ' cur' : '')} aria-disabled={v === 'v3'}
+          style={{ left: lbl[v][0], top: lbl[v][1] }} onClick={() => v === 'v3' ? onLocked() : setVersion(v)}>
+          {v === 'v3' && <span className="led on blink" style={{ width:5, height:5 }} />}{v}
+        </button>
+      ))}
+      <svg className="ticks" viewBox="0 0 76 76">
+        {[-42, -21, 0, 21, 42].map(a => (
+          <line key={a} x1="38" y1="2" x2="38" y2={a % 42 === 0 ? 8 : 5} stroke="#625E56" strokeWidth={a % 42 === 0 ? 1.5 : 1} transform={`rotate(${a} 38 38)`} />
+        ))}
+      </svg>
+      <motion.button className="knob" aria-label="版本旋钮" animate={{ rotate: pos[version] }} transition={{ type:'spring', stiffness:300, damping:18 }}
+        onClick={() => setVersion(version === 'v1' ? 'v2' : 'v1')}><i /></motion.button>
+    </div>
+  );
+}
+
+function Screen({ ver, seg, t, h, onClick, replaying, compare }) {
+  const g = SEGS[seg], w = Math.round(h * 9 / 16);
+  const changed = ver === 'v2' && g.chg;
+  return (
+    <motion.div layout transition={SOFT} style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
+      <div className="bezel">
+        <motion.div className="scr" layout style={{ width:w, height:h }} onClick={e => onClick(e, g)} transition={SOFT}>
+          <AnimatePresence initial={false}>
+            <motion.img key={g.f} src={F(g.f)} alt={g.text} initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} transition={{ duration:.18 }} />
+          </AnimatePresence>
+          <div className="hud"><span>{ver}</span><span>{fmt(t)}</span>{changed && <span className="o">v2 重渲</span>}</div>
+          {!replaying && <span className="hint">点击画面 → 插入 @{fmt(g.s)} {g.card.split(' ·')[0]}</span>}
+        </motion.div>
+      </div>
+      <div className="scr-cap"><span>{ver.toUpperCase()} · {compare ? `本段自检 ${g.sc[ver === 'v1' ? 0 : 1].toFixed(1)}` : '1080×1920'}</span><span>SEG {String(seg + 1).padStart(2, '0')}/18</span></div>
+    </motion.div>
+  );
+}
+
+// 双磁带：上 = 原片 03:42 与 49 道切口；下 = 成片 01:57（按 18 段分格，兼作进度条）
+function Tapes({ t, seg, cutP, version, onSeek }) {
+  const shown = Math.round(cutP * 49);
+  const finW = 100 - (100 - TOTAL / 222 * 100) * cutP;
+  return (
+    <div className="tapes">
+      <div className="tp-cap"><span>原片 <b>03:42</b></span><span>剪去 <b>{fmt(105 * cutP)}</b> · <b>{shown}</b> 处切口</span></div>
+      <div className="track orig">
+        {CUTS.map((c, i) => (
+          <motion.i key={i} className={c.slip ? 's' : ''} style={{ left: `${c.x / 222 * 100}%`, width: `${Math.max(.3, c.w / 222 * 100)}%` }}
+            initial={false} animate={{ scaleY: i < shown ? 1 : 0 }} transition={SPRING} />
+        ))}
+      </div>
+      <svg className="funnel" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1="0" x2="0" y2="10" /><line x1="100" y1="0" x2={finW} y2="10" />
+      </svg>
+      <div className="fin-row">
+        <motion.div className="track fin" style={{ width: `${finW}%` }}
+          onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onSeek((e.clientX - r.left) / r.width * TOTAL); }}>
+          {SEGS.map((g, i) => {
+            const end = i < 17 ? SEGS[i + 1].s : TOTAL;
+            return <span key={i} className={'sg' + (i === seg ? ' cur' : '') + (version === 'v2' && g.chg ? ' chg' : '')} style={{ left: `${g.s / TOTAL * 100}%`, width: `${(end - g.s) / TOTAL * 100}%` }} />;
+          })}
+          <b className="head" style={{ left: `${t / TOTAL * 100}%` }} />
+        </motion.div>
+        <span className="fin-cap">成片 <b>{fmt(222 - 105 * cutP)}</b></span>
+      </div>
+    </div>
+  );
+}
+
+function Vu({ t, active }) {
+  const lv = ch => active ? clamp(.52 + .28 * Math.sin(t * 11.3 + ch * 1.7) * Math.sin(t * 2.9 + ch) + .16 * Math.sin(t * 31 + ch * 3)) : .08;
+  return (
+    <div>
+      <div className="vu">
+        <div className="vu-scale"><span>0</span><span>-6</span><span>-14</span><span>-24</span></div>
+        {[0, 1].map(ch => {
+          const n = Math.round(lv(ch) * 16);
+          return <div className="vu-ch" key={ch}>{Array.from({ length:16 }, (_, i) => <i key={i} className={i < n ? (i >= 13 ? 'p' : 'f') : ''} />)}</div>;
+        })}
+      </div>
+      <div className="vu-lr" style={{ paddingLeft:28 }}><span>L</span><span>R</span></div>
+    </div>
+  );
+}
+
+function Device({ version, setVersion, compare, setCompare, t, seg, playing, setPlaying, onSeek, onScreenClick, exportOpen, setExportOpen, onExportPick, rt, filledSeg, notify }) {
+  const replaying = rt !== null;
+  const cutP = replaying ? clamp((rt - ST[1]) / (ST[2] - ST[1])) : 1;
+  const V = VERS[version];
+  const g = SEGS[seg];
+  const [tip, setTip] = useState(null);
+  const vIdx = version === 'v1' ? 0 : 1;
+  return (
+    <section className="dev">
+      <header className="dev-head">
+        <div className="plate-l">
+          <span className="lbl">PREVIEW · 9:16</span>
+          <div className="st">{replaying
+            ? <><span className="led on blink" />剪辑过程重播中</>
+            : <><span className="led ok" />{version === 'v2' ? '只重渲了 2 段' : '首版 · 18 段'}<span className="mono">自检 {V.total.toFixed(1)}</span></>}
+          </div>
+        </div>
+        <VersionKnob version={version} setVersion={setVersion} onLocked={() => notify('v3 正在换背景，合成完成后可切换')} />
+        <div className="head-r2">
+          <button className="slide" onClick={() => setCompare(c => !c)} aria-pressed={compare}>
+            <span className="lbls"><span className={compare ? '' : 'cur'}>单屏</span><span className={compare ? 'cur' : ''}>对比</span></span>
+            <span className={'slot-track' + (compare ? ' on' : '')}><motion.span layout className="slot-thumb" transition={{ type:'spring', stiffness:500, damping:30 }} /></span>
+          </button>
+          <Key className="key-o zh" onClick={() => setExportOpen(o => !o)} aria-expanded={exportOpen}>导出 ▾</Key>
+        </div>
+        <AnimatePresence>
+          {exportOpen && (
+            <motion.div className="menu" initial={{ opacity:0, y:-6, scaleY:.96 }} animate={{ opacity:1, y:0, scaleY:1 }} exit={{ opacity:0, y:-4 }} transition={SPRING} style={{ transformOrigin:'top' }}>
+              <span className="lbl">导出 {version}</span>
+              <button onClick={() => onExportPick('MP4 · 1080×1920')}>成片 MP4<span className="mono">1080×1920</span></button>
+              <button onClick={() => onExportPick('封面 4:3')}>封面<span className="mono">4:3</span></button>
+              <button onClick={() => onExportPick('封面 3:4')}>封面<span className="mono">3:4</span></button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </header>
+
+      <div className="dev-main">
+        <AnimatePresence initial={false}>
+          {!compare && (
+            <motion.div key="L" className="col" initial={{ opacity:0, width:0 }} animate={{ opacity:1, width:176 }} exit={{ opacity:0, width:0 }} transition={SOFT}>
+              <div>
+                <span className="lbl">TIME</span>
+                <Lcd sub={`/ ${fmt(TOTAL)}`}><Num v={fmt(t)} /></Lcd>
+              </div>
+              <div className="panel seginfo">
+                <span className="lbl">SEG {String(seg + 1).padStart(2, '0')}</span>
+                <div className="zh">{g.text}</div>
+                <div className="card"><span>{g.card}</span><b className="mono" style={{ color:'var(--ink)' }}>{g.sc[vIdx].toFixed(1)}</b></div>
+              </div>
+              <div className="panel">
+                <span className="lbl">自检 · {version}</span>
+                <div className="mini-score">
+                  {V.dims.map(([k, v]) => <Fragment key={k}><span>{k}</span><b>{v.toFixed(1)}</b></Fragment>)}
+                  <div className="tot"><span>综合</span><b>{V.total.toFixed(1)}</b></div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="stage">
+          <LayoutGroup>
+            <div className="screens">
+              {compare
+                ? ['v1', 'v2'].map(v => <Screen key={v} ver={v} seg={seg} t={t} h={560} onClick={onScreenClick} replaying={replaying} compare />)
+                : <Screen key={version} ver={version} seg={seg} t={t} h={596} onClick={onScreenClick} replaying={replaying} />}
+            </div>
+          </LayoutGroup>
+          <AnimatePresence>{compare && (
+            <motion.div className="diff" initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={SOFT}>
+              <span className="led on" />同步播放 · v1 → v2 只有 2 段不同：
+              {SEGS.map((g, i) => g.chg ? <button key={i} className="tag" onClick={() => onSeek(g.s + .01)}>@{fmt(g.s)}<em>{g.card.split(' ·')[0]}</em></button> : null)}
+              <span className="mono">自检 8.8 → 9.0</span>
+            </motion.div>
+          )}</AnimatePresence>
+        </div>
+
+        <AnimatePresence initial={false}>
+          {!compare && (
+            <motion.div key="R" className="col" initial={{ opacity:0, width:0 }} animate={{ opacity:1, width:176 }} exit={{ opacity:0, width:0 }} transition={SOFT}>
+              <div>
+                <span className="lbl">管线 · {replaying ? 'v1 重播' : version}</span>
+                <div className="pipe">
+                  {STAGES.map((s, i) => {
+                    const sec = version === 'v1' || replaying ? s.v1 : s.v2;
+                    const run = replaying && rt >= ST[i] && rt < ST[i + 1];
+                    const done = !replaying || rt >= ST[i + 1];
+                    return <div key={s.k}><span className={'led ' + (run ? 'on' : done ? 'ok' : '')} />{s.k}<b className={sec === null ? 'r' : ''}>{sec === null ? '复用' : fmtShort(sec)}</b></div>;
+                  })}
+                </div>
+              </div>
+              <div className="panel">
+                <span className="lbl">LEVEL · 人声</span>
+                <Vu t={replaying ? rt : t} active={playing || replaying} />
+              </div>
+              <div className="panel">
+                <span className="lbl">硬性检查</span>
+                <div className="checks">
+                  <div>字幕安全区<b><span className="led ok" />通过</b></div>
+                  <div>对比度<b><span className="led ok" />≥4.5</b></div>
+                  <div>黑帧<b><span className="led ok" />0</b></div>
+                  <div>响度<b><span className="led ok" />-14 LUFS</b></div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <footer className="dev-foot">
+        <div className="foot-side"><span className="lbl">TAPE</span></div>
+        <Tapes t={t} seg={seg} cutP={cutP} version={version} onSeek={onSeek} />
+        <div className="foot-side"><Key className={'play ' + (playing ? 'key-d' : 'key-o')} onClick={() => setPlaying(p => !p)} aria-label={playing ? '暂停' : '播放'}>{playing ? '❚❚' : '▶'}</Key></div>
+        <div className="steps-wrap">
+          <div className="steps-legend">
+            <span style={{ left:0, width:98 }}>钩子 ×3</span>
+            <span style={{ left: 34 * 17, width:30 }}>CTA</span>
+          </div>
+          <div className="steps">
+            {SEGS.map((s, i) => {
+              const cur = i === seg;
+              const lit = replaying ? i < filledSeg : cur;
+              return (
+                <motion.button key={i} className={'key step' + (i < 3 ? ' hook' : '') + (cur ? ' cur' : '')} whileTap={{ y:2 }} transition={SPRING}
+                  onClick={() => onSeek(s.s + .01)} onMouseEnter={() => setTip(i)} onMouseLeave={() => setTip(null)}>
+                  <span className={'led' + (lit ? ' on' : '')} />{String(i + 1).padStart(2, '0')}
+                  {version === 'v2' && s.chg && <span className="chg" />}
+                  <AnimatePresence>{tip === i && (
+                    <motion.span className="step-tip" initial={{ opacity:0, y:4 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:.14 }}>
+                      <span className="mono">{fmt(s.s)} · {s.card} · {s.sc[vIdx].toFixed(1)}</span>{s.text}
+                    </motion.span>
+                  )}</AnimatePresence>
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+      </footer>
+    </section>
+  );
+}
+
+/* ================= App ================= */
+function App() {
+  const [version, setVersion] = useState('v2');
+  const [compare, setCompare] = useState(false);
+  const [t, setT] = useState(58.4);
+  const [playing, setPlaying] = useState(false);
+  const [rt, setRt] = useState(null);
+  const [liveOpen, setLiveOpen] = useState(false);
+  const [choice, setChoice] = useState(1);
+  const [tags, setTags] = useState([]);
+  const [draft, setDraft] = useState('');
+  const [extra, setExtra] = useState([]);
+  const [flyer, setFlyer] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [toast, setToast] = useState(null);
+  const streamRef = useRef(null), tagRowRef = useRef(null);
+  const st = useRef({}); st.current = { playing, rt };
+
+  // 单一 rAF 时钟：播放 + 重播
+  useEffect(() => {
+    if (!playing && rt === null) return;
+    let id, last = performance.now();
+    const loop = now => {
+      const dt = Math.min(.05, (now - last) / 1000); last = now;
+      if (st.current.playing) setT(x => (x + dt) % TOTAL);
+      if (st.current.rt !== null) setRt(r => r === null ? null : Math.min(REPLAY_END, r + dt));
+      id = requestAnimationFrame(loop);
+    };
+    id = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(id);
+  }, [playing, rt === null]);
+  useEffect(() => { if (rt !== null && rt >= REPLAY_END) { const id = setTimeout(() => setRt(null), 500); return () => clearTimeout(id); } }, [rt]);
+
+  // 打开时对话流停在底部（最新）
+  useLayoutEffect(() => { const s = streamRef.current; s.scrollTop = s.scrollHeight; }, []);
+  useEffect(() => { document.fonts && document.fonts.ready.then(() => { const s = streamRef.current; if (!window.__keepScroll) s.scrollTop = s.scrollHeight; }); }, []);
+
+  // 新消息进来后（等入场弹簧走完）滚到底
+  useEffect(() => {
+    if (!extra.length) return;
+    const s = streamRef.current; s.scrollTo({ top: s.scrollHeight, behavior:'smooth' });
+    const id = setTimeout(() => s.scrollTo({ top: s.scrollHeight, behavior:'smooth' }), 450);
+    return () => clearTimeout(id);
+  }, [extra.length]);
+
+  const notify = msg => { setToast(msg); clearTimeout(window.__tt); window.__tt = setTimeout(() => setToast(null), 2200); };
+
+  const replay = () => {
+    setLiveOpen(true); setRt(0); setPlaying(false);
+    const s = streamRef.current, el = document.getElementById('live');
+    if (s && el) s.scrollTo({ top: el.offsetTop - 16, behavior:'smooth' });
+  };
+
+  // 重播期间：分镜阶段让预览与步进键跟着跑
+  const filledSeg = rt === null ? 18 : Math.floor(clamp((rt - ST[3]) / (ST[4] - ST[3] - .1)) * 18);
+  const viewSeg = rt !== null && rt >= ST[3] ? Math.min(17, Math.max(0, filledSeg - 1)) : segAt(t);
+  const viewT = rt !== null && rt >= ST[3] ? SEGS[viewSeg].s : t;
+
+  const onScreenClick = (e, g) => {
+    if (rt !== null) return;
+    setPlaying(false);
+    const tag = { time: fmt(g.s), card: g.card.split(' ·')[0], label: fmt(g.s) + g.card };
+    if (tags.some(x => x.label === tag.label)) return;
+    const to = tagRowRef.current.getBoundingClientRect();
+    setFlyer({ ...tag, x: e.clientX - 40, y: e.clientY - 12, tx: to.left + 10 + tags.length * 120, ty: to.top + 2 });
+  };
+  const land = () => { setTags(ts => [...ts, flyer]); setFlyer(null); };
+
+  const send = () => {
+    const text = draft.trim();
+    if (!text && !tags.length) { notify('先说一句要改什么'); return; }
+    const nIn = String(4 + extra.filter(m => m.io === 'in').length).padStart(2, '0');
+    const nOut = String(6 + extra.filter(m => m.io === 'out').length).padStart(2, '0');
+    setExtra(x => [...x, { io:'in', n:nIn, text, tags }]);
+    setDraft(''); setTags([]);
+    setTimeout(() => {
+      setExtra(x => [...x, { io:'out', n:nOut, text:`收到${text ? '「' + text + '」' : ''}。v3 正在换背景，合成完成后接着改这一处，预估 +¥0.12。` }]);
+    }, 700);
+  };
+  const onChip = c => {
+    if (c === '导出') { setExportOpen(true); return; }
+    setDraft(c);
+  };
+  const onExportPick = what => { setExportOpen(false); notify(`${version} · ${what} 已加入导出队列`); };
+
+  const composer = <Composer tags={tags} setTags={setTags} draft={draft} setDraft={setDraft} onSend={send} onChip={onChip} tagRowRef={tagRowRef} />;
+
+  return (
+    <MotionConfig reducedMotion="user">
+      <div className="app">
+        <Rail />
+        <Chat rt={rt} liveOpen={liveOpen} onReplay={replay} onCloseLive={() => setLiveOpen(false)} version={version} setVersion={setVersion}
+          choice={choice} setChoice={setChoice} extra={extra} onExport={() => setExportOpen(true)} composer={composer} streamRef={streamRef} />
+        <Device version={version} setVersion={setVersion} compare={compare} setCompare={setCompare} t={viewT} seg={viewSeg}
+          playing={playing} setPlaying={setPlaying} onSeek={s => { setT(clamp(s, 0, TOTAL - .01)); }} onScreenClick={onScreenClick}
+          exportOpen={exportOpen} setExportOpen={setExportOpen} onExportPick={onExportPick} rt={rt} filledSeg={filledSeg} notify={notify} />
+      </div>
+      {flyer && (
+        <motion.span className="tag flyer" initial={{ x: flyer.x, y: flyer.y, scale:1.3, rotate:-6 }}
+          animate={{ x: flyer.tx, y: flyer.ty, scale:1, rotate:0 }} transition={{ type:'spring', stiffness:170, damping:20 }}
+          style={{ left:0, top:0 }} onAnimationComplete={land}>@{flyer.time}<em>{flyer.card}</em></motion.span>
+      )}
+      <AnimatePresence>{toast && (
+        <motion.div className="toast" initial={{ opacity:0, y:12, x:'-50%' }} animate={{ opacity:1, y:0, x:'-50%' }} exit={{ opacity:0, y:8, x:'-50%' }} transition={SPRING}>
+          <span className="led on" />{toast}
+        </motion.div>
+      )}</AnimatePresence>
+    </MotionConfig>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

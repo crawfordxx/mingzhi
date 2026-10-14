@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明知AI剪辑 · 对话出片</title>
+<!-- 界面用系统字体栈（SF Pro / 苹方）。下面只加载「成片内容」用到的字幕字体：思源黑体 Heavy（刀锋样式、钩子卡） -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@900&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   明知AI剪辑 · C3 Apple Liquid Glass（iOS 26 / macOS Tahoe）
+   依据 WWDC25「Meet Liquid Glass」：
+   - 玻璃只用于「导航层」：侧栏、工具栏、输入框、播放控制、菜单；消息与卡片留在内容层
+   - 折射（lensing）：SVG 位移贴图按每个玻璃元素的像素尺寸生成，只在边缘弯折光线
+   - 不叠玻璃：玻璃上的元素用 fill / 透明度，而非再套一层玻璃
+   - 着色只给主操作（发送、导出）；圆角同心（外圆角 − 内边距 = 内圆角）
+   - 底层内容决定玻璃颜色：环境层是当前成片帧的大幅模糊
+   ============================================================ */
+:root{
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","PingFang SC","Hiragino Sans GB","Noto Sans SC",sans-serif;
+  --display:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --spring:cubic-bezier(.34,1.36,.64,1);        /* 轻微回弹：只给有动量的操作 */
+  --smooth:cubic-bezier(.22,1,.36,1);           /* 临界阻尼：默认 */
+  --ai1:#ff6778; --ai2:#ffba71; --ai3:#8d99ff; --ai4:#4fd1ff; --ai5:#c686ff;   /* Apple Intelligence 光晕色 */
+}
+[data-theme="light"]{
+  --bg:#f2f2f4; --card:#ffffff; --card2:#f7f7f9;
+  --label:#1d1d1f; --label2:#515154; --label3:#6e6e73;
+  --sep:rgba(60,60,67,.14); --fill:rgba(120,120,128,.12); --fill2:rgba(120,120,128,.2);
+  --accent:#0071e3; --accent-soft:rgba(0,113,227,.11); --accent-text:#0066cc;
+  --green:#248a3d; --switch:#34c759; --orange:#c93400; --orange-soft:rgba(255,149,0,.16); --blue-soft:rgba(88,86,214,.12);
+  --glass:rgba(255,255,255,.34); --glass-strong:rgba(250,250,252,.72);
+  --rim:rgba(255,255,255,.85); --rim2:rgba(255,255,255,.35);
+  --shadow:0 10px 30px -8px rgba(0,0,0,.16),0 2px 6px -1px rgba(0,0,0,.06);
+  --amb-opacity:.2;
+}
+[data-theme="dark"]{
+  --bg:#111113; --card:#1c1c1e; --card2:#232326;
+  --label:#f5f5f7; --label2:#c7c7cc; --label3:#98989d;
+  --sep:rgba(84,84,88,.5); --fill:rgba(120,120,128,.24); --fill2:rgba(120,120,128,.34);
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.2); --accent-text:#4da3ff;
+  --green:#30d158; --switch:#30d158; --orange:#ff9f0a; --orange-soft:rgba(255,159,10,.18); --blue-soft:rgba(94,92,230,.24);
+  --glass:rgba(40,40,44,.38); --glass-strong:rgba(36,36,40,.74);
+  --rim:rgba(255,255,255,.28); --rim2:rgba(255,255,255,.1);
+  --shadow:0 12px 34px -8px rgba(0,0,0,.6),0 2px 6px -1px rgba(0,0,0,.3);
+  --amb-opacity:.24;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font);font-size:14px;line-height:1.5;color:var(--label);background:var(--bg);overflow:hidden;
+  -webkit-font-smoothing:antialiased;letter-spacing:.005em;transition:background .5s ease,color .5s ease}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.num{font-variant-numeric:tabular-nums}
+.l3{font-size:12px;color:var(--label3)}
+
+/* ---------- 环境层：当前帧的大幅模糊，让玻璃随内容变色 ---------- */
+.ambient{position:fixed;inset:-10%;z-index:0;pointer-events:none;opacity:var(--amb-opacity);transition:opacity .5s}
+.ambient img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:blur(80px) saturate(1.6) brightness(1.25);transition:opacity .8s ease}
+
+/* ---------- 液态玻璃 ---------- */
+.lg{position:relative;isolation:isolate;background:var(--glass);
+  -webkit-backdrop-filter:blur(14px) saturate(180%);backdrop-filter:blur(14px) saturate(180%);   /* 无折射时的降级 */
+  box-shadow:
+    inset 0 0 0 .5px var(--rim2),
+    inset 1px 1.5px 0 -.5px var(--rim),            /* 左上受光边 */
+    inset -1px -1px 0 -.5px var(--rim2),           /* 右下弱反光 */
+    var(--shadow);
+  transition:background .5s ease}
+/* 镜面高光：随指针移动的柔光点（interactive glass） */
+.lg::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:-1;
+  background:radial-gradient(160px circle at var(--mx,30%) var(--my,-40%),rgba(255,255,255,.35),transparent 60%);opacity:.8;mix-blend-mode:soft-light}
+.lg.thick{background:var(--glass-strong)}
+.lg.tint{background:color-mix(in srgb,var(--accent) 88%,transparent);color:#fff}
+@media (prefers-reduced-transparency:reduce){.lg{background:var(--card)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}}
+
+/* ---------- 窗口骨架 ---------- */
+.win{position:relative;z-index:1;height:100vh;display:grid;grid-template-columns:64px 540px minmax(0,1fr);gap:12px;padding:12px}
+
+/* 侧栏（极窄，浮在内容之上） */
+.rail{border-radius:30px;display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:12px}
+.appicon{width:44px;height:44px;border-radius:20px;position:relative;overflow:hidden;display:grid;place-items:center;
+  background:linear-gradient(160deg,#3a3a3e,#0e0e10);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 -1px 0 rgba(0,0,0,.4),0 4px 10px -2px rgba(0,0,0,.35)}
+.appicon b{font-family:"PingFang SC",var(--font);font-weight:600;font-size:19px;color:#fff;letter-spacing:0;line-height:1}
+.appicon i{position:absolute;left:8px;right:8px;bottom:9px;height:2px;border-radius:2px;background:linear-gradient(90deg,#fff 0 60%,#0a84ff 60%)}
+.appicon::after{content:"";position:absolute;inset:0;background:linear-gradient(160deg,rgba(255,255,255,.28),transparent 45%)}
+.rail hr{width:26px;border:0;border-top:1px solid var(--sep)}
+.proj{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;color:var(--label2);width:52px}
+.proj .pt{width:32px;height:56px;border-radius:9px;overflow:hidden;box-shadow:0 0 0 .5px var(--sep),0 2px 6px rgba(0,0,0,.12);transition:transform .45s var(--spring)}
+.proj .pt img{width:100%;height:100%;object-fit:cover}
+.proj:hover .pt{transform:scale(1.06)}
+.proj:active .pt{transform:scale(.96);transition-duration:.1s}
+.proj.on{color:var(--label);font-weight:600}
+.proj.on .pt{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
+.rbtn{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;color:var(--label2);background:var(--fill);transition:transform .4s var(--spring),background .2s,color .2s}
+.rbtn:hover{background:var(--fill2);color:var(--label)}
+.rbtn:active{transform:scale(.92);transition-duration:.1s}
+.rail .grow{flex:1}
+
+/* ---------- 对话列（内容层） ---------- */
+.chat{position:relative;min-height:0}
+.flow{position:absolute;inset:0;overflow-y:auto;padding:80px 10px 196px;display:flex;flex-direction:column;gap:14px;scrollbar-width:none}
+.flow::-webkit-scrollbar{display:none}
+/* 滚动边缘效果：内容在玻璃下「柔和消散」，不用硬分隔线 */
+.flow{-webkit-mask:linear-gradient(transparent 0,transparent 40px,#000 92px,#000 calc(100% - 150px),rgba(0,0,0,.25) calc(100% - 60px),transparent);
+  mask:linear-gradient(transparent 0,transparent 40px,#000 92px,#000 calc(100% - 150px),rgba(0,0,0,.25) calc(100% - 60px),transparent)}
+.chead{position:absolute;z-index:3;left:6px;right:6px;top:0;height:60px;border-radius:30px;display:flex;align-items:center;gap:12px;padding:0 10px 0 20px}
+.chead h1{font-family:var(--display);font-size:15px;font-weight:600;letter-spacing:-.01em;line-height:1.25}
+.chead .l3{display:block;font-weight:400;letter-spacing:0}
+.chead .ver-mini{margin-left:auto;height:40px;padding:0 14px;border-radius:20px;background:var(--fill);font-size:13px;color:var(--label2);display:flex;align-items:center;gap:6px}
+.stamp{align-self:center;font-size:12px;color:var(--label3);font-weight:500}
+.stamp b{font-weight:600;color:var(--label2)}
+
+/* 卡片（内容层：实体，不是玻璃） */
+.card{scroll-margin-top:76px;background:var(--card);border-radius:20px;box-shadow:0 0 0 .5px var(--sep),0 1px 2px rgba(0,0,0,.04);transition:background .5s}
+.card-h{display:flex;align-items:center;gap:10px;padding:12px 12px 8px 16px;min-height:50px}
+.card-h h3{font-family:var(--display);font-size:15px;font-weight:600;letter-spacing:-.01em}
+.ok{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;color:var(--green)}
+.chev{width:30px;height:30px;border-radius:15px;display:grid;place-items:center;color:var(--label3);background:var(--fill);margin-left:auto;transition:transform .45s var(--smooth),background .2s}
+.chev:hover{background:var(--fill2)}
+.open .chev{transform:rotate(180deg)}
+.collapse{display:grid;grid-template-rows:0fr;transition:grid-template-rows .5s var(--smooth)}
+.collapse>div{overflow:hidden;min-height:0}
+.open>.collapse{grid-template-rows:1fr}
+
+/* 1 设置卡 */
+.sum{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 14px}
+.sum span{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;background:var(--fill);font-size:13px;color:var(--label2);white-space:nowrap}
+.sum img{width:18px;height:18px;border-radius:5px;object-fit:cover;object-position:0 0}
+.sgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 16px 12px}
+.sbox{border-radius:14px;background:var(--card2);box-shadow:inset 0 0 0 .5px var(--sep);padding:10px;height:84px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;position:relative}
+.sbox b{font-weight:600;font-size:13px;line-height:1.3}
+.blade{font-family:"Noto Sans SC";font-weight:900;font-size:15px;color:#fff;text-shadow:-1.5px 0 #000,1.5px 0 #000,0 -1.5px #000,0 1.5px #000;letter-spacing:0}
+.blade em{font-style:normal;color:#ffd54a}
+.startbtn{margin:0 16px 16px;width:calc(100% - 32px);height:40px;border-radius:20px;background:var(--fill);color:var(--label2);font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px;cursor:default}
+
+/* 2 剪辑直播 */
+.live{position:relative}
+.live .meta{padding:0 16px;font-size:12px;color:var(--label3)}
+.verdict{padding:8px 16px 0;font-size:15px;font-weight:500;letter-spacing:-.005em}
+.verdict .arr{color:var(--label3);font-weight:400}
+.mini{display:flex;align-items:center;gap:12px;padding:12px 16px 16px}
+.strip{flex:1;display:grid;grid-template-columns:repeat(18,1fr);gap:3px}
+.strip i{aspect-ratio:9/16;border-radius:3px;background-size:cover;background-position:center;box-shadow:0 0 0 .5px var(--sep)}
+.replay{height:32px;padding:0 13px 0 11px;border-radius:16px;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;
+  color:var(--accent-text);background:var(--accent-soft);margin-left:auto;transition:transform .4s var(--spring),background .2s}
+.replay:hover{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+.replay:active{transform:scale(.95);transition-duration:.1s}
+.replay svg{transition:transform .7s var(--smooth)}
+.replay:hover svg{transform:rotate(-360deg)}
+/* Apple Intelligence 光晕边框：AI 正在工作时出现 */
+@property --ang{syntax:"<angle>";inherits:false;initial-value:0deg}
+.glow::before,.glow::after{content:"";position:absolute;inset:-1.5px;border-radius:21.5px;pointer-events:none;
+  background:conic-gradient(from var(--ang),var(--ai1),var(--ai2),var(--ai4),var(--ai3),var(--ai5),var(--ai1));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;padding:1.5px;
+  animation:spin 3.2s linear infinite;opacity:0;transition:opacity .6s}
+.glow::after{filter:blur(10px);inset:-3px;padding:4px;opacity:0}
+.glow.on::before{opacity:1}.glow.on::after{opacity:.55}
+@keyframes spin{to{--ang:360deg}}
+/* 重播区 */
+.rp{padding:2px 16px 16px}
+.rp-top{display:grid;grid-template-columns:auto auto 1fr;gap:18px;align-items:end;padding:4px 0 12px}
+.kpi span{display:block;font-size:12px;color:var(--label3)}
+.kpi b{display:inline-block;font-family:var(--display);font-weight:600;font-size:22px;letter-spacing:-.02em;line-height:1.1}
+.dur{justify-self:stretch}
+.dur .bar{position:relative;height:8px;border-radius:4px;background:var(--fill);margin-top:6px;overflow:hidden}
+.dur .bar i{position:absolute;left:0;top:0;bottom:0;width:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 60%,#8d99ff));transition:width .45s var(--smooth)}
+.dur .row{display:flex;justify-content:space-between;align-items:baseline}
+.tx{list-style:none;display:flex;flex-direction:column;gap:2px;min-height:150px}
+.tx li{display:grid;grid-template-columns:42px 1fr;gap:8px;font-size:14px;line-height:24px;opacity:0;transform:translateY(8px);filter:blur(8px)}
+.tx li.in{opacity:1;transform:none;filter:none;transition:opacity .4s,transform .6s var(--spring),filter .5s}
+.tx .tc{font-family:var(--mono);font-size:12px;color:var(--label3)}
+/* 被剪掉的词：先像「写作工具」一样高亮，再划线，再收拢 */
+.cut{position:relative;display:inline-block;white-space:nowrap;vertical-align:top;overflow:hidden;border-radius:5px;padding:0 2px;margin:0 1px;
+  transition:background .3s,max-width .55s var(--smooth),opacity .4s,filter .4s,padding .55s var(--smooth),margin .55s var(--smooth)}
+.cut::after{content:"";position:absolute;left:2px;right:2px;top:50%;height:1.5px;border-radius:1px;background:currentColor;transform:scaleX(0);transform-origin:left;transition:transform .3s var(--smooth)}
+.cut.breath{color:#5856d6}.cut.slip{color:var(--orange)}
+[data-theme="dark"] .cut.breath{color:#a5a3ff}
+.cut.hl.breath{background:var(--blue-soft)}.cut.hl.slip{background:var(--orange-soft)}
+.cut.struck::after{transform:scaleX(1)}
+.cut.gone{max-width:0!important;opacity:0;filter:blur(4px);padding:0;margin:0}
+.sb{display:grid;grid-template-columns:repeat(18,1fr);gap:3px;margin-top:12px}
+.sb i{aspect-ratio:9/16;border-radius:4px;background-size:cover;background-position:center;box-shadow:0 0 0 .5px var(--sep);opacity:0;transform:scale(.7) translateY(6px);filter:blur(6px)}
+.sb i.in{opacity:1;transform:none;filter:none;transition:opacity .3s,transform .55s var(--spring),filter .4s}
+.rings{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center;margin-top:14px}
+.rings svg circle{transition:stroke-dashoffset 1s var(--smooth)}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}
+.legend div{display:flex;align-items:center;gap:8px;opacity:.3;transition:opacity .4s}
+.legend div.in{opacity:1}
+.legend i{width:8px;height:8px;border-radius:50%}
+.legend span{font-size:13px;color:var(--label2)}
+.legend b{margin-left:auto;font-family:var(--display);font-weight:600;font-size:17px;font-variant-numeric:tabular-nums}
+.fin{margin-top:14px;padding:11px 14px;border-radius:14px;background:var(--card2);box-shadow:inset 0 0 0 .5px var(--sep);font-size:14px;font-weight:500;opacity:0;transform:translateY(6px) scale(.98);filter:blur(6px)}
+.fin.in{opacity:1;transform:none;filter:none;transition:opacity .4s,transform .6s var(--spring),filter .5s}
+.shimmer{background:linear-gradient(100deg,var(--label) 40%,var(--accent) 50%,var(--label) 60%);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shim 1.6s var(--smooth) .1s both}
+@keyframes shim{from{background-position:100% 0}to{background-position:0 0}}
+
+/* 3/6 版本卡 */
+.ver{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:14px 14px 0 14px}
+.vth{position:relative;width:48px;height:85px}
+.vth img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:9px;box-shadow:0 0 0 .5px var(--sep),0 3px 8px rgba(0,0,0,.12)}
+.vth .fan{transform:rotate(-8deg) translate(-6px,2px) scale(.94);opacity:.85}
+.vname{display:flex;align-items:center;gap:8px}
+.vname b{font-family:var(--display);font-weight:700;font-size:24px;letter-spacing:-.03em;line-height:1}
+.cap{height:22px;padding:0 9px;border-radius:11px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;background:var(--accent-soft);color:var(--accent-text)}
+.cap.grey{background:var(--fill);color:var(--label2)}
+.vmeta{font-size:13px;color:var(--label2);margin-top:6px}
+.vdiff{font-size:13px;color:var(--label);margin-top:2px;font-weight:500}
+.score{display:flex;flex-direction:column;align-items:center;gap:2px}
+.score text{font-family:var(--display);font-weight:600}
+.vacts{grid-column:1/-1;display:flex;margin:12px -14px 0;border-top:.5px solid var(--sep)}
+.vbtn{flex:1;height:44px;font-size:14px;font-weight:500;color:var(--accent-text);display:flex;align-items:center;justify-content:center;gap:5px;transition:background .2s}
+.vbtn+.vbtn{border-left:.5px solid var(--sep)}
+.vbtn:hover{background:var(--fill)}
+.vbtn:active{background:var(--fill2)}
+.ver .vacts .vbtn:first-child{border-bottom-left-radius:20px}.ver .vacts .vbtn:last-child{border-bottom-right-radius:20px}
+.ver.cur{box-shadow:0 0 0 1.5px var(--accent),0 6px 20px -8px color-mix(in srgb,var(--accent) 50%,transparent)}
+
+/* 消息 */
+.me{align-self:flex-end;max-width:82%;padding:9px 14px;border-radius:20px 20px 6px 20px;background:var(--accent);color:#fff;font-size:15px;line-height:1.45}
+.ref{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px 0 3px;border-radius:12px;vertical-align:1px;margin-right:5px;white-space:nowrap;
+  font-size:13px;font-weight:600;background:var(--accent-soft);color:var(--accent-text)}
+.me .ref{background:rgba(255,255,255,.22);color:#fff}
+.ref img{width:18px;height:18px;border-radius:9px;object-fit:cover}
+.ref .mono{font-weight:500;font-size:12px}
+.ai{display:grid;grid-template-columns:28px 1fr;gap:10px;padding-right:12px}
+.av{width:28px;height:28px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(140deg,var(--ai3),var(--ai4) 50%,var(--ai1));box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+.av b{color:#fff;font-size:12px;font-weight:700;font-family:"PingFang SC",var(--font)}
+.ai p{font-size:15px;line-height:1.5}
+.todo{list-style:none;margin:10px 0 4px;display:flex;flex-direction:column;border-radius:16px;background:var(--card);box-shadow:0 0 0 .5px var(--sep);overflow:hidden}
+.todo li{display:flex;align-items:center;gap:12px;padding:9px 12px;font-size:14px;color:var(--label2)}
+.todo li+li{border-top:.5px solid var(--sep)}
+.todo img{width:26px;height:46px;border-radius:6px;object-fit:cover;box-shadow:0 0 0 .5px var(--sep)}
+.todo b{color:var(--label);font-weight:600}
+.opts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.opt{position:relative;border-radius:16px;padding:6px;text-align:left;background:var(--card);box-shadow:0 0 0 .5px var(--sep);transition:transform .45s var(--spring),box-shadow .25s}
+.opt:hover{transform:translateY(-2px)}
+.opt:active{transform:scale(.97);transition-duration:.1s}
+.opt.on{box-shadow:0 0 0 2px var(--accent)}
+.opt .pv{height:66px;border-radius:10px;background:#f4f1ea;padding:8px 9px;display:flex;flex-direction:column;justify-content:center;gap:5px;overflow:hidden}
+.opt .pv .r{display:flex;align-items:center;gap:5px;font-size:10px;color:#333;font-weight:700;font-family:"PingFang SC",var(--font)}
+.opt .pv .bar{height:7px;border-radius:3px;background:#cfd2d8}
+.opt .pv .bar.hi{background:#e25b3c}
+.opt .pv .big{font-family:var(--display);font-weight:800;font-size:22px;color:#e25b3c;line-height:1;letter-spacing:-.03em}
+.opt .lab{display:flex;justify-content:space-between;align-items:baseline;padding:7px 4px 2px;font-size:12px;color:var(--label3)}
+.opt .lab b{font-size:13px;font-weight:600;color:var(--label)}
+.opt .ck{position:absolute;right:10px;top:10px;width:20px;height:20px;border-radius:10px;background:var(--accent);display:grid;place-items:center;transform:scale(0);transition:transform .4s var(--spring)}
+.opt.on .ck{transform:scale(1)}
+.picked{font-size:13px;color:var(--label3);margin-top:8px}
+/* 8 处理中 */
+.proc .card{position:relative;padding:12px 14px;margin-top:8px}
+.bgs{display:grid;grid-template-columns:repeat(10,1fr);gap:5px}
+.bgs i{height:34px;border-radius:8px;opacity:.4;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12);transition:opacity .3s,transform .5s var(--spring)}
+.bgs i.on{opacity:1;transform:scale(1.12);box-shadow:0 0 0 2px var(--card),0 0 0 3.5px var(--accent)}
+.bgrow{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;font-size:13px;color:var(--label3)}
+.bgrow b{color:var(--label);font-weight:600}
+.prog{margin-top:8px;height:6px;border-radius:3px;background:var(--fill);overflow:hidden;position:relative}
+.prog i{position:absolute;left:0;top:0;bottom:0;width:62%;border-radius:3px;background:var(--accent);overflow:hidden;transition:width .8s var(--smooth)}
+.prog i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);animation:run 1.5s linear infinite}
+@keyframes run{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.steps{display:flex;gap:14px;margin-top:9px;font-size:12px;color:var(--label3)}
+.steps .done{color:var(--green);font-weight:500}.steps .now{color:var(--label);font-weight:600}
+.dots{display:inline-flex;gap:3px;margin-left:4px;vertical-align:middle}
+.dots i{width:5px;height:5px;border-radius:50%;background:var(--label3);animation:blink 1.2s infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes blink{0%,80%,100%{opacity:.25;transform:scale(.8)}40%{opacity:1;transform:none}}
+.typing::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:4px;background:var(--label3);animation:blink 1s infinite}
+
+/* 9 输入框（玻璃，浮在消息之上） */
+.composer{position:absolute;z-index:3;left:6px;right:6px;bottom:0;border-radius:28px;padding:10px 10px 10px 16px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;padding-top:2px}
+.tags:empty{display:none}
+.tags .ref{height:28px;border-radius:14px;padding-right:4px}
+.tags .ref img{width:22px;height:22px;border-radius:11px}
+.tags .ref button{width:20px;height:20px;border-radius:10px;display:grid;place-items:center;margin-left:2px;transition:background .2s}
+.tags .ref button:hover{background:var(--accent-soft)}
+textarea{display:block;width:100%;resize:none;border:0;outline:0;background:none;color:var(--label);font:inherit;font-size:15px;line-height:22px;height:44px;margin-top:6px}
+textarea::placeholder{color:var(--label3)}
+.crow{display:flex;align-items:center;gap:6px;margin-top:4px}
+.chips{display:flex;gap:6px;overflow:hidden}
+.chip{height:30px;padding:0 12px;border-radius:15px;font-size:13px;color:var(--label);background:var(--fill);white-space:nowrap;transition:background .2s,transform .4s var(--spring)}
+.chip:hover{background:var(--fill2)}
+.chip:active{transform:scale(.94);transition-duration:.1s}
+.trow{display:flex;align-items:flex-start;gap:8px;min-height:28px}
+.trow .tags{flex:1}
+.est{margin-left:auto;line-height:28px;font-size:12px;color:var(--label3);white-space:nowrap}
+.est b{font-weight:600;color:var(--label2)}
+.send{width:36px;height:36px;border-radius:18px;display:grid;place-items:center;background:var(--accent);color:#fff;flex:none;transition:transform .4s var(--spring)}
+.send:hover{transform:scale(1.06)}
+.send:active{transform:scale(.9);transition-duration:.1s}
+
+/* ---------- 舞台：大预览（内容层），工具栏与播放控制浮在其上 ---------- */
+.stage{position:relative;border-radius:32px;overflow:hidden;background:#0d0d0f;isolation:isolate}
+.stage .amb{position:absolute;inset:-12%;z-index:0}
+.stage .amb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:blur(60px) saturate(1.35) brightness(.9);transition:opacity .8s}
+.theater{position:absolute;inset:66px 0 0;display:flex;align-items:flex-start;justify-content:center;gap:20px;z-index:1;padding:8px 24px 0;container-type:size}
+.pl{position:relative;height:calc(100cqh - 10px);aspect-ratio:9/16;border-radius:24px;overflow:hidden;box-shadow:0 30px 60px -20px rgba(0,0,0,.6),0 0 0 .5px rgba(255,255,255,.2);
+  transition:height .6s var(--smooth)}
+.compare .pl{height:min(calc(100cqh - 10px),calc((100cqw - 68px) / 2 * 16 / 9))}
+.pl.b{display:none}
+.compare .vl{display:flex!important}
+.compare .pl.b{display:block;animation:mat .6s var(--smooth)}
+@keyframes mat{from{opacity:0;transform:scale(.92);filter:blur(12px)}to{opacity:1;transform:none;filter:none}}
+.scr{position:absolute;inset:0;cursor:pointer;container-type:size}
+.scr > img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .45s ease,filter .45s ease,transform .6s var(--smooth)}
+.scr > img.next{opacity:0;filter:blur(14px);transform:scale(1.04)}
+.vl{position:absolute;left:12px;bottom:12px;z-index:3;height:26px;display:none!important;padding:0 10px;border-radius:13px;display:flex;align-items:center;font-size:13px;font-weight:600;color:#fff;background:rgba(0,0,0,.32);
+  -webkit-backdrop-filter:blur(12px) saturate(160%);backdrop-filter:blur(12px) saturate(160%);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.3)}
+.chg{position:absolute;left:12px;top:calc(50% - 13px);z-index:3;height:26px;padding:0 10px;border-radius:13px;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#fff;
+  background:color-mix(in srgb,var(--accent) 85%,transparent);opacity:0;transform:scale(.8);transition:opacity .3s,transform .45s var(--spring)}
+.chg.show{opacity:1;transform:none}
+/* 钩子卡 2/3 的版本化渲染（叠在真实帧上半屏；内容字体：思源黑体 Heavy） */
+.hook{position:absolute;left:0;right:0;top:0;height:50%;z-index:2;display:none;flex-direction:column;padding:7cqw 7cqw 0;background:linear-gradient(180deg,#0e0f0b,#161711)}
+.hook.show{display:flex}
+.hook .bn{align-self:flex-start;font-size:2.4cqw;font-weight:700;color:#141a00;background:#d4ff3a;border-radius:.8cqw;padding:.3cqw 1.4cqw;white-space:nowrap;font-family:"PingFang SC",var(--font)}
+.hook .pg{position:absolute;right:7cqw;top:17cqw;font-family:var(--mono);font-size:2.6cqw;color:#d4ff3a;border:1px solid #d4ff3a;border-radius:.8cqw;padding:0 1.2cqw}
+.hook h4{font-family:"Noto Sans SC";font-weight:900;color:#fff;line-height:1.2;margin-top:6cqw;letter-spacing:0}
+.hook .n{font-family:"Noto Sans SC";font-weight:900;color:#d4ff3a;line-height:1;letter-spacing:-.02em}
+.hook .ct{position:absolute;left:0;right:0;bottom:4cqh;text-align:center;font-family:"Noto Sans SC";font-weight:900;color:#fff;font-size:5.2cqw;line-height:1.25;letter-spacing:0;
+  text-shadow:-2px 0 #000,2px 0 #000,0 -2px #000,0 2px #000}
+.ripple{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:rgba(255,255,255,.55);pointer-events:none;z-index:5;animation:rip .65s var(--smooth) forwards}
+@keyframes rip{to{transform:scale(6);opacity:0}}
+.hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.9);z-index:3;height:30px;padding:0 12px;border-radius:15px;display:flex;align-items:center;font-size:13px;font-weight:500;color:#fff;white-space:nowrap;
+  background:rgba(0,0,0,.35);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);opacity:0;transition:opacity .25s,transform .4s var(--spring);pointer-events:none}
+.scr:hover .hint{opacity:1;transform:translate(-50%,-50%)}
+
+/* 舞台工具栏（玻璃浮层，内边距 10 → 圆角 22，与舞台 32 同心） */
+.tbar{position:absolute;z-index:4;left:10px;right:10px;top:10px;height:44px;display:flex;align-items:center;gap:8px;pointer-events:none}
+.tbar > *{pointer-events:auto}
+.seg{position:relative;display:flex;height:44px;padding:4px;border-radius:22px;color:#fff}
+.seg .ind{position:absolute;top:4px;bottom:4px;border-radius:18px;background:rgba(255,255,255,.3);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.5),inset 0 1px 0 rgba(255,255,255,.6),0 2px 8px rgba(0,0,0,.15)}
+.st{position:relative;z-index:1;height:36px;padding:0 14px;border-radius:18px;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;color:rgba(255,255,255,.75);transition:color .25s}
+.st .num{font-weight:500;font-size:12px;opacity:.85}
+.st.on{color:#fff}
+.st[disabled]{cursor:not-allowed}
+.st svg{width:14px;height:14px}
+.tglass{height:44px;border-radius:22px;display:flex;align-items:center;gap:8px;padding:0 16px;color:#fff;font-size:14px;font-weight:500;white-space:nowrap}
+.tglass .l{color:rgba(255,255,255,.78);font-weight:400;font-size:13px}
+/* 苹果开关：按下时滑块变成放大的玻璃透镜 */
+.sw{width:42px;height:26px;border-radius:13px;background:rgba(255,255,255,.28);position:relative;transition:background .3s}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:22px;height:22px;border-radius:11px;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.25);transition:transform .45s var(--spring),width .2s,background .2s}
+[aria-pressed="true"] .sw{background:var(--switch)}
+[aria-pressed="true"] .sw::after{transform:translateX(16px)}
+.cmpbtn:active .sw::after{width:28px;background:rgba(255,255,255,.75);box-shadow:inset 0 0 0 .5px #fff,0 4px 12px rgba(0,0,0,.25)}
+[aria-pressed="true"].cmpbtn:active .sw::after{transform:translateX(10px)}
+.tbar .sp{flex:1}
+.expbtn{height:44px;padding:0 18px;border-radius:22px;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;transition:transform .4s var(--spring)}
+.expbtn:hover{transform:scale(1.03)}
+.expbtn:active{transform:scale(.95);transition-duration:.1s}
+
+/* 播放控制（玻璃，浮在画面下沿；与舞台底边同心：内边距 8 → 圆角 24） */
+.trans{position:absolute;z-index:4;left:50%;bottom:8px;transform:translateX(-50%);width:min(560px,calc(100% - 16px));height:48px;border-radius:24px;
+  display:grid;grid-template-columns:36px auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:0 16px 0 6px;color:#fff}
+.play{width:36px;height:36px;border-radius:18px;display:grid;place-items:center;transition:transform .4s var(--spring),background .2s}
+.play:hover{background:rgba(255,255,255,.18)}
+.play:active{transform:scale(.88);transition-duration:.1s}
+.tnow{font-size:13px;font-weight:500;font-variant-numeric:tabular-nums}
+.track{position:relative;height:26px;cursor:pointer}
+.track .rl{position:absolute;left:0;right:0;top:50%;height:6px;margin-top:-3px;border-radius:3px;background:rgba(255,255,255,.3);overflow:hidden;transition:height .3s var(--spring),margin .3s var(--spring)}
+.track:hover .rl{height:10px;margin-top:-5px}
+.track .fl{position:absolute;left:0;top:0;bottom:0;background:#fff}
+.track .tk{position:absolute;top:0;bottom:0;width:1px;background:rgba(0,0,0,.14)}
+.track .mk{position:absolute;top:50%;width:6px;height:6px;margin:-12px 0 0 -3px;border-radius:3px;background:#fff;box-shadow:0 0 0 1.5px var(--accent)}
+.nseg{font-size:13px;color:rgba(255,255,255,.85);white-space:nowrap}
+.nseg b{font-weight:600;color:#fff}
+
+/* 菜单：从触发按钮处弹出（玻璃） */
+.menu{position:fixed;z-index:30;width:250px;padding:6px;border-radius:22px;opacity:0;transform:scale(.6);filter:blur(10px);pointer-events:none;
+  transition:opacity .2s,transform .45s var(--spring),filter .3s}
+.menu.show{opacity:1;transform:none;filter:none;pointer-events:auto}
+.menu button{width:100%;display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:16px;text-align:left;transition:background .15s}
+.menu button:hover{background:var(--fill)}
+.menu .ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--fill);flex:none}
+.menu b{display:block;font-size:14px;font-weight:600}
+.menu span span{font-size:12px;color:var(--label2)}
+.toast{position:fixed;z-index:40;left:calc(12px + 64px + 12px + 540px + 12px + (100vw - 652px) / 2);top:76px;transform:translate(-50%,-10px) scale(.95);opacity:0;height:40px;padding:0 16px;border-radius:20px;display:flex;align-items:center;font-size:14px;font-weight:500;pointer-events:none;white-space:nowrap;
+  transition:opacity .25s,transform .45s var(--spring)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.enter{animation:enter .8s var(--smooth) both}
+@keyframes enter{from{opacity:0;transform:scale(.98);filter:blur(10px)}to{opacity:1;transform:none;filter:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01s!important}}
+</style>
+</head>
+<body>
+<div class="ambient" aria-hidden="true"><img id="amb0" alt=""></div>
+<!-- 动态生成的折射滤镜都放这里 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs id="lensDefs"></defs></svg>
+
+<div class="win">
+  <!-- ======== 侧栏 ======== -->
+  <nav class="rail lg enter" aria-label="项目">
+    <div class="appicon" title="明知AI剪辑 · Mingzhi"><b>明</b><i></i></div>
+    <hr>
+    <button class="proj on" aria-current="page" title="第 2 期 · 高性价比人生指南"><span class="pt"><img src="assets/frame_003.jpg" alt=""></span>第2期</button>
+    <button class="proj" title="第 1 期"><span class="pt" style="background:linear-gradient(170deg,#c9ccd4,#8e939f)"></span>第1期</button>
+    <button class="rbtn" aria-label="新建项目" title="新建"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <div class="grow"></div>
+    <button class="rbtn" id="theme" aria-label="切换深色模式" title="外观"><svg id="themeIco" width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16.5 12.5A7 7 0 0 1 7.5 3.5a7 7 0 1 0 9 9z" stroke-linejoin="round"/></svg></button>
+    <button class="rbtn" aria-label="设置" title="设置"><svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/><circle cx="7" cy="5.5" r="1.9" fill="var(--card)"/><circle cx="13" cy="10" r="1.9" fill="var(--card)"/><circle cx="8.5" cy="14.5" r="1.9" fill="var(--card)"/></svg></button>
+  </nav>
+
+  <!-- ======== 对话 ======== -->
+  <section class="chat enter" style="animation-delay:.06s" aria-label="对话">
+    <header class="chead lg thick">
+      <div><h1>第 2 期 · 高性价比人生指南<span class="l3">明知AI剪辑 · 3 个版本</span></h1></div>
+      <span class="ver-mini">当前 <b style="color:var(--label)">v2</b> · 自检 9.0</span>
+    </header>
+
+    <div class="flow" id="flow">
+      <span class="stamp"><b>今天</b> 23:07</span>
+
+      <!-- 1 设置卡 -->
+      <article class="card" id="setup">
+        <div class="card-h"><h3>出片设置</h3><span class="ok"><svg width="13" height="13" viewBox="0 0 14 14"><path d="M3 7.3l2.6 2.6L11 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>已开始出片</span>
+          <button class="chev" aria-expanded="false" aria-label="展开出片设置"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div>
+        <div class="sum">
+          <span><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.5" y="1.5" width="9" height="11" rx="2"/><path d="M6 5.2v3.6L9 7z" fill="currentColor"/></svg>第2期_口播.mov · 3:42</span>
+          <span><img src="assets/speaker_bottom.jpg" alt="">书房</span>
+          <span>刀锋 · 思源黑体</span>
+          <span class="num">¥3.84 / 上限 ¥10</span>
+        </div>
+        <div class="collapse"><div>
+          <div class="sgrid">
+            <div class="sbox"><span class="l3">口播素材</span><b>第2期_口播.mov<br><span class="l3" style="font-weight:400">3:42 · 竖屏 1080×1920</span></b></div>
+            <div class="sbox" style="background:linear-gradient(180deg,rgba(0,0,0,0) 30%,rgba(0,0,0,.65)),url(assets/speaker_bottom.jpg) 0 0/300% auto"><span class="l3" style="color:#fff;opacity:.9">背景</span><b style="color:#fff">书房</b></div>
+            <div class="sbox" style="background:linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.55)),url(assets/speaker_bottom.jpg) 0 30%/320% auto"><span class="l3" style="color:#fff;opacity:.9">字幕样式</span><span class="blade">怎么少花<em>冤枉钱</em></span><b style="color:#fff;font-size:12px">刀锋 · 思源黑体</b></div>
+            <div class="sbox"><span class="l3">预估花费</span><b class="num" style="font-size:20px;font-family:var(--display);letter-spacing:-.02em">¥3.84</b><span class="l3">上限 ¥10 · 可想 AI</span></div>
+          </div>
+          <button class="startbtn" disabled><svg width="13" height="13" viewBox="0 0 14 14"><path d="M3 7.3l2.6 2.6L11 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>开始出片 · 已于 23:07 确认</button>
+        </div></div>
+      </article>
+
+      <!-- 2 剪辑直播 -->
+      <article class="card live glow" id="live">
+        <div class="card-h"><h3>剪辑直播</h3><span class="ok">已完成 · 9 分 30 秒</span>
+          <button class="replay" id="replayBtn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 7a4.5 4.5 0 1 0 1.3-3.2M2.5 1.8v2.6h2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>重播剪辑过程</button></div>
+        <div class="meta">本机 Paraformer 识别（音频不出本机）· gemini-3.5-flash 剪口误与分镜</div>
+        <div id="liveSum">
+          <div class="verdict">删除 37 处气口 · 12 处口误 · 3:42 <span class="arr">→</span> 1:57 · 18 段</div>
+          <div class="mini"><div class="strip" id="strip"></div></div>
+        </div>
+        <div class="rp" id="rp" hidden>
+          <div class="rp-top">
+            <div class="kpi"><span>气口</span><b class="num" id="cB">0</b></div>
+            <div class="kpi"><span>口误</span><b class="num" id="cS">0</b></div>
+            <div class="kpi dur"><div class="row"><span>时长</span><b class="num" id="cD">3:42</b></div><div class="bar"><i id="durBar"></i></div></div>
+          </div>
+          <ol class="tx" id="tx"></ol>
+          <div class="sb" id="sb"></div>
+          <div class="rings"><svg id="ringSvg" width="104" height="104" viewBox="0 0 104 104"></svg><div class="legend" id="legend"></div></div>
+          <div class="fin" id="fin"><span>删除 37 处气口 · 12 处口误 · 3:42 → 1:57 · 18 段</span></div>
+        </div>
+      </article>
+
+      <!-- 3 v1 -->
+      <article class="card ver" data-ver="1">
+        <div class="vth"><img src="assets/frame_003.jpg" alt="v1 首帧"></div>
+        <div><div class="vname"><b>v1</b><span class="cap grey">首版</span></div>
+          <div class="vmeta num">1:57 · 18 段 · 花费 ¥3.84</div>
+          <div class="vdiff">全自动出片</div></div>
+        <div class="score"><svg width="46" height="46" viewBox="0 0 46 46"><circle cx="23" cy="23" r="19" fill="none" stroke="var(--fill2)" stroke-width="4"/><circle cx="23" cy="23" r="19" fill="none" stroke="#30d158" stroke-width="4" stroke-linecap="round" stroke-dasharray="105 119.4" transform="rotate(-90 23 23)"/><text x="23" y="27.5" text-anchor="middle" fill="currentColor" font-size="13">8.8</text></svg><span class="l3">自检</span></div>
+        <div class="vacts"><button class="vbtn" data-show="1">预览</button><button class="vbtn" data-cmp>与 v2 对比</button><button class="vbtn" data-exp>导出…</button></div>
+      </article>
+
+      <span class="stamp">23:16</span>
+      <!-- 4 用户 -->
+      <div class="me"><span class="ref"><img src="assets/frame_062.jpg" alt=""><span class="mono">@00:58</span>对比条卡</span>这张数据太弱了，加上具体比例，再把开头第二张钩子卡的 ¥0.51 放大</div>
+
+      <!-- 5 AI 回复 + 内联选项 -->
+      <div class="ai">
+        <span class="av"><b>明</b></span>
+        <div>
+          <p>明白，改两处，其余 16 段保持不动：</p>
+          <ul class="todo">
+            <li><img src="assets/frame_062.jpg" alt=""><span><b>@00:58 对比条卡</b><br>补上原文里的具体比例，换成更强的版式</span></li>
+            <li><img src="assets/frame_003.jpg" alt=""><span><b>@00:04 钩子卡 2/3</b><br>「¥0.51」放大成主视觉</span></li>
+          </ul>
+          <p style="margin-top:12px">对比条卡选一个版式：</p>
+          <div class="opts" id="opts" role="radiogroup" aria-label="对比条卡版式">
+            <button class="opt" role="radio" aria-checked="false" data-o="0"><span class="ck"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.2l2 2 4-4.4" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg></span>
+              <div class="pv"><div class="r">代糖<span class="bar hi" style="width:68%"></span></div><div class="r">不喝<span class="bar" style="width:40%"></span></div></div>
+              <div class="lab"><b>双条对比</b><span>稳妥</span></div></button>
+            <button class="opt on" role="radio" aria-checked="true" data-o="1"><span class="ck"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.2l2 2 4-4.4" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg></span>
+              <div class="pv"><div class="big">+ %</div><span class="bar hi" style="width:80%;display:block"></span><div class="r" style="font-weight:500;color:#666">比例取自原文</div></div>
+              <div class="lab"><b>大比例 + 条</b><span>推荐</span></div></button>
+            <button class="opt" role="radio" aria-checked="false" data-o="2"><span class="ck"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.2l2 2 4-4.4" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg></span>
+              <div class="pv" style="align-items:center"><svg width="60" height="34" viewBox="0 0 60 34"><path d="M6 31a24 24 0 0 1 48 0" fill="none" stroke="#cfd2d8" stroke-width="7" stroke-linecap="round"/><path d="M6 31a24 24 0 0 1 39-18.7" fill="none" stroke="#e25b3c" stroke-width="7" stroke-linecap="round"/></svg></div>
+              <div class="lab"><b>半环仪表</b><span>醒目</span></div></button>
+          </div>
+          <div class="picked" id="picked">已选「大比例 + 条」· 只重渲 2 段，约 ¥0.16</div>
+        </div>
+      </div>
+
+      <!-- 6 v2 -->
+      <article class="card ver cur" data-ver="2">
+        <div class="vth"><img class="fan" src="assets/frame_062.jpg" alt=""><img src="assets/frame_003.jpg" alt="v2 首帧"></div>
+        <div><div class="vname"><b>v2</b><span class="cap">当前</span></div>
+          <div class="vmeta num">1:57 · 18 段 · 自检 9.0</div>
+          <div class="vdiff">只重渲了 2 段 · 38 秒 · +¥0.16</div></div>
+        <div class="score"><svg width="46" height="46" viewBox="0 0 46 46"><circle cx="23" cy="23" r="19" fill="none" stroke="var(--fill2)" stroke-width="4"/><circle cx="23" cy="23" r="19" fill="none" stroke="#30d158" stroke-width="4" stroke-linecap="round" stroke-dasharray="107.5 119.4" transform="rotate(-90 23 23)"/><text x="23" y="27.5" text-anchor="middle" fill="currentColor" font-size="13">9.0</text></svg><span class="l3">自检</span></div>
+        <div class="vacts"><button class="vbtn" data-show="2">预览</button><button class="vbtn" data-cmp>与 v1 对比</button><button class="vbtn" data-exp>导出…</button></div>
+      </article>
+
+      <span class="stamp">23:21</span>
+      <!-- 7 用户 -->
+      <div class="me">背景换成夜景落地窗试试</div>
+
+      <!-- 8 AI 处理中 -->
+      <div class="ai proc">
+        <span class="av"><b>明</b></span>
+        <div>
+          <p>好，人像段统一换成「夜景落地窗」，卡片段不受影响<span class="dots"><i></i><i></i><i></i></span></p>
+          <div class="card glow on">
+            <div class="bgs" id="bgs"></div>
+            <div class="bgrow"><span>10 个预设</span><b>夜景落地窗 · 首次使用，正在生成</b></div>
+            <div class="prog"><i id="progBar"></i></div>
+            <div class="steps"><span class="done">✓ 生成背景</span><span class="now">抠像合成中 <span class="num" id="pct">62%</span></span><span>重渲人像段</span><span>自检</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9 输入框 -->
+    <div class="composer lg thick" id="composer">
+      <div class="trow"><div class="tags" id="tags"></div><span class="est">本轮预估 <b class="num">¥0.08</b></span></div>
+      <textarea id="ta" rows="2" placeholder="还想改哪里？点一下右侧画面，可引用那一刻" aria-label="输入修改意见"></textarea>
+      <div class="crow">
+        <div class="chips" id="chips"><button class="chip">节奏再快一点</button><button class="chip">换一张 B-roll</button><button class="chip">字幕换成得意黑</button><button class="chip" data-exp>导出</button></div>
+        <span class="grow" style="flex:1"></span>
+        <button class="send" id="send" aria-label="发送"><svg width="15" height="15" viewBox="0 0 14 14"><path d="M7 12V2.5M2.8 6.6L7 2.4l4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======== 舞台 ======== -->
+  <section class="stage enter" style="animation-delay:.12s" aria-label="预览">
+    <div class="amb"><img id="amb1" alt=""></div>
+    <div class="tbar">
+      <div class="seg lg" id="seg" role="tablist" aria-label="版本">
+        <span class="ind" id="ind"></span>
+        <button class="st" role="tab" data-v="1">v1<span class="num">8.8</span></button>
+        <button class="st on" role="tab" data-v="2" aria-selected="true">v2<span class="num">9.0</span></button>
+        <button class="st" role="tab" data-v="3" disabled title="v3 生成中"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="2.2"/><circle cx="8" cy="8" r="6" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="23.4 37.7" transform="rotate(-90 8 8)"/></svg>v3<span class="num" id="v3pct">62%</span></button>
+      </div>
+      <button class="tglass lg cmpbtn" id="cmp" aria-pressed="false">对比<span class="sw"></span></button>
+      <span class="sp"></span>
+      <div class="tglass lg"><span class="l">算力余额</span><span class="num">¥36.27</span><span class="l">可想 AI</span></div>
+      <button class="expbtn lg tint" data-exp>导出<svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+    </div>
+
+    <div class="theater" id="theater">
+      <div class="pl b"><div class="scr"><img class="cur" alt="v1 预览"><img class="next" alt=""><div class="hook"></div><span class="vl">v1</span><span class="chg"></span><span class="hint">点画面，引用这一刻</span></div></div>
+      <div class="pl a"><div class="scr"><img class="cur" alt="成片预览"><img class="next" alt=""><div class="hook"></div><span class="vl">v2</span><span class="chg"></span><span class="hint">点画面，引用这一刻</span></div></div>
+    </div>
+
+    <div class="trans lg" id="trans">
+      <button class="play" id="play" aria-label="播放"><svg id="pico" width="16" height="16" viewBox="0 0 16 16"><path d="M4 2.2v11.6c0 .6.6.9 1.1.6l9.2-5.8c.5-.3.5-.9 0-1.2L5.1 1.6C4.6 1.3 4 1.6 4 2.2z" fill="currentColor"/></svg></button>
+      <span class="tnow" id="tnow">00:04</span>
+      <div class="track" id="track" role="slider" aria-label="播放进度" aria-valuemin="0" aria-valuemax="117"><div class="rl"><div class="fl" id="fill"></div><div id="tks"></div></div><div id="mks"></div></div>
+      <span class="nseg" id="nseg"></span>
+    </div>
+  </section>
+</div>
+
+<div class="menu lg thick" id="menu" role="menu">
+  <button role="menuitem"><span class="ic"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="4" y="1.5" width="8" height="13" rx="2"/><path d="M7 6v4l3-2z" fill="currentColor"/></svg></span><span><b>MP4 视频</b><span class="num">1080×1920 · 1:57</span></span></button>
+  <button role="menuitem"><span class="ic"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="4" width="8" height="6" rx="1.2"/><rect x="10.5" y="3" width="4" height="10" rx="1.2"/></svg></span><span><b>封面</b><span>4:3 + 3:4</span></span></button>
+</div>
+<div class="toast lg thick" id="toast" role="status"></div>
+
+<script>
+/* ============================================================
+   液态玻璃折射：为每个 .lg 元素按像素尺寸生成位移贴图
+   贴图编码「圆角矩形边缘的法线」：中心 0.5 不位移，越靠边越向内取样 → 边缘光线被弯折（lensing）
+   大元素折射更强（Apple：更大的玻璃更「厚」）
+   ============================================================ */
+(function(){
+  'use strict';
+  const defs = document.getElementById('lensDefs');
+  const cache = new WeakMap();
+  let uid = 0;
+  function lensMap(w, h, r, band){
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d'), im = ctx.createImageData(w, h), d = im.data;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++){
+      const px = i + .5 - w/2, py = j + .5 - h/2;
+      const qx = Math.abs(px) - (w/2 - r), qy = Math.abs(py) - (h/2 - r);
+      let dist, nx = 0, ny = 0;
+      if (qx > 0 && qy > 0){ const L = Math.hypot(qx, qy) || 1; dist = r - L; nx = qx/L*Math.sign(px); ny = qy/L*Math.sign(py); }
+      else if (qx > qy){ dist = r - qx; nx = Math.sign(px); }
+      else { dist = r - qy; ny = Math.sign(py); }
+      const k = Math.max(0, 1 - dist/band), s = k*k*k;   // 三次衰减：只在最外一圈明显弯折
+      const o = (j*w + i)*4;
+      d[o] = 128 - nx*s*127; d[o+1] = 128 - ny*s*127; d[o+2] = 128; d[o+3] = 255;
+    }
+    ctx.putImageData(im, 0, 0);
+    return c.toDataURL();
+  }
+  function apply(el){
+    const w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
+    if (!w || !h) return;
+    const key = w + 'x' + h, prev = cache.get(el);
+    if (prev && prev.key === key) return;
+    const r = Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 20, h/2, w/2);
+    const big = Math.max(w, h) > 300;
+    const band = Math.min(w, h) * (big ? .22 : .42);
+    const scale = big ? 36 : 22;
+    const blur = big ? 10 : 5;
+    const id = prev ? prev.id : 'lens' + (uid++);
+    const html = `<filter id="${id}" x="0" y="0" width="${w}" height="${h}" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feImage x="0" y="0" width="${w}" height="${h}" href="${lensMap(w, h, r, band)}" result="m"/>
+      <feDisplacementMap in="SourceGraphic" in2="m" scale="${scale}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+    const old = document.getElementById(id); if (old) old.remove();
+    defs.insertAdjacentHTML('beforeend', html);
+    el.style.backdropFilter = el.style.webkitBackdropFilter = `url(#${id}) blur(${blur}px) saturate(185%) brightness(1.04)`;
+    cache.set(el, {id, key});
+  }
+  const ro = new ResizeObserver(es => requestAnimationFrame(() => es.forEach(e => apply(e.target))));
+  window.__lens = el => { apply(el); ro.observe(el); };
+  if (!matchMedia('(prefers-reduced-transparency: reduce)').matches)
+    document.querySelectorAll('.lg').forEach(window.__lens);
+})();
+
+/* ============================================================
+   界面逻辑
+   ============================================================ */
+(function(){
+  'use strict';
+  const $ = s=>document.querySelector(s), $$ = s=>[...document.querySelectorAll(s)];
+  const FR = ['frame_003','frame_022','frame_038','frame_047','frame_062','frame_080','frame_101','frame_114'];
+  const src = f=> f<0 ? 'assets/speaker_bottom.jpg' : `assets/${FR[f]}.jpg`;
+  const fmt = t=>{t=Math.max(0,Math.floor(t));return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0')};
+  // 18 段：真实字幕时间码、卡片模板、最近的真实帧
+  const SEGS = [[0,'钩子卡 1/3',0],[4,'钩子卡 2/3',0],[8,'钩子卡 3/3',0],[13,'网页截图 B-roll',1],[17,'网页截图',1],[21,'数字网格卡',2],
+    [26,'人像 + 关键词',2],[30,'知识卡',2],[35,'知识卡 · 证据 A',3],[40,'终端卡',3],[47,'终端卡',3],[52,'AI 生图 B-roll',4],
+    [58,'对比条卡',4],[65,'划线清单卡',5],[80,'纯人像',-1],[98,'加载动画卡',6],[105,'评论卡',6],[112,'三连 CTA',7]].map(([t,n,f])=>({t,n,f}));
+  const TOTAL = 117, CHANGED = [1,12];
+  const segAt = t=>{let k=0;SEGS.forEach((g,i)=>{if(t>=g.t)k=i});return k};
+  const wait = ms=>new Promise(r=>setTimeout(r,ms));
+
+  let tt=0; const toast = m=>{const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2400)};
+
+  // ---------- 外观切换（缓慢过渡，避免亮度突变） ----------
+  $('#theme').addEventListener('click', ()=>{
+    const r = document.documentElement, dark = r.dataset.theme !== 'dark';
+    r.dataset.theme = dark ? 'dark' : 'light';
+    $('#themeIco').innerHTML = dark ? '<circle cx="10" cy="10" r="3.6"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4" stroke-linecap="round"/>' : '<path d="M16.5 12.5A7 7 0 0 1 7.5 3.5a7 7 0 1 0 9 9z" stroke-linejoin="round"/>';
+    $('#theme').setAttribute('aria-label', dark ? '切换浅色模式' : '切换深色模式');
+  });
+
+  // ---------- 预览 ----------
+  let ver = 2, time = 4, playing = false, compare = false;
+  const plA = $('.pl.a'), plB = $('.pl.b');
+  // 钩子卡 2/3 按版本渲染：v1 的 ¥0.51 混在句中；v2 放大成主视觉（真实字幕内容）
+  const hookHTML = v => `<span class="bn">这 3 句话都出自 GitHub 近 3.5 万星的《高性价比人生指南》</span><span class="pg">2 / 3</span>` +
+    (v===1 ? `<h4 style="font-size:7.4cqw">买双色球<br>每投 1 块钱<br>长期平均只拿回 <span style="color:#d4ff3a">¥0.51</span></h4>`
+           : `<h4 style="font-size:5.4cqw">买双色球，每投 1 块钱<br>长期平均只能拿回</h4><div class="n" style="font-size:22cqw;margin-top:2cqw">¥0.51</div>`) +
+    `<div class="ct">买双色球，每投 1 块钱<br>长期平均只能拿回五毛一</div>`;
+  // 帧切换：新帧从模糊中「凝结」出来（materialize），旧帧淡出
+  function setFrame(pl, url, speaker){
+    const cur = pl.querySelector('img.cur'), nx = pl.querySelector('img.next');
+    if (cur.getAttribute('src') === url) return;
+    if (!cur.getAttribute('src')){ cur.src = url; cur.style.objectPosition = speaker?'50% 30%':''; return; }
+    nx.src = url; nx.style.objectPosition = speaker?'50% 30%':'';
+    requestAnimationFrame(()=>{ nx.classList.remove('next'); nx.classList.add('cur'); cur.classList.remove('cur'); cur.classList.add('next'); });
+  }
+  function paintPlayer(pl, v){
+    const k = segAt(time), g = SEGS[k], hook = pl.querySelector('.hook');
+    setFrame(pl, src(g.f), g.f<0);
+    hook.classList.toggle('show', k===1);
+    if (k===1 && hook.dataset.v !== String(v)){ hook.dataset.v = v; hook.innerHTML = hookHTML(v); }
+    pl.querySelector('.vl').textContent = 'v'+v;
+    const ch = pl.querySelector('.chg');
+    ch.textContent = k===1 ? '本段已改 · ¥0.51 放大' : '本段已改 · 大比例 + 条';
+    ch.classList.toggle('show', v===2 && CHANGED.includes(k));
+  }
+  let lastAmb = '';
+  function paint(){
+    paintPlayer(plA, compare ? 2 : ver);
+    if (compare) paintPlayer(plB, 1);
+    const g = SEGS[segAt(time)], url = src(g.f);
+    if (url !== lastAmb){ lastAmb = url; $('#amb0').src = url; $('#amb1').src = url; }   // 环境层跟随画面
+    const p = time/TOTAL*100;
+    $('#fill').style.width = p+'%';
+    $('#tnow').textContent = fmt(time);
+    $('#nseg').innerHTML = `<b>${String(segAt(time)+1).padStart(2,'0')}</b> / 18 · ${g.n}`;
+    $('#track').setAttribute('aria-valuenow', Math.round(time));
+  }
+  $('#tks').innerHTML = SEGS.slice(1).map(g=>`<i class="tk" style="left:${g.t/TOTAL*100}%"></i>`).join('');
+  $('#mks').innerHTML = CHANGED.map(k=>`<i class="mk" title="v2 改动" style="left:${(SEGS[k].t+2)/TOTAL*100}%"></i>`).join('');
+
+  // 版本分段控件：指示器像液滴一样滑过去（移动中横向拉伸）
+  function moveInd(animate){
+    const b = $(`.st[data-v="${ver}"]`), ind = $('#ind');
+    const from = {l: ind.offsetLeft, w: ind.offsetWidth};
+    ind.style.left = b.offsetLeft+'px'; ind.style.width = b.offsetWidth+'px';
+    if (animate && from.w){
+      const dx = from.l - b.offsetLeft;
+      ind.animate([{transform:`translateX(${dx}px) scaleX(${from.w/b.offsetWidth})`},{transform:`translateX(${dx*.4}px) scaleX(1.25) scaleY(.88)`,offset:.45},{transform:'none'}],
+        {duration:520, easing:'cubic-bezier(.34,1.36,.64,1)'});
+    }
+  }
+  function setVer(v){
+    if (v===ver && !compare) return;
+    ver = v;
+    $$('.st').forEach(b=>{const on=+b.dataset.v===v; b.classList.toggle('on',on); b.setAttribute('aria-selected',on)});
+    moveInd(true);
+    if (compare) setCompare(false);
+    const scr = plA.querySelector('.scr');
+    scr.animate([{filter:'blur(10px) brightness(1.15)',transform:'scale(.985)'},{filter:'none',transform:'none'}],{duration:520,easing:'cubic-bezier(.22,1,.36,1)'});
+    paint();
+  }
+  function setCompare(on){
+    compare = on;
+    $('#cmp').setAttribute('aria-pressed', on);
+    $('#theater').classList.toggle('compare', on);
+    if (on && ver!==2){ ver = 2; $$('.st').forEach(b=>b.classList.toggle('on', +b.dataset.v===2)); moveInd(true); }
+    paint();
+  }
+  $('#seg').addEventListener('click', e=>{const b=e.target.closest('.st'); if(b && !b.disabled) setVer(+b.dataset.v)});
+  $('#cmp').addEventListener('click', ()=>setCompare(!compare));
+
+  // 播放（对比时两路共用一个时钟 → 同步）
+  let last=0;
+  function loop(now){ if(!playing) return; time += Math.min(.1,(now-last)/1000); last=now;
+    if (time>=TOTAL){ time=TOTAL; setPlay(false); } paint(); requestAnimationFrame(loop); }
+  const PLAY = '<path d="M4 2.2v11.6c0 .6.6.9 1.1.6l9.2-5.8c.5-.3.5-.9 0-1.2L5.1 1.6C4.6 1.3 4 1.6 4 2.2z" fill="currentColor"/>';
+  const PAUSE = '<rect x="3.5" y="2" width="3.2" height="12" rx="1" fill="currentColor"/><rect x="9.3" y="2" width="3.2" height="12" rx="1" fill="currentColor"/>';
+  function setPlay(v){
+    playing = v; $('#play').setAttribute('aria-label', v?'暂停':'播放'); $('#pico').innerHTML = v ? PAUSE : PLAY;
+    if (v){ if(time>=TOTAL) time=0; last=performance.now(); requestAnimationFrame(loop); }
+    else addTag(time, null, true);                  // 暂停 → 自动引用这一刻
+  }
+  $('#play').addEventListener('click', ()=>setPlay(!playing));
+  $('#track').addEventListener('click', e=>{const r=e.currentTarget.getBoundingClientRect(); time=Math.max(0,Math.min(TOTAL,(e.clientX-r.left)/r.width*TOTAL)); paint();});
+
+  // ---------- @时间引用：点画面 → 标签从点击处飞进输入框 ----------
+  const tags = $('#tags');
+  function addTag(t, from, quiet){
+    const g = SEGS[segAt(t)], key = fmt(t)+g.n;
+    if (tags.querySelector(`[data-key="${key}"]`)) return;
+    if (tags.children.length >= 3) tags.firstElementChild.remove();
+    const el = document.createElement('span'); el.className='ref'; el.dataset.key=key;
+    el.innerHTML = `<img src="${src(g.f)}" alt=""><span class="mono">@${fmt(t)}</span>${g.n}<button aria-label="移除引用"><svg width="9" height="9" viewBox="0 0 8 8"><path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>`;
+    tags.appendChild(el);
+    if (from){
+      const to = el.getBoundingClientRect(), gh = el.cloneNode(true);
+      gh.style.cssText = `position:fixed;left:${to.left}px;top:${to.top}px;z-index:50;margin:0;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.25);background:var(--card)`;
+      document.body.appendChild(gh); el.style.opacity = 0;
+      const dx = from.x-to.left-to.width/2, dy = from.y-to.top-to.height/2;
+      gh.animate([{transform:`translate(${dx}px,${dy}px) scale(.5)`,opacity:0,filter:'blur(6px)'},
+                  {transform:`translate(${dx*.45}px,${dy*.45-50}px) scale(1.1)`,opacity:1,filter:'blur(0)',offset:.5},
+                  {transform:'none',opacity:1}],{duration:650,easing:'cubic-bezier(.22,1,.36,1)'})
+        .onfinish = ()=>{ gh.remove(); el.style.opacity=''; el.animate([{transform:'scale(1.12)'},{transform:'none'}],{duration:380,easing:'cubic-bezier(.34,1.56,.64,1)'}); };
+    }
+    if (!quiet) $('#ta').focus({preventScroll:true});
+  }
+  tags.addEventListener('click', e=>{const b=e.target.closest('button'); if(b){const r=b.closest('.ref'); r.animate([{opacity:1},{opacity:0,transform:'scale(.7)',filter:'blur(4px)'}],{duration:200}).onfinish=()=>r.remove();}});
+  $$('.scr').forEach(s=>s.addEventListener('click', e=>{
+    const r = s.getBoundingClientRect(), rp = document.createElement('span');
+    rp.className='ripple'; rp.style.left=(e.clientX-r.left)+'px'; rp.style.top=(e.clientY-r.top)+'px'; s.appendChild(rp); setTimeout(()=>rp.remove(),700);
+    if (playing){ playing=false; $('#pico').innerHTML=PLAY; $('#play').setAttribute('aria-label','播放'); }
+    addTag(time, {x:e.clientX, y:e.clientY});
+  }));
+
+  // ---------- 导出菜单：从触发按钮的位置弹出 ----------
+  const menu = $('#menu');
+  document.addEventListener('click', e=>{
+    const b = e.target.closest('[data-exp]');
+    if (b){ e.stopPropagation(); const r=b.getBoundingClientRect(), up = r.bottom + 140 > innerHeight;
+      const left = Math.max(12, Math.min(innerWidth-262, r.left + r.width/2 - 125));
+      menu.style.left = left+'px'; menu.style.top = (up ? r.top - 128 : r.bottom + 8)+'px';
+      menu.style.transformOrigin = `${r.left + r.width/2 - left}px ${up ? '100%' : '0'}`;
+      window.__lens(menu); menu.classList.toggle('show'); return; }
+    if (e.target.closest('#menu button')){ menu.classList.remove('show'); toast(`已加入导出队列 · v${ver}`); return; }
+    if (!e.target.closest('#menu')) menu.classList.remove('show');
+  });
+
+  // ---------- 对话里的交互 ----------
+  $('#flow').addEventListener('click', e=>{
+    const s = e.target.closest('[data-show]'); if (s){ setVer(+s.dataset.show); return; }
+    if (e.target.closest('[data-cmp]')){ setCompare(true); return; }
+    const o = e.target.closest('.opt');
+    if (o){ $$('.opt').forEach(x=>{const on=x===o; x.classList.toggle('on',on); x.setAttribute('aria-checked',on)});
+      $('#picked').textContent = `已选「${o.querySelector('.lab b').textContent}」· 只重渲 2 段，约 ¥0.16`; return; }
+    const ch = e.target.closest('.chev');
+    if (ch){ const c = ch.closest('.card'); const open = c.classList.toggle('open'); ch.setAttribute('aria-expanded', open); }
+  });
+  // 10 个背景预设（只有「书房」是真实拍摄环境，其余为色调块），「夜景落地窗」选中
+  const BG = ['url(assets/speaker_bottom.jpg) 0 0/300% auto','linear-gradient(160deg,#e3ddd3,#b4ab9e)','linear-gradient(160deg,#c48b5c,#5a3b28)',
+    'radial-gradient(circle at 70% 30%,#8ea0e0 0 1.5px,transparent 2.5px),radial-gradient(circle at 30% 55%,#e9c37a 0 1.5px,transparent 2.5px),linear-gradient(170deg,#1a2550,#080c1c)',
+    'linear-gradient(160deg,#25303d,#0c0f14)','linear-gradient(160deg,#d8c69e,#8a744c)','linear-gradient(160deg,#c9d7ae,#55704a)','linear-gradient(160deg,#f1f0ec,#c9c7c0)',
+    'radial-gradient(circle at 50% 35%,#6a6e78,#2a2c32)','linear-gradient(175deg,#f0a868,#a86a6c 55%,#4a3d63)'];
+  const BGN = ['书房','极简工作室','咖啡馆','夜景落地窗','科技暗色','日式和室','绿植阳台','白墙极简','演播室灰幕','黄昏天台'];
+  $('#bgs').innerHTML = BG.map((b,i)=>`<i class="${i===3?'on':''}" style="background:${b}" title="${BGN[i]}"></i>`).join('');
+  let pct = 62; setInterval(()=>{ if (pct<69){ pct+=.25; const v=Math.floor(pct)+'%'; $('#pct').textContent=v; $('#v3pct').textContent=v; $('#progBar').style.width=pct+'%'; } }, 900);
+
+  const thumb = g=>`background-image:url(${src(g.f)})${g.f<0?';background-position:50% 30%':''}`;
+  $('#strip').innerHTML = SEGS.map(g=>`<i style="${thumb(g)}"></i>`).join('');
+
+  // ---------- 重播剪辑过程 ----------
+  const TX = [
+    ['00:00', [['吃抗氧化补剂的人，'],['呃，','breath'],['死亡率反而更高一些']]],
+    ['00:04', [['买双色球，'],['就是说，','breath'],['每投 1 块钱，长期平均只能拿回五毛一']]],
+    ['00:13', [['然后呢，嗯，','breath'],['我平时经常在 GitHub 上面去逛 AI 项目']]],
+    ['00:17', [['有一个，有一个','slip'],['叫《高性价比人生指南》']]],
+    ['00:21', [['这个项目里面一共讲了 '],['六百，','slip'],['650 条']]],
+    ['00:40', [['然后我就很好奇地'],['那个，','breath'],['让 AI 帮我把它读了一遍']]],
+  ];
+  // 自检四维 → 四个同心圆环（像「健身记录」的圆环一样逐个闭合）
+  const DIMS = [['版式',9.1,'#ff375f'],['层级',8.8,'#ff9f0a'],['动效节奏',8.6,'#30d158'],['品牌一致性',9.3,'#0a84ff']];
+  function buildRings(){
+    $('#ringSvg').innerHTML = DIMS.map(([,v,c],i)=>{ const r = 46 - i*11, C = 2*Math.PI*r;
+      return `<circle cx="52" cy="52" r="${r}" fill="none" stroke="${c}" stroke-opacity=".18" stroke-width="8.5"/>
+              <circle class="arc" data-i="${i}" cx="52" cy="52" r="${r}" fill="none" stroke="${c}" stroke-width="8.5" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}" transform="rotate(-90 52 52)"/>`; }).join('');
+    $('#legend').innerHTML = DIMS.map(([n,,c])=>`<div><i style="background:${c}"></i><span>${n}</span><b>0.0</b></div>`).join('');
+  }
+  // 数字滚动（类 numericText 过渡）
+  function roll(el, text){ if (el.textContent === text) return; el.textContent = text;
+    el.animate([{transform:'translateY(45%)',opacity:.2,filter:'blur(2px)'},{transform:'none',opacity:1,filter:'none'}],{duration:260,easing:'cubic-bezier(.22,1,.36,1)'}); }
+  function countTo(el, from, to, ms, f){ const t0=performance.now();
+    return new Promise(res=>{(function s(n){const k=Math.min(1,(n-t0)/ms),e=1-Math.pow(1-k,3); el.textContent=f(from+(to-from)*e); k<1?requestAnimationFrame(s):res()})(t0)}); }
+  const mmss = v=>`${Math.floor(v/60)}:${String(Math.round(v%60)).padStart(2,'0')}`;
+  let run = 0;
+  async function replay(){
+    const id = ++run, alive = ()=>id===run;
+    const live = $('#live'), rp = $('#rp');
+    $('#liveSum').hidden = true; rp.hidden = false; live.classList.add('on');
+    live.scrollIntoView({block:'start', behavior:'smooth'});
+    const tx = $('#tx'), sb = $('#sb'), fin = $('#fin');
+    tx.innerHTML = TX.map(([tc,parts])=>`<li><span class="tc">${tc}</span><span>${parts.map(([s,k])=>k?`<span class="cut ${k}" style="max-width:${s.length*16+8}px">${s}</span>`:s).join('')}</span></li>`).join('');
+    sb.innerHTML = SEGS.map(g=>`<i style="${thumb(g)}"></i>`).join('');
+    buildRings(); fin.classList.remove('in'); fin.firstElementChild.className='';
+    $('#cB').textContent='0'; $('#cS').textContent='0'; $('#cD').textContent='3:42'; $('#durBar').style.width='100%';
+    await wait(500);
+    // A：文字稿逐行凝结出现；气口/口误先高亮 → 划线 → 收拢，后文自然合拢
+    const lines = [...tx.children], total = tx.querySelectorAll('.cut').length; let n = 0;
+    for (const li of lines){
+      if (!alive()) return;
+      li.classList.add('in'); await wait(300);
+      for (const c of li.querySelectorAll('.cut')){
+        c.classList.add('hl'); await wait(260);
+        c.classList.add('struck'); await wait(320);
+        c.classList.add('gone'); n++;
+        roll($('#cB'), String(Math.round(37*n/total))); roll($('#cS'), String(Math.round(12*n/total)));
+        const d0 = 222-(105)*(n-1)/total, d1 = 222-105*n/total;
+        countTo($('#cD'), d0, d1, 420, mmss); $('#durBar').style.width = (d1/222*100)+'%';
+        await wait(140);
+      }
+    }
+    if (!alive()) return;
+    await wait(200);
+    // B：18 张分镜依次落位
+    for (const i of sb.children){ if(!alive()) return; i.classList.add('in'); await wait(65); }
+    await wait(250);
+    // C：四个圆环逐个闭合，分数滚动
+    const leg = [...$('#legend').children];
+    for (let i=0;i<4;i++){
+      if (!alive()) return;
+      const arc = $(`#ringSvg .arc[data-i="${i}"]`), C = +arc.getAttribute('stroke-dasharray');
+      arc.style.strokeDashoffset = C*(1-DIMS[i][1]/10);
+      leg[i].classList.add('in'); countTo(leg[i].querySelector('b'), 0, DIMS[i][1], 900, v=>v.toFixed(1));
+      await wait(280);
+    }
+    await wait(700);
+    // D：结论 + 掠光；AI 光晕退场
+    fin.classList.add('in'); fin.firstElementChild.className='shimmer';
+    await wait(900); live.classList.remove('on');
+  }
+  $('#replayBtn').addEventListener('click', replay);
+
+  // ---------- 发送（假回复，流式） ----------
+  async function send(text){
+    text = (text||'').trim(); const refs = [...tags.children];
+    if (!text && !refs.length){ $('#ta').focus(); toast('先说一句要改什么'); return; }
+    const flow = $('#flow');
+    const me = document.createElement('div'); me.className='me';
+    me.innerHTML = refs.map(r=>{const c=r.cloneNode(true); c.querySelector('button')?.remove(); return c.outerHTML}).join('') + text.replace(/[<&]/g, ch=>ch==='<'?'&lt;':'&amp;');
+    flow.appendChild(me);
+    me.animate([{opacity:0,transform:'translateY(14px) scale(.96)',transformOrigin:'100% 100%'},{opacity:1,transform:'none'}],{duration:480,easing:'cubic-bezier(.34,1.36,.64,1)'});
+    tags.innerHTML=''; $('#ta').value='';
+    flow.scrollTo({top:flow.scrollHeight,behavior:'smooth'});
+    const ai = document.createElement('div'); ai.className='ai';
+    ai.innerHTML = `<span class="av"><b>明</b></span><div><p class="typing"></p></div>`;
+    await wait(450); flow.appendChild(ai); flow.scrollTo({top:flow.scrollHeight,behavior:'smooth'});
+    const p = ai.querySelector('p');
+    const where = refs.length ? refs.map(r=>r.querySelector('.mono').textContent).join('、') : '相关段落';
+    const reply = `收到。只改 ${where}，其余段落保持 v2 不动；等夜景落地窗这一轮完成后接着做，预计约 ¥0.08。`;
+    for (let i=1;i<=reply.length;i++){ p.textContent = reply.slice(0,i); await wait(20); }
+    p.classList.remove('typing'); flow.scrollTo({top:flow.scrollHeight,behavior:'smooth'});
+  }
+  $('#send').addEventListener('click', ()=>send($('#ta').value));
+  $('#ta').addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey && !e.isComposing){ e.preventDefault(); send($('#ta').value);} });
+  $('#chips').addEventListener('click', e=>{const c=e.target.closest('.chip'); if(c && !('exp' in c.dataset)){ $('#ta').value=c.textContent; $('#ta').focus(); }});
+
+  // ---------- 玻璃高光跟随指针（只更新指针附近的玻璃） ----------
+  document.addEventListener('pointermove', e=>{
+    for (const g of document.querySelectorAll('.lg')){ const r=g.getBoundingClientRect();
+      if (e.clientX < r.left-200 || e.clientX > r.right+200 || e.clientY < r.top-200 || e.clientY > r.bottom+200) continue;
+      g.style.setProperty('--mx',(e.clientX-r.left)+'px'); g.style.setProperty('--my',(e.clientY-r.top)+'px'); }
+  }, {passive:true});
+
+  // 初始：v2 暂停在 00:04（¥0.51 已放大），输入框里已有一枚引用
+  addEventListener('resize', ()=>moveInd(false));
+  moveInd(false); paint(); addTag(4, null, true);
+  const flow = $('#flow'); flow.scrollTop = flow.scrollHeight;
+  window.__ui = {replay, setCompare, setVer};
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明知AI剪辑 · 第 2 期</title>
+<!--
+  方向 B · 日式便当网格编辑风
+  设计哲学：杉浦康平（Kohei Sugiura）的「编辑设计」——
+    1) 把时间画成图（他的「时间地图」）：原片 3:42 → 成片 1:57 的压缩，用折线图式的连线直接画出来；
+    2) 目次即结构：一条成片 = 一本杂志「第 2 期」，18 段 = 18 篇，时间码 = 页码；
+    3) 朱色只属于「朱笔」：校对删改、印章、当前选中。黑 + 朱，其余全是纸。
+  字体：标题 Noto Serif SC 900（思源宋体 Heavy），正文 Noto Sans SC；字幕预设加载真实中文字体。
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+SC:wght@600;700;900&family=Instrument+Serif:ital@0;1&family=ZCOOL+KuaiLe&family=ZCOOL+QingKe+HuangYou&display=swap" rel="stylesheet">
+<!-- 霞鹜文楷（屏幕阅读版）与 得意黑：固定版本 CDN -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-screen-webfont@1.7.0/lxgwwenkaiscreen.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@chinese-fonts/dyh@2.0.1/dist/SmileySans-Oblique/result.css">
+<style>
+/* ========== 色彩与尺度：纸、墨、朱 ========== */
+:root{
+  --paper:#ECE7DC;      /* 页面底：略深的纸 */
+  --sheet:#F8F5EE;      /* 格子：便当的隔间 */
+  --sheet-2:#EFEADF;    /* 选中/悬停的隔间 */
+  --ink:#1A1916;        /* 墨 */
+  --ink-2:#4A463F;      /* 次级文字 7.7:1 */
+  --ink-3:#6B655B;      /* 三级文字，只用于 --sheet 上 5.3:1 */
+  --rule:rgba(26,25,22,.14);
+  --rule-2:rgba(26,25,22,.28);
+  --shu:#C8361B;        /* 朱：大字、印章、标记 */
+  --shu-text:#B8311A;   /* 朱：小字（5.5:1） */
+  --shu-on-ink:#F06A4C; /* 墨底上的朱 5.7:1 */
+  --lime:#D4FF3A;       /* 用户钩子卡里的荧光黄绿，只出现在成片内容里 */
+  --gap:10px;
+  --ease:cubic-bezier(.2,.7,.2,1);
+  --serif:"Noto Serif SC","Songti SC",serif;
+  --sans:"Noto Sans SC","PingFang SC",sans-serif;
+  --latin:"Instrument Serif","Noto Serif SC",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background-color:var(--paper);
+  /* 纸感：极淡的噪点，SVG 内联 */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .1 0 0 0 0 .09 0 0 0 0 .08 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--shu);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+.app{height:100vh;min-height:860px;display:flex;flex-direction:column;padding:0 20px 18px}
+
+/* ========== 刊头：子持ち罫（粗+细双线）收底 ========== */
+.mast{height:60px;flex:none;display:flex;align-items:center;gap:22px;position:relative}
+.mast::after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;border-top:3px solid var(--ink);border-bottom:1px solid var(--ink)}
+.mast::before{content:"";position:absolute;left:0;right:0;bottom:4px;height:1px}
+/* 字标：明知（重宋）+ AI（拉丁意大利体，朱）+ 剪辑（轻黑体，宽字距） */
+.mark{display:flex;align-items:baseline;gap:0;white-space:nowrap;text-decoration:none;color:inherit}
+.mark .mz{font-family:var(--serif);font-weight:900;font-size:26px;letter-spacing:.04em;line-height:1}
+.mark .ai{font-family:var(--latin);font-style:italic;font-size:28px;color:var(--shu);margin:0 5px 0 3px;line-height:1;letter-spacing:-.01em}
+.mark .jj{font-family:var(--serif);font-weight:600;font-size:17px;letter-spacing:.1em;line-height:1;color:var(--ink-2)}
+.mark .lat{font-family:var(--latin);font-size:13px;color:var(--ink-2);margin-left:6px;letter-spacing:.06em;align-self:center;border-left:1px solid var(--rule-2);padding-left:10px}
+.issue{display:flex;align-items:baseline;gap:10px;white-space:nowrap}
+.issue .no{font-family:var(--latin);font-style:italic;font-size:17px;color:var(--ink-2)}
+.issue .ttl{font-family:var(--serif);font-weight:900;font-size:19px;letter-spacing:.02em}
+.issue .st{font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--shu-text);display:flex;align-items:center;gap:6px}
+.issue .st::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--shu)}
+.mast .sp{flex:1}
+.meta{font-size:12px;color:var(--ink-2);letter-spacing:.04em;white-space:nowrap}
+.bal{display:flex;align-items:baseline;gap:8px;white-space:nowrap;padding:6px 0}
+.bal .k{font-size:12px;color:var(--ink-2);letter-spacing:.08em}
+.bal .v{font-family:var(--serif);font-weight:900;font-size:17px}
+.bal a{font-size:12px;color:var(--shu-text);text-decoration:none;border-bottom:1px solid currentColor}
+.icon-btn{display:flex;align-items:center;gap:6px;font-size:13px;padding:6px 10px;border:1px solid var(--rule-2);border-radius:2px;transition:background .2s var(--ease),border-color .2s}
+.icon-btn:hover{background:var(--sheet);border-color:var(--ink)}
+.icon-btn svg{transition:transform .5s var(--ease)}
+.icon-btn:hover svg{transform:rotate(60deg)}
+
+/* ========== 便当：三栏网格 ========== */
+.bento{flex:1;min-height:0;margin-top:12px;display:grid;gap:var(--gap);
+  grid-template-columns:318px 520px 1fr;grid-template-rows:200px minmax(0,1fr);
+  grid-template-areas:"play hero hero" "play toc side"}
+.cell{background:var(--sheet);border-radius:3px;position:relative;min-width:0;min-height:0;
+  opacity:0;transform:translateY(6px);animation:rise .6s var(--ease) forwards;animation-delay:calc(var(--d,0) * 70ms)}
+@keyframes rise{to{opacity:1;transform:none}}
+/* 格子页眉：编号（拉丁意大利体，朱）+ 标题 + 说明 */
+.hd{display:flex;align-items:baseline;gap:10px;padding:11px 16px 8px;border-bottom:1px solid var(--rule);white-space:nowrap}
+.hd .n{font-family:var(--latin);font-style:italic;font-size:16px;color:var(--shu-text);line-height:1}
+.hd h2{margin:0;font-family:var(--serif);font-weight:900;font-size:15px;letter-spacing:.08em;line-height:1}
+.hd .s{font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis}
+.hd .r{margin-left:auto;display:flex;gap:14px}
+.tl{font-size:12px;color:var(--ink-2);position:relative;padding-bottom:1px}
+.tl::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:currentColor;transform:scaleX(0);transform-origin:right;transition:transform .3s var(--ease)}
+.tl:hover{color:var(--ink)}
+.tl:hover::after{transform:scaleX(1);transform-origin:left}
+
+/* ========== 01 播放器栏 ========== */
+.playcol{grid-area:play;display:flex;flex-direction:column;gap:var(--gap);min-height:0}
+.player{flex:none;padding:0;overflow:hidden}
+.screen{position:relative;width:100%;aspect-ratio:9/16;background:#111;overflow:hidden;container-type:inline-size;border-radius:3px 3px 0 0}
+.layer{position:absolute;inset:0}
+.layer img.full{width:100%;height:100%;object-fit:cover;display:block}
+.layer .top{position:absolute;left:0;right:0;top:0;height:50%;container-type:size}
+.layer .bot{position:absolute;left:0;right:0;bottom:0;height:50%;background:url(assets/speaker_bottom.jpg) center/cover}
+.layer .portrait{position:absolute;inset:0;background:url(assets/speaker_bottom.jpg) 50% 20%/auto 100%}
+.burn{position:absolute;left:8%;right:8%;top:44.5%;text-align:center;text-wrap:balance;font-size:5.6cqw;line-height:1.3;color:#fff;font-weight:900;pointer-events:none}
+.badge{position:absolute;left:10px;bottom:10px;font-size:12px;color:#fff;background:rgba(17,17,17,.62);padding:2px 8px;border-radius:2px;letter-spacing:.04em;backdrop-filter:blur(4px)}
+.ctrl{padding:10px 14px 12px}
+.prog{position:relative;height:16px;cursor:pointer}
+.prog .trk{position:absolute;left:0;right:0;top:7px;height:2px;background:var(--rule-2)}
+.prog .fill{position:absolute;left:0;top:7px;height:2px;background:var(--ink);width:0}
+.prog .tick{position:absolute;top:4px;width:1px;height:8px;background:var(--ink-3)}
+.prog .head{position:absolute;top:3px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--shu);transition:transform .2s var(--ease)}
+.prog:hover .head{transform:scale(1.3)}
+.crow{display:flex;align-items:center;gap:12px;margin-top:6px}
+.pbtn{width:32px;height:32px;border-radius:50%;background:var(--ink);color:var(--sheet);display:grid;place-items:center;flex:none;transition:transform .2s var(--ease),background .2s}
+.pbtn:hover{transform:scale(1.08);background:var(--shu)}
+.pbtn:active{transform:scale(.94)}
+.tc{font-family:var(--serif);font-weight:700;font-size:14px}
+.tc em{font-style:normal;color:var(--ink-3);font-weight:600}
+.cur{margin-left:auto;font-size:12px;color:var(--ink-2);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 出厂格：墨底，花费 + 导出 */
+.ship{flex:1;background:var(--ink);color:#F1EDE4;padding:14px 16px 16px;display:flex;flex-direction:column;min-height:0}
+.ship .k{font-size:12px;color:#A8A196;letter-spacing:.1em;display:flex;justify-content:space-between}
+.ship .price{display:flex;align-items:baseline;gap:8px;margin-top:2px}
+.ship .price b{font-family:var(--serif);font-weight:900;font-size:30px;line-height:1.1}
+.ship .price span{font-size:14px;color:#A8A196}
+.stack{display:flex;height:6px;margin-top:8px;background:#3A3833;border-radius:1px;overflow:visible}
+.stack i{display:block;height:100%;position:relative;transition:filter .2s,transform .2s var(--ease);transform-origin:bottom}
+.stack i:hover{transform:scaleY(1.9)}
+.stack i + i{box-shadow:-1px 0 0 var(--ink)}
+.ship .legend{font-size:12px;color:#A8A196;margin-top:5px;min-height:18px}
+.ship .btns{margin-top:auto;display:grid;grid-template-columns:1.35fr 1fr;gap:8px}
+.xbtn{display:flex;flex-direction:column;align-items:flex-start;padding:6px 12px;border-radius:2px;text-align:left;transition:transform .2s var(--ease),background .2s,border-color .2s}
+.xbtn b{font-size:14px;font-weight:700;letter-spacing:.04em}
+.xbtn small{font-size:12px;opacity:.86}
+.xbtn.pri{background:var(--shu);color:#fff}
+.xbtn.pri:hover{background:#B02E16;transform:translateY(-1px)}
+.xbtn.sec{border:1px solid #6E685E;color:#F1EDE4}
+.xbtn.sec:hover{border-color:#F1EDE4;transform:translateY(-1px)}
+
+/* ========== 卷首：时间地图 ========== */
+.hero{grid-area:hero;display:grid;grid-template-columns:372px 1fr;padding:14px 22px 10px 22px;gap:26px;overflow:hidden}
+.hero .kick{font-size:12px;letter-spacing:.14em;color:var(--ink-2);display:flex;gap:10px}
+.hero .kick i{font-family:var(--latin);font-size:15px;letter-spacing:.02em;color:var(--shu-text)}
+.dur{display:flex;align-items:flex-end;gap:12px;margin-top:6px;position:relative}
+.dur .was{font-family:var(--serif);font-weight:700;font-size:40px;color:var(--ink-3);position:relative;line-height:1;padding-bottom:12px}
+/* 朱笔删除线：一笔划过原片时长 */
+.dur .was::after{content:"";position:absolute;left:-4px;right:-4px;top:38%;height:3px;background:var(--shu);transform:rotate(-8deg) scaleX(0);transform-origin:left;animation:strike .5s .5s var(--ease) forwards}
+@keyframes strike{to{transform:rotate(-8deg) scaleX(1)}}
+.dur .arr{font-size:20px;color:var(--ink-3);padding-bottom:18px}
+.dur .now{font-family:var(--serif);font-weight:900;font-size:92px;line-height:.86;letter-spacing:-.02em}
+.seal{position:absolute;left:306px;top:-6px;width:50px;height:50px;background:var(--shu);color:#fff;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  font-family:var(--serif);font-weight:900;font-size:17px;line-height:1.02;box-shadow:inset 0 0 0 2px var(--shu),inset 0 0 0 3.5px rgba(255,255,255,.85);
+  transform:rotate(-6deg) scale(1.6);opacity:0;filter:url(#rough);animation:stamp .35s 1.05s cubic-bezier(.3,1.6,.5,1) forwards;transition:transform .3s var(--ease)}
+.seal:hover{transform:rotate(2deg) scale(1.05)}
+@keyframes stamp{to{transform:rotate(-6deg) scale(1);opacity:.95}}
+.hero .sum{margin-top:12px;font-size:15px;color:var(--ink-2)}
+.hero .sum b{font-family:var(--serif);font-weight:900;color:var(--shu-text);font-size:18px;margin:0 2px}
+.map{display:flex;flex-direction:column;min-width:0}
+.map svg{display:block;width:100%;height:90px;overflow:visible}
+.map .lg{display:flex;gap:16px;font-size:12px;color:var(--ink-3);margin-bottom:4px;align-items:center}
+.map .lg i{display:inline-block;width:8px;height:10px;background:var(--shu);margin-right:5px;vertical-align:-1px}
+.map .lg i.t{width:3px}
+.seg-r{cursor:pointer;transition:fill .2s}
+.seg-r:hover{fill:#5a554c}
+.seg-r.on{fill:var(--shu)}
+.cut{transform-box:fill-box;transform-origin:center bottom;transform:scaleY(0);animation:cutin .3s var(--ease) forwards}
+@keyframes cutin{to{transform:scaleY(1)}}
+/* 工序：七步一线贯穿 */
+.steps{display:grid;grid-template-columns:repeat(7,1fr) auto;margin-top:6px;position:relative;border-top:1px solid var(--ink)}
+.step{padding:7px 8px 0 0;position:relative;white-space:nowrap}
+.step::before{content:"";position:absolute;left:0;top:-4px;width:7px;height:7px;border-radius:50%;background:var(--ink)}
+.step .a{font-size:13px;font-weight:700;display:block;margin-top:2px}
+.step .b{font-size:12px;color:var(--ink-3);font-family:var(--serif);font-weight:600}
+.step .b::before{content:"✓ ";color:var(--ink-2);font-family:var(--sans)}
+.step.tot{text-align:right;padding-right:0}
+.step.tot::before{display:none}
+.step.tot .a{font-family:var(--serif);font-weight:900;font-size:15px}
+.step.tot .b::before{content:none}
+
+/* ========== 02 目次 ========== */
+.toc{grid-area:toc;display:flex;flex-direction:column}
+.list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:var(--rule-2) transparent}
+.row{border-bottom:1px solid var(--rule);position:relative}
+.rbtn{display:grid;grid-template-columns:56px 58px 1fr 44px 46px;align-items:center;gap:0 12px;padding:7px 14px 7px 16px;width:100%;text-align:left;transition:background .2s var(--ease)}
+.row:hover .rbtn{background:#F3EFE6}
+.row.on .rbtn{background:var(--sheet-2)}
+.rbtn .t{font-family:var(--serif);font-weight:700;font-size:15px;position:relative;letter-spacing:.01em;transition:transform .25s var(--ease),color .2s}
+.row:hover .rbtn .t{transform:translateX(3px)}
+.row.on .rbtn .t{color:var(--shu-text)}
+.row.on .rbtn .t::before{content:"";position:absolute;left:-11px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--shu)}
+.thumb{display:block;container-type:size;width:58px;height:52px;border-radius:2px;overflow:hidden;position:relative;background:#ddd;transition:transform .25s var(--ease),box-shadow .25s}
+.row:hover .thumb{transform:translateY(-2px);box-shadow:0 6px 12px -6px rgba(26,25,22,.45)}
+.thumb .img{position:absolute;inset:0;background-size:100% auto;background-position:top center}
+.rbtn .txt{min-width:0}
+.rbtn .txt p{margin:0;font-size:14px;line-height:1.42;text-wrap:balance;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rbtn .txt span{font-size:12px;color:var(--ink-3);display:block;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rbtn .txt span em{font-style:normal;color:var(--shu-text)}
+.score{font-family:var(--serif);font-weight:900;font-size:17px;text-align:right;line-height:1}
+.score small{display:block;font-family:var(--sans);font-weight:500;font-size:12px;color:var(--ink-3);margin-top:3px}
+.redo-t{font-size:12px;color:var(--ink-2);padding:5px 0;border-radius:2px;text-align:center;border:1px solid var(--rule-2);transition:all .2s var(--ease)}
+.redo-t:hover,.row.open .redo-t{border-color:var(--ink);background:var(--ink);color:var(--sheet)}
+/* 一句话重做：展开区 */
+.redo{display:grid;grid-template-rows:0fr;transition:grid-template-rows .32s var(--ease)}
+.row.open .redo{grid-template-rows:1fr}
+.redo > div{overflow:hidden}
+.redo .in{padding:0 14px 12px 154px}
+.redo label{font-size:12px;color:var(--ink-3);display:flex;justify-content:space-between;margin-bottom:2px}
+.redo .f{display:flex;gap:10px;align-items:center}
+.redo input{flex:1;font:inherit;font-size:14px;background:transparent;border:0;border-bottom:1.5px solid var(--ink);padding:6px 0;color:var(--ink);outline:none}
+.redo input::placeholder{color:var(--ink-3)}
+.redo .go{font-size:13px;font-weight:700;background:var(--shu);color:#fff;padding:6px 12px;border-radius:2px;white-space:nowrap;transition:background .2s}
+.redo .go:hover{background:#B02E16}
+.redo .chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center}
+.redo .chip{font-size:12px;padding:2px 8px;border:1px solid var(--rule-2);border-radius:20px;color:var(--ink-2);transition:all .2s}
+.redo .chip:hover{border-color:var(--ink);color:var(--ink)}
+.redo .bar{height:2px;background:var(--shu);margin-top:8px;transform:scaleX(0);transform-origin:left}
+.row.busy .redo .bar{animation:busy 1.6s linear forwards}
+@keyframes busy{to{transform:scaleX(1)}}
+.row.flash .score{animation:flash 1s var(--ease)}
+@keyframes flash{0%{color:var(--shu)}100%{color:var(--ink)}}
+
+/* ========== 右栏：背景 / 字幕 / 自检 ========== */
+.side{grid-area:side;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:var(--gap);min-height:0}
+.side > .cell{display:flex;flex-direction:column}
+.bgs{display:grid;grid-template-columns:repeat(5,1fr);gap:8px 8px;padding:9px 16px 10px}
+.bg{text-align:left;position:relative}
+.bg .sw{display:block;height:30px;border-radius:2px;position:relative;overflow:hidden;box-shadow:0 0 0 1px var(--rule)}
+.bg .sw::after{content:"";position:absolute;inset:0;background:inherit;transition:transform .45s var(--ease)}
+.bg .sw.photo::after{background:url(assets/speaker_bottom.jpg) 4% 30%/240% auto}
+.bg:hover .sw::after{transform:scale(1.08)}
+.bg .nm{display:block;font-size:12px;font-weight:700;margin-top:3px;white-space:nowrap;line-height:1.3}
+.bg .tg{display:block;font-size:12px;color:var(--ink-3);line-height:1.3}
+.bg.on .sw{box-shadow:0 0 0 2px var(--shu)}
+.bg.on .nm{color:var(--shu-text)}
+.bg.on .sw::before{content:"";position:absolute;right:4px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--shu);z-index:2;box-shadow:0 0 0 2px #fff}
+.subs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 8px;padding:9px 16px 10px}
+.sub{text-align:left}
+.sub .pv{height:44px;border-radius:2px;position:relative;overflow:hidden;display:grid;place-items:center;
+  background:linear-gradient(rgba(20,18,15,.42),rgba(20,18,15,.42)),url(assets/speaker_bottom.jpg) 50% 92%/170% auto;box-shadow:0 0 0 1px var(--rule)}
+.sub .pv .ph{font-size:19px;white-space:nowrap;line-height:1}
+.sub .pv .ph span{display:inline-block}
+.sub .nm{display:flex;justify-content:space-between;font-size:12px;margin-top:4px;white-space:nowrap}
+.sub .nm b{font-weight:700}
+.sub .nm em{font-style:normal;color:var(--ink-3)}
+.sub.on .pv{box-shadow:0 0 0 2px var(--shu)}
+.sub.on .nm b{color:var(--shu-text)}
+
+/* 六套字幕预设：字体 + 描边 + 高亮色 + 逐字动效 */
+.st-hei{font-family:"Noto Sans SC";font-weight:900;color:#fff;-webkit-text-stroke:4px #111;paint-order:stroke fill}
+.st-hei .hl{color:var(--lime)}
+.st-song{font-family:"Noto Serif SC";font-weight:900;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.6)}
+.st-song .hl{color:#FF7A5C}
+.st-dyh{font-family:"Smiley Sans Oblique","Noto Sans SC";color:#FFE14D;-webkit-text-stroke:4px #111;paint-order:stroke fill;font-size:1.12em}
+.st-dyh .hl{color:#fff}
+.st-wk{font-family:"LXGW WenKai Screen","Noto Serif SC";color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.7)}
+.st-wk .hl{box-shadow:inset 0 -.28em 0 rgba(200,54,27,.85)}
+.st-kl{font-family:"ZCOOL KuaiLe";color:#fff;-webkit-text-stroke:5px #E8452C;paint-order:stroke fill}
+.st-kl .hl{color:#FFF1A8}
+.st-hy{font-family:"ZCOOL QingKe HuangYou";color:#fff;-webkit-text-stroke:4px #111;paint-order:stroke fill;font-size:1.08em}
+.st-hy .hl{color:#111;-webkit-text-stroke:0;background:var(--lime);padding:0 .08em}
+/* 逐字动效：悬停或选中时重播，每字错开 45ms */
+.play span{animation-duration:.42s;animation-timing-function:var(--ease);animation-fill-mode:both;animation-delay:calc(var(--i) * 45ms)}
+.play.fx-pop span{animation-name:fxPop}
+.play.fx-rise span{animation-name:fxRise}
+.play.fx-dash span{animation-name:fxDash}
+.play.fx-type span{animation-name:fxType;animation-timing-function:steps(1,end)}
+.play.fx-bounce span{animation-name:fxBounce}
+.play.fx-zoom span.hl{animation-name:fxZoom}
+@keyframes fxPop{0%{transform:scale(.3);opacity:0}70%{transform:scale(1.18)}100%{transform:none;opacity:1}}
+@keyframes fxRise{0%{transform:translateY(.5em);opacity:0}100%{transform:none;opacity:1}}
+@keyframes fxDash{0%{transform:translateX(-.8em) skewX(-14deg);opacity:0}100%{transform:none;opacity:1}}
+@keyframes fxType{0%{opacity:0}100%{opacity:1}}
+@keyframes fxBounce{0%,100%{transform:none}40%{transform:translateY(-.32em)}}
+@keyframes fxZoom{0%,100%{transform:none}45%{transform:scale(1.32)}}
+
+.qc{display:grid;grid-template-columns:1.05fr 1fr;gap:20px;padding:8px 16px 8px;flex:1;min-height:0}
+.dim{display:grid;grid-template-columns:74px 1fr 34px;align-items:center;gap:10px;height:26px}
+.dim .l{font-size:13px;font-weight:500}
+.dim .tr{height:6px;background:#E3DDD0;position:relative}
+.dim .tr i{position:absolute;left:0;top:0;bottom:0;background:var(--ink);transform-origin:left;transform:scaleX(0);animation:grow .8s var(--ease) forwards;animation-delay:calc(.6s + var(--i) * 90ms)}
+@keyframes grow{to{transform:scaleX(1)}}
+.dim .tr::after{content:"";position:absolute;left:80%;top:-4px;bottom:-4px;width:2px;background:var(--shu)}
+.dim .v{font-family:var(--serif);font-weight:900;font-size:17px;text-align:right}
+.qc .note{font-size:12px;color:var(--ink-3);margin-top:4px}
+.qc .note b{color:var(--shu-text);font-weight:700}
+.chk{list-style:none;margin:0;padding:0}
+.chk li{display:grid;grid-template-columns:16px 1fr auto;gap:8px;align-items:center;font-size:13px;height:26px;border-bottom:1px dashed var(--rule)}
+.chk li:last-child{border-bottom:0}
+.chk li b{font-family:var(--serif);font-weight:700;font-size:13px}
+.chk svg{display:block}
+
+/* ========== 成片里的卡片复刻（无真帧的段落用 HTML 渲染，cqw 单位，缩略图与播放器共用） ========== */
+.ct{position:absolute;inset:0;overflow:hidden;container-type:size;font-family:"Noto Sans SC";color:#141414;line-height:1.2}
+.ct.warm{background:radial-gradient(120% 90% at 70% 30%,#F1EBE1 0%,#DCD2C2 70%,#CFC3AF 100%)}
+.ct .win{position:absolute;left:7cqw;right:7cqw;top:8cqw;background:#fff;border-radius:3cqw;box-shadow:0 1.5cqw 4cqw rgba(60,40,20,.16);padding:5cqw}
+.ct.hook{background:#0F0F0D;color:#fff;padding:8cqw 7cqw}
+.ct.hook .src{position:absolute;left:7cqw;top:6cqw;right:24cqw;background:var(--lime);color:#111;font-size:3.6cqw;font-weight:700;padding:1cqw 2cqw;border-radius:1cqw;white-space:nowrap;overflow:hidden}
+.ct.hook .vs{margin-top:5cqw;font-size:4.4cqw;color:#ddd}
+.ct.hook .vs i{display:block;height:4.4cqw;margin:1.2cqw 0 2.6cqw;background:#5A5A55;border-radius:.6cqw}
+.ct.hook .vs i.l{background:var(--lime)}
+.ct.hook .tag{position:absolute;top:6cqw;right:6cqw;font-size:4.4cqw;border:.5cqw solid rgba(255,255,255,.5);padding:.6cqw 2.4cqw;border-radius:9cqw}
+.ct.hook .k{font-size:5cqw;color:var(--lime);font-weight:700;margin-top:6cqw}
+.ct.hook .big{font-size:26cqw;font-weight:900;color:var(--lime);line-height:1;letter-spacing:-.02em;margin-top:2cqw}
+.ct.hook .t{font-size:11cqw;font-weight:900;line-height:1.18;margin-top:6cqw}
+.ct.hook .t .hl{color:var(--lime)}
+.ct .url{font-size:3.8cqw;color:#666;background:#F2F2F0;border-radius:9cqw;padding:1.4cqw 3cqw}
+.ct .h{font-size:7cqw;font-weight:900;margin-top:4cqw}
+.ct .ln{display:flex;justify-content:space-between;font-size:4cqw;padding:2.4cqw 0;border-bottom:.3cqw solid #eee}
+.ct .ln b{font-weight:700}
+.ct .ln i{font-style:normal;color:#888}
+.ct .six{font-size:28cqw;font-weight:900;letter-spacing:-.03em;line-height:1}
+.ct .six small{font-size:8cqw;margin-left:1cqw}
+.ct .dots{height:16cqw;margin-top:3cqw;background-image:radial-gradient(circle,#141414 .55cqw,transparent .65cqw);background-size:2.6cqw 2.6cqw}
+.ct .title{position:absolute;inset:0;display:grid;place-items:center;font-family:"Noto Serif SC";font-weight:900;font-size:11cqw;letter-spacing:.04em}
+.ct .title::after{content:"";position:absolute;left:30%;right:30%;top:62%;height:1cqw;background:#141414}
+.ct .win.term{background:#161616;color:#E8E6E1;font-family:ui-monospace,Menlo,monospace;font-size:4.2cqw;line-height:1.7}
+.ct .term .p{color:#E28B67}
+.ct .term .g{color:#8A8A85}
+.ct .term .y{color:var(--lime)}
+.ct .cmp .r{margin-top:4cqw;font-size:4.4cqw}
+.ct .cmp .r i{display:block;height:5cqw;margin-top:1.4cqw;border-radius:1cqw;background:#141414}
+.ct .cmp .r.a i{background:#E0482B}
+.ct .cmt{display:flex;gap:3cqw;align-items:center;margin-top:4cqw}
+.ct .cmt .av{width:9cqw;height:9cqw;border-radius:50%;background:#D8CCBA;flex:none}
+.ct .cmt .bx{flex:1;border:.4cqw solid #ddd;border-radius:9cqw;padding:2cqw 3.5cqw;font-size:4.4cqw;color:#999}
+
+.toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,20px);opacity:0;background:var(--ink);color:#F1EDE4;font-size:13px;padding:10px 16px;border-radius:2px;transition:all .35s var(--ease);pointer-events:none;z-index:9}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<!-- 印章的粗糙边缘：轻微位移滤镜 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="1.6" numOctaves="1" seed="4"/><feDisplacementMap in="SourceGraphic" scale="1.6"/></filter></svg>
+
+<div class="app">
+  <!-- 刊头 -->
+  <header class="mast">
+    <a class="mark" href="#" aria-label="明知AI剪辑 Mingzhi">
+      <span class="mz">明知</span><span class="ai">AI</span><span class="jj">剪辑</span><span class="lat">Mingzhi</span>
+    </a>
+    <div class="issue">
+      <span class="no">No.02</span>
+      <span class="ttl">第 2 期 · 高性价比人生指南</span>
+      <span class="st">出片完成</span>
+    </div>
+    <span class="sp"></span>
+    <span class="meta">本机运行 · MIT</span>
+    <div class="bal"><span class="k">算力余额</span><span class="v num">¥36.27</span><a href="#" data-toast="充值页将在浏览器新标签打开">充值</a></div>
+    <button class="icon-btn" data-toast="设置：模型、字体、导出路径">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
+      设置
+    </button>
+  </header>
+
+  <main class="bento">
+    <!-- 01 成片预览 + 出厂 -->
+    <section class="playcol">
+      <div class="cell player" style="--d:0">
+        <div class="screen" id="screen"><span class="badge num" id="badge">01 / 18</span></div>
+        <div class="ctrl">
+          <div class="prog" id="prog"><div class="trk"></div><div class="fill" id="fill"></div><div class="head" id="head"></div></div>
+          <div class="crow">
+            <button class="pbtn" id="pbtn" aria-label="播放"><svg id="picon" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.2v9.6L10.5 6z"/></svg></button>
+            <span class="tc num" id="tc">00:00 <em>/ 01:57</em></span>
+            <span class="cur" id="cur">钩子卡 1/3</span>
+          </div>
+        </div>
+      </div>
+      <div class="cell ship" style="--d:5">
+        <div class="k"><span>本次花费</span><span>开跑前已确认</span></div>
+        <div class="price"><b class="num">¥3.84</b><span>/ 上限 ¥10</span></div>
+        <div class="stack" id="stack"></div>
+        <div class="legend" id="legend">悬停色段看明细 · 已用上限的 38%</div>
+        <div class="btns">
+          <button class="xbtn pri" data-toast="正在导出 MP4 · 1080×1920 · H.264"><b>导出 MP4</b><small class="num">1080×1920 · 1:57</small></button>
+          <button class="xbtn sec" data-toast="封面已导出：4:3 与 3:4 各一张"><b>导出封面</b><small>4:3 · 3:4</small></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 卷首：时间地图 -->
+    <section class="cell hero" style="--d:1">
+      <div>
+        <div class="kick"><i>No.02</i><span>一条口播 · 全自动出片</span></div>
+        <div class="dur">
+          <span class="was num">3:42</span><span class="arr">→</span><span class="now num">1:57</span>
+          <div class="seal" title="已通过自检，可发布"><span>出</span><span>片</span></div>
+        </div>
+        <div class="sum">删除 <b class="num">37</b> 处气口 · <b class="num">12</b> 处口误 · 切成 18 段</div>
+      </div>
+      <div class="map">
+        <div class="lg"><span><i class="t"></i>气口 37</span><span><i></i>口误 12</span><span style="margin-left:auto">上：原片 3:42　下：成片 1:57（同一比例尺，点色块跳转）</span></div>
+        <svg id="map" role="img" aria-label="原片到成片的时间压缩图"></svg>
+        <div class="steps" id="steps"></div>
+      </div>
+    </section>
+
+    <!-- 02 目次 -->
+    <section class="cell toc" style="--d:2">
+      <div class="hd"><span class="n">02</span><h2>目次</h2><span class="s">18 段 · 点段落切换预览 · 每段可一句话重做</span></div>
+      <ul class="list" id="list"></ul>
+    </section>
+
+    <!-- 右栏 -->
+    <section class="side">
+      <div class="cell" style="--d:3">
+        <div class="hd"><span class="n">03</span><h2>背景</h2><span class="s" id="bgNow">当前：书房 · 本地抠像</span>
+          <span class="r"><button class="tl" data-toast="选择一张图片作为背景">上传</button><button class="tl" data-toast="例如：傍晚的木质书房，暖光">一句话生成</button></span></div>
+        <div class="bgs" id="bgs"></div>
+      </div>
+      <div class="cell" style="--d:4">
+        <div class="hd"><span class="n">04</span><h2>字幕样式</h2><span class="s" id="subNow"></span></div>
+        <div class="subs" id="subs"></div>
+      </div>
+      <div class="cell" style="--d:5">
+        <div class="hd"><span class="n">05</span><h2>自检报告</h2><span class="s">视觉模型四维打分 · 硬性检查</span><span class="r"><span class="s" style="color:var(--shu-text)">全部通过</span></span></div>
+        <div class="qc">
+          <div>
+            <div id="dims"></div>
+            <div class="note">朱线 = 8 分重做线 · 本次自动重做 <b>2</b> 段</div>
+          </div>
+          <ul class="chk" id="chk"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 真实内容数据 ================= */
+// 每段：起始秒、字幕原文、卡片模板、真帧或 HTML 复刻卡、自检分
+const SEGS = [
+  {t:0,   text:'吃抗氧化补剂的人，死亡率反而更高一些', tpl:'钩子卡 1/3 · 大数字', frame:'frame_003', score:9.2},
+  {t:4,   text:'买双色球，每投 1 块钱，长期平均只能拿回五毛一', tpl:'钩子卡 2/3 · ¥0.51', card:'hook2', score:9.0},
+  {t:8,   text:'帮人收钱取现的兼职，挣几百块，换一份案底', tpl:'钩子卡 3/3', card:'hook3', score:8.8},
+  {t:13,  text:'我平时经常在 GitHub 上面去逛 AI 项目', tpl:'网页截图 B-roll', card:'web', score:8.6},
+  {t:17,  text:'叫《高性价比人生指南》', tpl:'网页截图', frame:'frame_022', score:9.1},
+  {t:21,  text:'这个项目里面一共讲了 650 条', tpl:'数字网格卡', card:'grid', score:9.4},
+  {t:26,  text:'怎么少花冤枉钱', tpl:'大字标题卡', card:'title', score:8.9},
+  {t:30,  text:'每一条信息都告诉你你会失去什么', tpl:'知识卡', frame:'frame_038', score:9.0},
+  {t:35,  text:'并且它每一条知识都是有证据来源的', tpl:'知识卡 · 证据等级 A', frame:'frame_047', score:9.3},
+  {t:40,  text:'然后我就很好奇地让 AI 帮我把它读了一遍', tpl:'Claude Code 终端卡', card:'term1', score:8.7},
+  {t:47,  text:'第一点呢，它就建议我少喝饮料', tpl:'终端卡', card:'term2', score:8.5},
+  {t:52,  text:'每天喝两瓶饮料以上的人', tpl:'AI 生图 B-roll', frame:'frame_062', score:8.8, redo:1},
+  {t:58,  text:'每天喝两杯代糖饮料以上的', tpl:'对比条卡', card:'compare', score:8.4, redo:1},
+  {t:65,  text:'从收入的角度来看，它还提醒我 / 但是要尽可能地减少无用的消费', tpl:'划线清单卡', frame:'frame_080', score:8.9},
+  {t:80,  text:'我们这些做 AI 的人呢，那轮到自己的身体和存款', tpl:'纯人像', card:'portrait', score:9.0},
+  {t:98,  text:'由于 GitHub 在国内可能不太方便打开', tpl:'加载动画卡', frame:'frame_101', score:8.6},
+  {t:105, text:'想要的朋友呢，就在评论区留言', tpl:'评论卡', card:'comment', score:8.8},
+  {t:112, text:'自己该如何更高性价比地生活', tpl:'三连 CTA', frame:'frame_114', score:9.5},
+];
+const END = 117, ORIG = 222; // 成片 1:57，原片 3:42
+const STEPS = [['识别',21],['剪口误',48],['换背景',134],['分镜',66],['B-roll',232],['渲染',277],['自检',78]];
+const BGS = [
+  {n:'书房', photo:true},
+  {n:'极简工作室', c:'linear-gradient(160deg,#EEEBE4,#CFC9BD)'},
+  {n:'咖啡馆', c:'linear-gradient(160deg,#A27B5C,#5E402D)'},
+  {n:'夜景落地窗', c:'radial-gradient(circle at 30% 40%,#F2C46B 0 1.5px,transparent 2px),radial-gradient(circle at 70% 60%,#E9E3C8 0 1.2px,transparent 2px),radial-gradient(circle at 52% 28%,#F2C46B 0 1px,transparent 1.6px),linear-gradient(180deg,#121A2B,#2C3B5A)'},
+  {n:'科技暗色', c:'linear-gradient(160deg,#2A2E33,#131517)'},
+  {n:'木质茶室', c:'linear-gradient(160deg,#C3A57F,#7E5F40)'},
+  {n:'绿植阳台', c:'linear-gradient(160deg,#A9BE97,#4F6B4A)'},
+  {n:'图书馆', c:'linear-gradient(160deg,#87705A,#3F3226)'},
+  {n:'城市天台', c:'linear-gradient(180deg,#C9D3DC,#7F93A8)'},
+  {n:'纯色灰墙', c:'linear-gradient(160deg,#BDB9B2,#8F8B85)'},
+];
+const SUBS = [
+  {id:'hei',  n:'硬核黑体', font:'思源黑体', fx:'pop',    fxn:'逐字弹出'},
+  {id:'song', n:'杂志宋',   font:'思源宋体', fx:'rise',   fxn:'渐显上移'},
+  {id:'dyh',  n:'得意斜体', font:'得意黑',   fx:'dash',   fxn:'冲刺斜入'},
+  {id:'wk',   n:'文楷手记', font:'霞鹜文楷', fx:'type',   fxn:'打字机'},
+  {id:'kl',   n:'快乐综艺', font:'站酷快乐体', fx:'bounce', fxn:'逐字跳动'},
+  {id:'hy',   n:'黄油粗描', font:'站酷庆科黄油体', fx:'zoom', fxn:'关键词放大'},
+];
+const DIMS = [['版式',9.1],['层级',8.8],['动效节奏',8.5],['品牌一致性',9.2]];
+const CHECKS = [['字幕避让卡片与安全区','18/18'],['对比度（最低）','6.2:1'],['黑帧','0 处'],['响度','−14.0 LUFS']];
+const COST = [['本地 ASR 识别',0,'#8C857A'],['Gemini 剪辑与分镜',1.33,'#F1EDE4'],['gpt-image-2 生图',.96,'#C9C2B5'],['Seedance 生视频',1.20,'#F06A4C'],['其他（截图/音乐/音效）',.35,'#6E685E']];
+
+/* ================= 工具函数 ================= */
+const $ = s => document.querySelector(s);
+const fmt = s => { s = Math.max(0, Math.floor(s)); return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); };
+const segEnd = i => i < SEGS.length - 1 ? SEGS[i+1].t : END;
+const state = { cur:0, t:0, playing:false, sub:'hei', bg:0 };
+// 把字幕拆成逐字 span，关键词「冤枉钱」打高亮
+function charSpans(str, hl){
+  const k = hl ? str.indexOf(hl) : -1;
+  return [...str].map((ch,i) => `<span style="--i:${i}"${k>=0 && i>=k && i<k+hl.length ? ' class="hl"' : ''}>${ch}</span>`).join('');
+}
+
+/* ================= 无真帧段落：用 HTML 复刻用户的卡片风格 ================= */
+function cardHTML(type){
+  switch(type){
+    case 'hook2': return `<div class="ct hook"><span class="src">近 3 句都出自《高性价比人生指南》</span><span class="tag">2 / 3</span><div class="k" style="margin-top:9cqw">双色球 · 长期平均回报</div><div class="big">¥0.51</div><div class="vs">每投 ¥1.00<i></i>只拿回 ¥0.51<i class="l" style="width:51%"></i></div></div>`;
+    case 'hook3': return `<div class="ct hook"><span class="src">近 3 句都出自《高性价比人生指南》</span><span class="tag">3 / 3</span><div class="k" style="margin-top:9cqw">帮人收钱取现的兼职</div><div class="t">挣几百块<br>换一份<span class="hl">案底</span></div></div>`;
+    case 'web': return `<div class="ct warm"><div class="win"><span class="url">github.com/trending · AI</span><div class="h">Trending</div><div class="ln"><b>eternity4719 / HowToLiveBetter</b><i>3.5 万 ★</i></div><div class="ln"><b>AI 项目 · 今日上榜</b><i>…</i></div><div class="ln"><b>AI 项目 · 本周上榜</b><i>…</i></div></div></div>`;
+    case 'grid': return `<div class="ct warm"><div class="win"><div class="six">650<small>条</small></div><div class="dots"></div></div></div>`;
+    case 'title': return `<div class="ct warm"><div class="title">怎么少花冤枉钱</div></div>`;
+    case 'term1': return `<div class="ct warm"><div class="win term"><div class="g">~/HowToLiveBetter</div><div><span class="p">❯</span> claude</div><div>帮我把这个项目读一遍</div><div class="g">● 读取 650 条 …</div><div class="y">● 完成</div></div></div>`;
+    case 'term2': return `<div class="ct warm"><div class="win term"><div><span class="p">❯</span> 给我三条建议</div><div class="y">01 少喝饮料</div><div class="g">02 ……</div><div class="g">03 ……</div></div></div>`;
+    case 'compare': return `<div class="ct warm"><div class="win cmp"><div class="h" style="margin-top:0">代糖饮料</div><div class="r a">每天 ≥ 2 杯<i style="width:88%"></i></div><div class="r">很少喝<i style="width:46%"></i></div></div></div>`;
+    case 'comment': return `<div class="ct warm"><div class="win"><div class="h" style="margin-top:0">评论区留言</div><div class="cmt"><span class="av"></span><span class="bx">想要的朋友，留言…</span></div><div class="cmt"><span class="av"></span><span class="bx">想要 +1</span></div></div></div>`;
+  }
+  return '';
+}
+// 缩略图：真帧取上半屏（卡片区），复刻卡直接缩小渲染
+function thumbHTML(s){
+  if (s.frame) return `<div class="img" style="background-image:url(assets/${s.frame}.jpg)"></div>`;
+  if (s.card === 'portrait') return `<div class="img" style="background-image:url(assets/speaker_bottom.jpg);background-size:cover;background-position:50% 30%"></div>`;
+  return cardHTML(s.card);
+}
+// 播放器整帧：真帧直接放；复刻帧 = 上半卡片 + 下半人像 + 当前字幕样式
+function frameHTML(s){
+  if (s.frame) return `<img class="full" src="assets/${s.frame}.jpg" alt="${s.text}">`;
+  const sub = SUBS.find(x => x.id === state.sub);
+  const burn = `<div class="burn st-${sub.id}">${s.text.replace(' / ','<br>')}</div>`;
+  if (s.card === 'portrait') return `<div class="portrait"></div>${burn}`;
+  return `<div class="top">${cardHTML(s.card)}</div><div class="bot"></div>${burn}`;
+}
+
+/* ================= 播放器 ================= */
+const screen = $('#screen');
+function showFrame(i){
+  const old = screen.querySelectorAll('.layer');
+  const el = document.createElement('div');
+  el.className = 'layer';
+  el.innerHTML = frameHTML(SEGS[i]);
+  screen.insertBefore(el, $('#badge'));
+  // 交叉淡入，旧层淡出后移除
+  el.animate([{opacity:0},{opacity:1}], {duration:old.length ? 260 : 0, easing:'ease-out'})
+    .finished.then(() => old.forEach(o => o.remove()));
+  $('#badge').textContent = String(i+1).padStart(2,'0') + ' / 18';
+}
+function select(i, {seek=true, scroll=true} = {}){
+  if (i < 0 || i >= SEGS.length) return;
+  const changed = i !== state.cur || !screen.querySelector('.layer');
+  state.cur = i;
+  if (seek) state.t = SEGS[i].t;
+  if (changed) showFrame(i);
+  document.querySelectorAll('.row').forEach((r,k) => r.classList.toggle('on', k === i));
+  document.querySelectorAll('.seg-r').forEach((r,k) => r.classList.toggle('on', k === i));
+  $('#cur').textContent = SEGS[i].tpl;
+  if (scroll) document.querySelectorAll('.row')[i].scrollIntoView({block:'nearest', behavior:'smooth'});
+  paintTime();
+}
+function paintTime(){
+  const p = state.t / END * 100;
+  $('#fill').style.width = p + '%';
+  $('#head').style.left = p + '%';
+  $('#tc').innerHTML = `${fmt(state.t)} <em>/ 01:57</em>`;
+}
+// 假播放：按真实时长推进，跨段自动换帧
+let last = 0;
+function tick(now){
+  if (!state.playing) return;
+  state.t += (now - last) / 1000; last = now;
+  if (state.t >= END){ state.t = END; setPlay(false); }
+  let i = SEGS.length - 1; while (i > 0 && SEGS[i].t > state.t) i--;
+  if (i !== state.cur) select(i, {seek:false});
+  paintTime();
+  requestAnimationFrame(tick);
+}
+function setPlay(on){
+  state.playing = on;
+  $('#picon').innerHTML = on ? '<path d="M2.5 1.5h2.6v9H2.5zM6.9 1.5h2.6v9H6.9z"/>' : '<path d="M2.5 1.2v9.6L10.5 6z"/>';
+  $('#pbtn').setAttribute('aria-label', on ? '暂停' : '播放');
+  if (on){ if (state.t >= END) state.t = 0; last = performance.now(); requestAnimationFrame(tick); }
+}
+$('#pbtn').addEventListener('click', () => setPlay(!state.playing));
+// 进度条：段落刻度 + 点击定位
+(() => {
+  const prog = $('#prog');
+  SEGS.forEach((s,i) => { if (i){ const k = document.createElement('i'); k.className = 'tick'; k.style.left = s.t/END*100 + '%'; prog.appendChild(k); } });
+  prog.addEventListener('click', e => {
+    const r = prog.getBoundingClientRect();
+    state.t = Math.min(END, Math.max(0, (e.clientX - r.left) / r.width * END));
+    let i = SEGS.length - 1; while (i > 0 && SEGS[i].t > state.t) i--;
+    select(i, {seek:false});
+  });
+})();
+
+/* ================= 时间地图：原片 → 成片 ================= */
+// 固定种子的伪随机，保证每次画出来一致
+function rng(seed){ return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function buildMap(){
+  const svg = $('#map'); const W = svg.clientWidth; const r = rng(7);
+  const sx = W / ORIG;
+  // 37 处气口（短）+ 12 处口误（长），总共删掉 105 秒
+  let cuts = [...Array(37)].map(() => ({k:'b', d:.6 + r()*1.2})).concat([...Array(12)].map(() => ({k:'e', d:3.5 + r()*3.5})));
+  for (let i = cuts.length - 1; i > 0; i--){ const j = Math.floor(r()*(i+1)); [cuts[i],cuts[j]] = [cuts[j],cuts[i]]; }
+  const cs = (ORIG - END) / cuts.reduce((a,c) => a + c.d, 0); cuts.forEach(c => c.d *= cs);
+  // 50 个保留块，总长 117 秒
+  let keeps = [...Array(50)].map(() => .4 + r()); const ks = END / keeps.reduce((a,b) => a+b, 0); keeps = keeps.map(k => k*ks);
+  const Y0 = 6, H0 = 12, Y1 = 64, H1 = 22;
+  let html = `<rect x="0" y="${Y0}" width="${W}" height="${H0}" fill="#1A1916"/>`;
+  let poly = '', cutsSvg = '', ox = 0, nx = 0;
+  keeps.forEach((k,i) => {
+    // 连线：保留块从原片位置「折叠」到成片位置
+    poly += `<polygon points="${ox*sx},${Y0+H0} ${(ox+k)*sx},${Y0+H0} ${(nx+k)*sx},${Y1} ${nx*sx},${Y1}" fill="rgba(26,25,22,${i%2?.13:.07})"/>`;
+    ox += k; nx += k;
+    if (i < cuts.length){
+      const c = cuts[i];
+      cutsSvg += `<rect class="cut" style="animation-delay:${300 + i*14}ms" x="${ox*sx}" y="${Y0 - (c.k==='e'?4:0)}" width="${Math.max(c.d*sx, c.k==='e'?3:1.4)}" height="${H0 + (c.k==='e'?4:0)}" fill="#C8361B"/>`;
+      ox += c.d;
+    }
+  });
+  let segs = SEGS.map((s,i) => `<rect class="seg-r" data-i="${i}" x="${s.t*sx + .5}" y="${Y1}" width="${(segEnd(i)-s.t)*sx - 1}" height="${H1}" fill="#1A1916"><title>${fmt(s.t)} ${s.text}</title></rect>`).join('');
+  // 右侧注记：省下的时间
+  const note = `<text x="${END*sx + 14}" y="${Y1 + 16}" font-family="Noto Serif SC" font-weight="900" font-size="16" fill="#B8311A">−1:45</text><text x="${END*sx + 66}" y="${Y1 + 16}" font-size="12" fill="#6B655B">删掉 47%</text>`;
+  svg.innerHTML = poly + html + cutsSvg + segs + note;
+  svg.querySelectorAll('.seg-r').forEach(el => el.addEventListener('click', () => select(+el.dataset.i)));
+}
+$('#steps').innerHTML = STEPS.map((s,i) => `<div class="step"><span class="b">${fmt(s[1]).replace(/^0/,'')}</span><span class="a">${s[0]}</span></div>`).join('')
+  + `<div class="step tot"><span class="b tl0">全程</span><span class="a num">${fmt(STEPS.reduce((a,s)=>a+s[1],0)).replace(/^0/,'')}</span></div>`;
+
+/* ================= 目次 ================= */
+$('#list').innerHTML = SEGS.map((s,i) => `
+  <li class="row" data-i="${i}">
+    <div class="rbtn" role="button" tabindex="0">
+      <span class="t num">${fmt(s.t)}</span>
+      <span class="thumb">${thumbHTML(s)}</span>
+      <span class="txt"><p>${s.text}</p><span>${s.tpl} · ${(segEnd(i)-s.t)} 秒${s.redo ? ' · <em>自动重做 ×1</em>' : ''}</span></span>
+      <span class="score num">${s.score.toFixed(1)}<small>自检</small></span>
+      <button class="redo-t" aria-expanded="false">重做</button>
+    </div>
+    <div class="redo"><div><div class="in">
+      <label for="r${i}"><span>一句话告诉 AI 这段怎么改，只重渲染这一段</span><span>约 ¥0.08 · 40 秒</span></label>
+      <div class="f"><input id="r${i}" placeholder="例如：这张换成对比图"><button class="go">重做此段</button></div>
+      <div class="chips"><button class="chip">换成对比图</button><button class="chip">数字再大一点</button><button class="chip">换一张 B-roll</button></div>
+      <div class="bar"></div>
+    </div></div></div>
+  </li>`).join('');
+document.querySelectorAll('.row').forEach(row => {
+  const i = +row.dataset.i, btn = row.querySelector('.redo-t'), inp = row.querySelector('input');
+  row.querySelector('.rbtn').addEventListener('click', e => { if (!e.target.closest('.redo-t')) select(i); });
+  row.querySelector('.rbtn').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target === e.currentTarget) select(i); });
+  btn.addEventListener('click', () => {
+    const open = !row.classList.contains('open');
+    document.querySelectorAll('.row.open').forEach(r => { r.classList.remove('open'); r.querySelector('.redo-t').setAttribute('aria-expanded','false'); });
+    if (open){ row.classList.add('open'); btn.setAttribute('aria-expanded','true'); select(i); setTimeout(() => inp.focus({preventScroll:true}), 200); }
+  });
+  row.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => { inp.value = c.textContent; inp.focus(); }));
+  const submit = () => {
+    if (!inp.value.trim()){ inp.focus(); toast('先写一句话，比如「这张换成对比图」'); return; }
+    row.classList.add('busy'); row.querySelector('.go').textContent = '重渲染中…';
+    setTimeout(() => {
+      row.classList.remove('busy','open'); btn.setAttribute('aria-expanded','false');
+      row.querySelector('.go').textContent = '重做此段';
+      const sc = row.querySelector('.score');
+      sc.innerHTML = `${Math.min(9.6, SEGS[i].score + .3).toFixed(1)}<small>已更新</small>`;
+      row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+      toast(`第 ${i+1} 段已按「${inp.value.trim()}」重做，其余段落未动`); inp.value = '';
+    }, 1650);
+  };
+  row.querySelector('.go').addEventListener('click', submit);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape'){ btn.click(); } });
+});
+
+/* ================= 背景选择器 ================= */
+$('#bgs').innerHTML = BGS.map((b,i) => `
+  <button class="bg${i===0?' on':''}" data-i="${i}" aria-pressed="${i===0}">
+    <span class="sw${b.photo?' photo':''}" style="${b.photo?'':'background:'+b.c}"></span>
+    <span class="nm">${b.n}</span><span class="tg">${b.photo?'当前成片':'待生成'}</span>
+  </button>`).join('');
+$('#bgs').addEventListener('click', e => {
+  const b = e.target.closest('.bg'); if (!b) return;
+  const i = +b.dataset.i; state.bg = i;
+  document.querySelectorAll('.bg').forEach((x,k) => { x.classList.toggle('on', k===i); x.setAttribute('aria-pressed', k===i); });
+  $('#bgNow').textContent = i === 0 ? '当前：书房 · 本地抠像' : `已选：${BGS[i].n} · 下次渲染时生成，约 ¥0.12`;
+});
+
+/* ================= 字幕样式 ================= */
+$('#subs').innerHTML = SUBS.map(s => `
+  <button class="sub${s.id===state.sub?' on':''}" data-id="${s.id}" aria-pressed="${s.id===state.sub}">
+    <span class="pv"><span class="ph st-${s.id} fx-${s.fx}">${charSpans('怎么少花冤枉钱','冤枉钱')}</span></span>
+    <span class="nm"><b>${s.n}</b><em>${s.font}</em></span>
+  </button>`).join('');
+function paintSubNow(){ const s = SUBS.find(x => x.id === state.sub); $('#subNow').textContent = `当前：${s.n} · ${s.font} · ${s.fxn}`; }
+// 悬停重播逐字动效（先移除 class，强制回流，再加回）
+function replay(ph){ ph.classList.remove('play'); void ph.offsetWidth; ph.classList.add('play'); }
+document.querySelectorAll('.sub').forEach(b => {
+  const ph = b.querySelector('.ph');
+  b.addEventListener('mouseenter', () => replay(ph));
+  b.addEventListener('click', () => {
+    state.sub = b.dataset.id;
+    document.querySelectorAll('.sub').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
+    paintSubNow(); replay(ph);
+    if (!SEGS[state.cur].frame) showFrame(state.cur); // 复刻帧上的字幕即时换样式
+  });
+});
+paintSubNow();
+
+/* ================= 自检 + 花费 ================= */
+$('#dims').innerHTML = DIMS.map((d,i) => `<div class="dim"><span class="l">${d[0]}</span><span class="tr"><i style="width:${d[1]*10}%;--i:${i}"></i></span><span class="v num">${d[1].toFixed(1)}</span></div>`).join('');
+const ok = '<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6.4" fill="none" stroke="#1A1916" stroke-width="1.2"/><path d="M4 7.2l2 2 4-4.4" fill="none" stroke="#1A1916" stroke-width="1.5"/></svg>';
+$('#chk').innerHTML = CHECKS.map(c => `<li>${ok}<span>${c[0]}</span><b class="num">${c[1]}</b></li>`).join('');
+$('#stack').innerHTML = COST.map(c => `<i style="width:${c[1]/10*100}%;background:${c[2]}" data-l="${c[0]} ¥${c[1].toFixed(2)}"></i>`).join('');
+$('#stack').addEventListener('mouseover', e => { if (e.target.dataset.l) $('#legend').textContent = e.target.dataset.l; });
+$('#stack').addEventListener('mouseleave', () => $('#legend').textContent = '悬停色段看明细 · 已用上限的 38%');
+
+/* ================= 轻提示 + 键盘 ================= */
+let tt;
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 2200); }
+document.querySelectorAll('[data-toast]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); toast(b.dataset.toast); }));
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input')) return;
+  if (e.key === 'ArrowDown'){ e.preventDefault(); select(state.cur + 1); }
+  if (e.key === 'ArrowUp'){ e.preventDefault(); select(state.cur - 1); }
+  if (e.key === ' ' && !e.target.closest('button')){ e.preventDefault(); setPlay(!state.playing); }
+});
+
+/* ================= 启动 ================= */
+buildMap();
+select(0, {scroll:false});
+// 字体加载完后重画一次时间地图（注记文字宽度依赖字体）
+document.fonts && document.fonts.ready.then(buildMap).then(() => select(state.cur, {seek:false, scroll:false}));
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { buildMap(); select(state.cur, {seek:false, scroll:false}); }, 120); });
+</script>
+</body>
+</html>

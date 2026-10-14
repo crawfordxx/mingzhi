@@ -1,0 +1,1123 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明知 · ego 暗色</title>
+<!--
+============================================================================
+ G2 · ego 暗色 —— 明知AI剪辑 第四轮初稿
+============================================================================
+ form 来自内容的哪里：
+   看片要准，所以全暗。舞台就是一间小影院（03-cinema 油画压暗），9:16 成片作为一扇
+   深色浮窗立在画中银幕的位置，旁边叠一扇终端窗，写着这一帧是哪一段、用了什么卡、
+   改没改过。AI 在干活时，背景点阵里的点会从干活的地方被蓝色点亮、一圈圈扩散出去
+   （显影中的 v3、重播剪辑过程、你刚发出的指令），没在干活时点阵就是安静的灰点。
+
+ ego 设计 DNA 对照表（token 来自 lite.ego.app 线上 CSS 实测，2026-10-14）：
+   字体     标题 system-ui 700 / 行高 1.0；点缀词 IBM Plex Serif Italic 200（线上 computed
+            style 实测：「browser」「(lite)」「(yes, free)」都是 ibmPlexSerif 200 italic）；
+            代码/时间码 IBM Plex Mono（ego 也加载了这个字体）
+   背景     html.dark：--bg-1 #2e2e2e / --bg-2 #292929 / --bg-3 #242424 / --bg-4 #141414 / --bg-5 #0d0d0d
+   文字     html.dark：--text-1 #ffffffe6 / --text-2 #ffffffb3 / --text-3 #ffffff7a / --text-4 #ffffff3d
+            （text-3 只放在 bg-3 及更暗的底上，对比度 ≥4.68；bg-1 上的辅助文字改用 text-2）
+   蓝阶     --brand-1..6 #d6dff5 → #294ea3；html.dark --accent #7d9aeb、--accent-light #303848；
+            全页唯一的彩色（关键短语胶囊、@引用、选中态、进度、点阵点亮）
+   点阵     --dot-grid-base 换成暗色版（白 7%）；--dot-grid-active #004cfe80 在暗底上太沉，
+            点亮时提到 accent #7d9aeb，并按 --dot-grid-active 的思路做半透明扩散
+   发光边   --glow-border #adc0eb：选中的版式、选中的背景、显影中的卡片
+   渐变     --positive-ripple：显影进度条、自检分数条
+   阴影     --shadow-1 0 0 0 1px #ffffff0f；--shadow-3 0 0 0 1px #ffffff14, 0 16px 48px #00000059；
+            浮窗 0 25px 50px -12px rgba(0,0,0,.6)
+   圆角     6 / 10 / 13 / 18 / 26，按钮全部胶囊
+   构图     ego hero 的「油画 + 白色浮窗 + 深色终端窗叠放」→ 暗版：压暗油画画框 + 深色预览浮窗 + 更深的终端窗
+   按钮     主 CTA：ego 浅色版是黑底白字胶囊，暗色版翻转成白底黑字胶囊；次 CTA 用 #ffffff14 胶囊；
+            旁边配斜体衬线小注「(只花 ¥3.84)」
+   公告条   ego 顶部 brand-1 公告条 → 暗色 accent-light #303848，内容是正在显影的 v3，配黑色小胶囊
+   Space    ego 把工作区叫 Space、带缩略图 → 左侧项目栏每期是一个 Space，用油画做缩略图
+   窗口点   ego 的红黄绿三点在本版改成中性灰，遵守「蓝阶是唯一彩色」
+
+ 参考清单（v3 的 10 个资源在本会话里已经实际打开过，结论沿用；加上 ego 本站）：
+  0. lite.ego.app（Playwright 渲染 + 读 CSSOM）：上面的整张对照表。
+  1. motion.dev/docs/react-scroll-animations：对话流消息用 whileInView + viewport.root 进入；
+     头部的蓝色细导引条用 useScroll(container) + useSpring。
+  2. prompt-motion.com：403，加上 Cloudflare 人机验证，没看到内容，没有借鉴。
+  3. unsection.com：Cloudflare 人机验证，没看到内容，没有借鉴。
+  4. bentogrids.com：设置卡展开后是 2×2 便当格（素材 / 背景 / 字幕 / 预估）。
+  5. 60fps.design：Spring / Glow / Stagger / Typing → @标签弹簧飞入、选中态 glow、
+     重播逐行 stagger、处理中消息逐字流出。
+  6. jiro.build：模板库，没有可直接用的风格词；只借了它「风格写成关键词」的写法，
+     这里换成上面的 DNA 对照表。
+  7. navbar.gallery：Side Bar Menu → 60px Space 栏；Announcement Bar → 顶部 v3 公告条。
+  8. footer.design：Trove 的 Small Type 收尾 → 输入框下一行小字（MIT · 本机识别 · 音频不出本机）。
+  9. cta.gallery：Download 类 CTA → 导出按钮配斜体小注，菜单每项写明规格。
+ 10. styles.refero.design：ego 本身就是用户指定的风格，refero 只拿来对照 Linear 的「midnight precision」，
+     刻意避开它的冷蓝黑底和霓虹：底色用 ego 的中性灰阶，不偏蓝。
+============================================================================
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@1,200;1,300&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@700;900&display=swap" rel="stylesheet">
+<style>
+html.dark{
+  --bg-1:#2e2e2e; --bg-2:#292929; --bg-3:#242424; --bg-4:#141414; --bg-5:#0d0d0d; --bg-6:#000;
+  --bg-alpha-2:#ffffff0a; --bg-alpha-3:#ffffff0f; --bg-alpha-4:#ffffff14; --bg-alpha-5:#ffffff1a; --bg-alpha-6:#ffffff1f;
+  --text-0:#fff; --text-1:#ffffffe6; --text-2:#ffffffb3; --text-3:#ffffff7a; --text-4:#ffffff3d; --text-5:#ffffff29;
+  --brand-1:#d6dff5; --brand-2:#adc0eb; --brand-3:#85a0e0; --brand-4:#5c81d6; --brand-5:#3361cc; --brand-6:#294ea3;
+  --accent:#7d9aeb; --accent-light:#303848; --accent-dark:#2e57b8;
+  --glow-border:#adc0eb;
+  --positive-ripple:linear-gradient(90deg,#f0f3fa 0%,#e3e9f7 16.72%,#b7c7eb 31.81%,#b7c6eb 46.23%,#7d9add 62.06%,#8da6e1 74.49%,#708fda 87.22%,#97aee3 100%);
+  --shadow-1:0 0 0 1px #ffffff0f; --shadow-1-1:0 0 0 1px #ffffff1a;
+  --shadow-3:0 0 0 1px #ffffff14, 0 16px 48px 0 #00000059;
+  --float:0 0 0 1px #ffffff14, 0 25px 50px -12px rgba(0,0,0,.6);
+  --r-6:6px; --r-10:10px; --r-13:13px; --r-18:18px; --r-26:26px;
+  --sans:system-ui,-apple-system,"PingFang SC","Hiragino Sans GB",sans-serif;
+  --serif-i:'IBM Plex Serif',ui-serif,Georgia,'Songti SC',serif;
+  --mono:'IBM Plex Mono',ui-monospace,'PingFang SC',monospace;
+  --frame-sans:'Noto Sans SC','PingFang SC',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg-5);color:var(--text-1);font-family:var(--sans);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+textarea{font:inherit;color:inherit}
+img{display:block}
+::selection{background:var(--accent-dark);color:#fff}
+/* ego 的斜体衬线点缀词 */
+.i{font-family:var(--serif-i);font-style:italic;font-weight:200;letter-spacing:0}
+.mono{font-family:var(--mono)}
+/* 关键短语高亮：浅蓝胶囊 → 暗版 accent-light 底 + brand-2 字 */
+.hl{background:var(--accent-light);color:var(--brand-2);font-weight:600;padding:1px 7px;border-radius:7px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+
+#dots{position:fixed;inset:0;z-index:0;pointer-events:none}
+.app{position:relative;z-index:1;display:grid;grid-template-columns:60px 552px 1fr;grid-template-rows:34px 1fr;height:100vh;width:100vw}
+
+/* 公告条 */
+.bar{grid-column:1/-1;background:var(--accent-light);display:flex;align-items:center;justify-content:center;gap:12px;font-size:13.5px;color:var(--text-1);position:relative;z-index:5}
+.bar .pulse{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.bar b{font-weight:600;color:var(--brand-2)}
+.pill-black{height:24px;padding:0 10px 0 12px;border-radius:999px;background:#000;color:#fff;font-size:12.5px;display:inline-flex;align-items:center;gap:5px}
+.pill-black:hover{background:#111}
+
+/* Space 栏 */
+.rail{display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 0 12px;border-right:1px solid var(--bg-alpha-3);background:#0d0d0dd9;position:relative;z-index:6}
+.mark{width:34px;height:34px;border-radius:10px;background:var(--text-1);color:#000;display:grid;place-items:center;font-weight:700;font-size:16px}
+.rail hr{width:24px;border:0;height:1px;background:var(--bg-alpha-5)}
+.space{display:flex;flex-direction:column;align-items:center;gap:5px}
+.space .th{width:40px;height:40px;border-radius:10px;overflow:hidden;box-shadow:var(--shadow-1);transition:box-shadow .2s}
+.space .th img{width:100%;height:100%;object-fit:cover}
+.space.on .th{box-shadow:0 0 0 2px var(--bg-5),0 0 0 3.5px var(--glow-border)}
+.space .lb{font-size:12px;color:var(--text-3);line-height:1}
+.space.on .lb{color:var(--text-1)}
+.add{width:40px;height:40px;border-radius:10px;background:var(--bg-alpha-4);color:var(--text-2);font-size:20px;display:grid;place-items:center}
+.add:hover{background:var(--bg-alpha-6);color:var(--text-1)}
+.icon-btn{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;color:var(--text-2)}
+.icon-btn:hover{background:var(--bg-alpha-4);color:var(--text-1)}
+.menu-wrap{position:relative}
+.menu{position:absolute;z-index:60;min-width:250px;background:var(--bg-1);border-radius:var(--r-13);box-shadow:var(--float);padding:6px}
+.menu.side{left:calc(100% + 10px);bottom:0;min-width:330px}
+.menu.down{right:0;top:calc(100% + 8px)}
+.menu.down-l{left:0;top:calc(100% + 8px)}
+.mh{padding:7px 10px 5px;font-size:12px;color:var(--text-2)}
+.mi{width:100%;display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:9px 10px;border-radius:8px;font-size:14px;text-align:left;color:var(--text-1)}
+.mi:hover{background:var(--bg-alpha-4)}
+.mi .mono{font-size:12px;color:var(--text-2)}
+
+/* 对话列 */
+.chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--bg-alpha-3)}
+.hd{height:56px;flex:none;display:flex;align-items:center;gap:12px;padding:0 24px;position:relative;background:var(--bg-5)}
+.word{font-size:19px;font-weight:700;letter-spacing:-.01em;color:var(--text-1);white-space:nowrap}
+.word .i{font-size:19px;color:var(--text-2);margin-left:3px}
+.bal{margin-left:auto;font-size:13px;color:var(--text-3);white-space:nowrap;display:flex;align-items:baseline;gap:6px}
+.bal b{font-size:15px;color:var(--text-1);font-weight:600;font-variant-numeric:tabular-nums}
+.bal .i{font-size:14px;color:var(--text-2)}
+.leader{position:absolute;left:24px;right:24px;bottom:0;height:1px;background:var(--accent);transform-origin:0 50%;opacity:.8}
+.leader-bg{position:absolute;left:24px;right:24px;bottom:0;height:1px;background:var(--bg-alpha-4)}
+
+.scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:20px 24px 16px;display:flex;flex-direction:column;gap:20px;scrollbar-width:thin;scrollbar-color:#3a3a3a transparent}
+.who{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-3);margin-bottom:8px}
+.who .av{width:20px;height:20px;border-radius:6px;background:var(--text-1);color:#000;font-size:11px;font-weight:700;display:grid;place-items:center}
+.who .t{margin-left:auto;font-family:var(--mono);font-size:12px}
+.ai-text{font-size:15px;line-height:1.7;color:var(--text-1);text-wrap:pretty}
+.card{background:var(--bg-3);border-radius:var(--r-18);box-shadow:var(--shadow-1);padding:14px 16px}
+.k{font-size:12px;color:var(--text-3)}
+
+/* 设置卡 */
+.setup-row{display:flex;align-items:center;gap:12px}
+.setup-row .th{width:38px;height:38px;border-radius:10px;overflow:hidden;flex:none}
+.setup-row .th img{width:100%;height:100%;object-fit:cover;object-position:50% 20%}
+.setup-row .nm{font-weight:600;font-size:15px;line-height:1.3}
+.setup-row .sub{font-size:13px;color:var(--text-3)}
+.chev{margin-left:auto;width:32px;height:32px;border-radius:999px;background:var(--bg-alpha-4);display:grid;place-items:center;color:var(--text-2);flex:none}
+.chev:hover{color:var(--text-1);background:var(--bg-alpha-6)}
+.bento{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.cell{background:var(--bg-1);border-radius:var(--r-13);padding:12px;min-width:0}
+.cell .k{color:var(--text-2)}
+.cell .v{font-size:15px;font-weight:600;margin-top:2px}
+.cell .img{height:70px;border-radius:8px;overflow:hidden;margin-top:8px}
+.cell .img img{width:100%;height:100%;object-fit:cover}
+.subprev{margin:10px 0 2px;font-family:var(--frame-sans);font-weight:900;font-size:19px;line-height:1.2;color:#fff;-webkit-text-stroke:3px #000;paint-order:stroke fill;white-space:nowrap}
+.subprev span{color:#D4FF3A}
+.cost{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.1;margin-top:4px;font-variant-numeric:tabular-nums}
+.cost .i{font-size:17px;color:var(--text-2);font-weight:200;margin-left:6px}
+.rip{height:4px;border-radius:4px;background:var(--bg-alpha-5);overflow:hidden;margin-top:10px}
+.rip i{display:block;height:100%;background:var(--positive-ripple);border-radius:4px}
+.cta-row{display:flex;align-items:center;gap:12px;margin-top:14px}
+.btn-w{height:40px;padding:0 18px;border-radius:999px;background:var(--text-1);color:#000;font-weight:600;font-size:14.5px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn-w:hover{background:#fff}
+.btn-w[disabled]{background:var(--bg-alpha-6);color:var(--text-2);cursor:default}
+.btn-g{height:34px;padding:0 14px;border-radius:999px;background:var(--bg-alpha-4);color:var(--text-1);font-size:13.5px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.btn-g:hover{background:var(--bg-alpha-6)}
+.btn-g[disabled]{color:var(--text-3);cursor:default;background:var(--bg-alpha-3)}
+.note{font-family:var(--serif-i);font-style:italic;font-weight:200;font-size:17px;color:var(--text-2);white-space:nowrap}
+
+/* 终端窗（剪辑直播） */
+.term{background:var(--bg-5);border-radius:var(--r-13);box-shadow:var(--shadow-3);overflow:hidden;position:relative}
+.tbar{height:34px;display:flex;align-items:center;gap:7px;padding:0 12px;border-bottom:1px solid var(--bg-alpha-3);position:relative}
+.tbar i{width:10px;height:10px;border-radius:50%;background:var(--text-5)}
+.tbar .ttl{position:absolute;left:0;right:0;text-align:center;font-family:var(--mono);font-size:12px;color:var(--text-3);pointer-events:none}
+.tbody{padding:12px 14px 14px;font-family:var(--mono);font-size:13px;line-height:1.75;color:var(--text-2)}
+.tbody .ok{color:var(--accent)}
+.tbody .w{color:var(--text-1)}
+.tbody .dim{color:var(--text-3)}
+.trow{display:grid;grid-template-columns:18px 64px 1fr;gap:0 6px;align-items:baseline}
+.strip8{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin:12px 0 4px}
+.strip8 .c{aspect-ratio:9/16;border-radius:6px;overflow:hidden;background:var(--bg-3)}
+.strip8 img{width:100%;height:100%;object-fit:cover}
+.tfoot{display:flex;align-items:center;gap:12px;padding:0 14px 14px}
+/* 重播 */
+.ln{display:flex;flex-wrap:wrap;align-items:baseline;font-family:var(--sans);font-size:14.5px;line-height:1.65;color:var(--text-1)}
+.ln .n{font-family:var(--mono);font-size:12px;color:var(--text-3);width:46px;flex:none}
+.tok{display:inline-block;white-space:pre;position:relative}
+.cut{border-radius:5px;padding:0 3px;margin:0 1px}
+.cut .st{position:absolute;left:2px;right:2px;top:54%;height:1.5px;background:var(--accent);transform-origin:0 50%}
+.scraps{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;min-height:28px}
+.scrap{height:24px;padding:0 9px;border-radius:999px;background:var(--bg-alpha-4);font-family:var(--sans);font-size:12.5px;color:var(--text-3);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.scrap s{text-decoration-color:var(--accent);text-decoration-thickness:1.5px}
+.scrap .kd{color:var(--brand-2);font-size:12px}
+.cnt{display:flex;gap:18px;margin-top:10px;font-size:12px;color:var(--text-3)}
+.cnt b{color:var(--text-1);font-weight:500;font-variant-numeric:tabular-nums}
+.scores{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.score .k{font-family:var(--sans)}
+.score .v{font-family:var(--sans);font-size:22px;font-weight:700;color:var(--text-1);line-height:1.2;font-variant-numeric:tabular-nums}
+.final{margin-top:12px;padding:9px 12px;border-radius:10px;background:var(--accent-light);font-family:var(--sans);font-size:14px;color:var(--text-1)}
+.final b{color:var(--brand-2);font-weight:600}
+
+/* 版本卡 */
+.ver{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center}
+.ver .ths{display:flex;gap:4px}
+.ver .ths .c{width:34px;aspect-ratio:9/16;border-radius:6px;overflow:hidden;background:var(--bg-1)}
+.ver .ths img{width:100%;height:100%;object-fit:cover}
+.ver h3{font-size:17px;font-weight:700;line-height:1.2;display:flex;align-items:baseline;gap:6px}
+.ver h3 .i{font-size:18px;color:var(--text-2)}
+.ver h3 .now{margin-left:auto;font-size:12px;font-weight:500;color:var(--brand-2);font-family:var(--sans)}
+.meta{display:flex;flex-wrap:wrap;gap:2px 16px;font-size:13px;color:var(--text-3);margin:4px 0 10px}
+.meta b{color:var(--text-1);font-weight:600;font-size:15px;margin-right:3px;font-variant-numeric:tabular-nums}
+.meta .up b{color:var(--brand-2)}
+.acts{display:flex;gap:8px;align-items:center}
+
+/* 用户消息 */
+.me{align-self:flex-end;max-width:410px}
+.bub{background:var(--accent-light);border-radius:18px 18px 6px 18px;padding:10px 14px;font-size:15px;line-height:1.65;color:var(--text-1)}
+.ref{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;background:var(--brand-6);color:var(--brand-1);font-family:var(--mono);font-size:12.5px;margin-right:6px;vertical-align:1px;white-space:nowrap}
+.me .t{text-align:right;font-family:var(--mono);font-size:12px;color:var(--text-3);margin-top:5px}
+
+/* AI 回复：引用 + 版式选项 */
+.refs{display:flex;gap:8px;margin-top:12px}
+.refc{display:flex;align-items:center;gap:9px;padding:5px 12px 5px 5px;border-radius:12px;background:var(--bg-3);box-shadow:var(--shadow-1)}
+.refc .fr{border-radius:6px;overflow:hidden}
+.refc .k{font-family:var(--mono);color:var(--brand-2)}
+.refc .n{font-size:13px;color:var(--text-1)}
+.opts-k{margin:16px 0 8px;font-size:13px;color:var(--text-2)}
+.opts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.opt{background:var(--bg-3);border-radius:var(--r-13);box-shadow:var(--shadow-1);padding:8px;text-align:left;position:relative}
+.opt:hover{box-shadow:var(--shadow-1-1)}
+.opt .lay{height:74px;border-radius:8px;background:#efefef;padding:9px;overflow:hidden;position:relative}
+.opt .lb{display:flex;gap:6px;align-items:baseline;font-size:13px;margin:8px 2px 2px;color:var(--text-1)}
+.opt .lb .mono{font-size:12px;color:var(--text-3)}
+.opt .ring{position:absolute;inset:-1px;border-radius:14px;box-shadow:0 0 0 2px var(--glow-border),0 0 24px 2px #7d9aeb40;pointer-events:none}
+.opt .chk{position:absolute;right:8px;top:8px;width:20px;height:20px;border-radius:50%;background:var(--brand-5);color:#fff;display:grid;place-items:center}
+.lay .bar1{height:9px;border-radius:3px;background:#1a1a1a;margin-top:6px}
+.lay .bar1.g{background:#c4c4c4}
+.lay .bar1.b{background:var(--brand-4)}
+.lay .t{height:6px;width:46%;border-radius:3px;background:#1a1a1a}
+
+/* 处理中 */
+.proc{position:relative}
+.proc .glowb{position:absolute;inset:0;border-radius:18px;pointer-events:none;box-shadow:0 0 0 1px #adc0eb66,0 0 36px -6px #7d9aeb55}
+.ph{display:flex;align-items:center;gap:10px}
+.ph .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.ph .tt{font-weight:600;font-size:15px}
+.ph .tt .i{font-size:16px;color:var(--text-2);margin-left:4px}
+.ph .pct{margin-left:auto;font-size:26px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.steps{display:flex;gap:14px;font-size:12px;color:var(--text-3);margin-top:8px}
+.steps .on{color:var(--brand-2)}
+.steps .done{color:var(--text-2)}
+.stream{font-size:15px;line-height:1.7;margin-top:10px;min-height:50px;color:var(--text-1)}
+.caret{display:inline-block;width:2px;height:16px;background:var(--accent);vertical-align:-3px;margin-left:2px}
+.bgs{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}
+.bgc .img{aspect-ratio:4/3;border-radius:10px;overflow:hidden;position:relative;background:var(--bg-1)}
+.bgc img{width:100%;height:100%;object-fit:cover;filter:brightness(.72) saturate(.85);transition:filter .25s}
+.bgc:hover img{filter:none}
+.bgc.sel img{filter:none}
+.bgc .nm{font-size:12px;color:var(--text-3);margin-top:4px;white-space:nowrap}
+.bgc.sel .nm{color:var(--brand-2);font-weight:500}
+.bgc .ring{position:absolute;inset:0;border-radius:10px;box-shadow:inset 0 0 0 2px var(--glow-border);pointer-events:none}
+.bgc .lbl{position:absolute;left:5px;right:5px;bottom:5px;font-size:12px;line-height:1.25;color:#fff;font-weight:600;text-shadow:0 1px 8px rgba(0,0,0,.9)}
+.bgc .bar2{position:absolute;left:0;top:0;height:3px;background:var(--positive-ripple)}
+
+/* 输入区 */
+.compose{flex:none;padding:10px 24px 12px;background:linear-gradient(180deg,rgba(13,13,13,0),var(--bg-5) 22px)}
+.chips{display:flex;gap:6px;margin-bottom:10px}
+.chip{height:30px;padding:0 12px;border-radius:999px;background:var(--bg-alpha-4);font-size:13px;color:var(--text-2);white-space:nowrap}
+.chip:hover{background:var(--bg-alpha-6);color:var(--text-1)}
+.box{background:var(--bg-3);border-radius:22px;box-shadow:var(--shadow-1);padding:12px 12px 10px 16px;transition:box-shadow .2s}
+.box:focus-within{box-shadow:0 0 0 1px #adc0eb80,0 0 0 4px #7d9aeb1f}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tags:empty{display:none}
+.intag{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 6px 0 10px;border-radius:999px;background:var(--brand-6);color:var(--brand-1);font-family:var(--mono);font-size:12.5px;margin-bottom:6px}
+.intag button{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-size:12px;color:var(--brand-2)}
+.intag button:hover{background:#ffffff26;color:#fff}
+.box textarea{width:100%;height:44px;resize:none;border:0;outline:0;background:transparent;font-size:15px;line-height:1.5;color:var(--text-1)}
+.box textarea::placeholder{color:var(--text-3)}
+.bft{display:flex;align-items:center;gap:10px}
+.at{height:28px;padding:0 10px;border-radius:999px;background:var(--bg-alpha-4);font-size:12.5px;color:var(--text-2);display:inline-flex;align-items:center;gap:5px}
+.est{font-size:12.5px;color:var(--text-3)}
+.est b{color:var(--text-1);font-weight:600}
+.est .i{font-size:14px;color:var(--text-2)}
+.send{margin-left:auto;width:36px;height:36px;border-radius:50%;background:var(--text-1);color:#000;display:grid;place-items:center}
+.send[disabled]{background:var(--bg-alpha-5);color:var(--text-3);cursor:default}
+.legal{display:flex;justify-content:space-between;margin-top:9px;font-size:12px;color:var(--text-3)}
+
+/* 舞台 */
+.stage{position:relative;min-width:0;padding:14px}
+.frame-card{position:relative;height:100%;border-radius:var(--r-26);overflow:hidden;box-shadow:var(--shadow-3);background:var(--bg-4)}
+.art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:var(--art-x,19%) 50%;filter:brightness(.66) saturate(.95) contrast(1.03)}
+.art-shade{position:absolute;inset:0;background:radial-gradient(60% 46% at 20% 26%,rgba(13,13,13,.72),rgba(13,13,13,0) 100%),linear-gradient(90deg,rgba(13,13,13,.5) 0%,rgba(13,13,13,0) 50%),linear-gradient(0deg,rgba(13,13,13,.55),transparent 28%),linear-gradient(180deg,rgba(13,13,13,.45),transparent 18%)}
+.top{position:absolute;left:24px;right:24px;top:20px;display:flex;align-items:center;gap:8px;z-index:4}
+.seg{display:flex;gap:2px;padding:3px;border-radius:999px;background:#0d0d0db3;backdrop-filter:blur(12px);box-shadow:var(--shadow-1)}
+.vt{position:relative;height:32px;padding:0 13px;border-radius:999px;font-size:13.5px;color:var(--text-2);display:flex;align-items:center;gap:7px;white-space:nowrap}
+.vt .n{font-family:var(--mono);font-size:12.5px;font-weight:500}
+.vt .sc{font-weight:600;color:var(--text-1);font-variant-numeric:tabular-nums}
+.vt.on{color:#000}
+.vt.on .sc{color:#000}
+.vt .bg{position:absolute;inset:0;border-radius:999px;background:var(--text-1);z-index:-1}
+.vt.dev .sc{color:var(--brand-2)}
+.vt.dev.on .sc{color:var(--brand-6)}
+.tog{height:38px;padding:0 14px 0 8px;border-radius:999px;background:#0d0d0db3;backdrop-filter:blur(12px);box-shadow:var(--shadow-1);display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--text-2)}
+.tog .sw{width:34px;height:22px;border-radius:999px;background:var(--bg-alpha-6);display:flex;align-items:center;padding:3px}
+.tog .sw i{width:16px;height:16px;border-radius:50%;background:var(--text-1);display:block}
+.tog.on{color:var(--text-1)}
+.tog.on .sw{background:var(--brand-5);justify-content:flex-end}
+.top .r{margin-left:auto;display:flex;align-items:center;gap:10px}
+.lead{position:absolute;left:36px;top:110px;width:330px;z-index:3}
+.lead h1{font-size:42px;font-weight:700;line-height:1.04;letter-spacing:-.02em;color:var(--text-1)}
+.lead h1 .i{font-weight:200;color:var(--text-2);letter-spacing:-.01em}
+.lead p{margin-top:18px;font-size:16px;line-height:1.7;color:var(--text-2);font-weight:400;text-wrap:pretty}
+.win{position:absolute;background:var(--bg-1);border-radius:var(--r-18);box-shadow:var(--float);overflow:hidden;z-index:2}
+.win .tbar{background:var(--bg-1)}
+.win .ttl{color:var(--text-2)}
+.fr-wrap{position:relative;margin:0 10px;border-radius:8px;overflow:hidden;cursor:crosshair;background:#000}
+.fr-tip{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);height:28px;padding:0 12px;border-radius:999px;background:#0d0d0de6;box-shadow:var(--shadow-1-1);display:flex;align-items:center;font-size:12.5px;color:var(--text-1);white-space:nowrap;pointer-events:none}
+.fr-tip .mono{color:var(--brand-2);margin-right:6px}
+.v3o{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:#0d0d0db8;backdrop-filter:blur(8px);text-align:center;pointer-events:none}
+.v3o .big{font-size:30px;font-weight:700;letter-spacing:-.02em}
+.v3o .i{font-size:20px;color:var(--text-2)}
+.v3o .rip{width:62%}
+.ctrl{height:52px;display:flex;align-items:center;gap:12px;padding:0 14px}
+.play{width:30px;height:30px;border-radius:50%;background:var(--text-1);color:#000;display:grid;place-items:center;flex:none}
+.tm{font-family:var(--mono);font-size:12.5px;color:var(--text-2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tm b{color:var(--text-1);font-weight:500}
+.prog{flex:1;height:18px;position:relative;cursor:pointer;display:flex;align-items:center}
+.prog .tr{position:absolute;left:0;right:0;height:3px;border-radius:3px;background:var(--bg-alpha-6)}
+.prog .fi{position:absolute;left:0;height:3px;border-radius:3px;background:var(--accent)}
+.prog .mk{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--brand-2);margin-left:-3px;top:2px;box-shadow:0 0 0 2px var(--bg-1)}
+.prog .kn{position:absolute;width:11px;height:11px;border-radius:50%;background:#fff;margin-left:-5.5px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+.st-term{position:absolute;z-index:3;width:400px;left:36px;bottom:34px}
+.st-term .tbody{font-size:12.5px;line-height:1.8;min-height:150px}
+.cmp-lb{display:flex;align-items:baseline;justify-content:center;gap:8px;font-size:13px;color:var(--text-2);margin-bottom:10px;white-space:nowrap}
+.cmp-lb b{color:var(--text-1);font-weight:700;font-size:15px}
+.cmp-lb .i{font-size:16px}
+.diff{font-size:12.5px;color:var(--brand-2);text-align:center;margin-top:10px}
+
+/* 成片帧里的 DOM 卡（无真实帧的段） */
+.frm{position:relative;overflow:hidden;background:#000;line-height:1.3;font-family:var(--frame-sans)}
+.frm>img{width:100%;height:100%;object-fit:cover}
+.frm-top{position:absolute;left:0;right:0;top:0;height:50%;padding:1.1em 1.1em 2.4em;overflow:hidden;display:flex;flex-direction:column}
+.ct-body{flex:1;display:flex;flex-direction:column;justify-content:center;min-height:0}
+.frm-bot{position:absolute;left:0;right:0;bottom:0;height:50%;overflow:hidden}
+.frm-bot img,.frm-full img{width:100%;height:100%;object-fit:cover}
+.frm-full{position:absolute;inset:0}
+.frm-full img{object-position:50% 30%}
+.frm-sub{position:absolute;left:0;right:0;top:46%;text-align:center;font-weight:900;font-size:1.02em;color:#fff;-webkit-text-stroke:.22em #000;paint-order:stroke fill;padding:0 .8em;z-index:2}
+.k-dark{background:#0b0b0b;color:#fff}
+.k-light{background:#F3F1EC;color:#141414}
+.ct-hd{display:flex;justify-content:space-between;gap:.6em;font-size:.56em;color:#d8d8d8;font-weight:700;flex:none}
+.ct-hd i{font-style:normal;border:1px solid #777;padding:0 .4em;border-radius:.3em;flex:none}
+.ct-main{font-weight:900;font-size:1.42em;line-height:1.28}
+.yl{color:#D4FF3A}
+.ylbg{background:linear-gradient(transparent 55%,#D4FF3A 55%)}
+.ct-meta{font-size:.6em;color:#6f6a62;font-weight:700}
+.hk{display:grid;grid-template-columns:2.6em 1fr auto;gap:.5em .6em;align-items:center;margin-top:1.1em;font-size:.62em;color:#cfcfcf;font-weight:700}
+.hk .b{height:1.1em;background:#5a5a5a}.hk .b.y{background:#D4FF3A}
+.hk .v{color:#fff}.hk .v.y{color:#D4FF3A}
+.dots{display:grid;grid-template-columns:repeat(13,1fr);gap:.22em;margin-top:.8em}
+.dots i{aspect-ratio:1;background:#141414}
+.tw{background:#161616;border-radius:.45em;padding:.9em 1em;font-family:var(--mono);font-size:.92em;color:#d6d6d6;line-height:1.7}
+.tw .bar{display:flex;gap:.35em;margin-bottom:.6em}.tw .bar i{width:.6em;height:.6em;border-radius:50%;background:#4a4a4a}
+.tw .p{color:#E8A04A}.tw .ok{color:#D4FF3A}
+.cmpb{display:grid;grid-template-columns:4.2em 1fr;gap:.55em .6em;align-items:center;margin-top:1em;font-size:.68em;font-weight:700}
+.cmpb .b{height:1.4em;background:#bdb6a8}.cmpb .b.d{background:#141414}.cmpb .b.y{background:#D4FF3A;outline:.12em solid #141414}
+.cmt{display:flex;gap:.6em;margin-top:.8em;background:#fff;border-radius:.5em;padding:.7em}
+.cmt .av{width:2em;height:2em;border-radius:50%;background:#141414;color:#fff;display:grid;place-items:center;font-size:.7em;flex:none}
+.cmt .ln2{flex:1;font-size:.62em}.cmt .ln2 div{height:.6em;background:#e3ded4;margin-top:.5em;border-radius:.2em}
+
+.toast{position:fixed;z-index:90;bottom:28px;height:40px;padding:0 16px;border-radius:999px;background:var(--bg-1);box-shadow:var(--float);display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text-1);white-space:nowrap}
+.toast i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.fly{position:fixed;left:0;top:0;z-index:95;pointer-events:none;height:26px;padding:0 10px;border-radius:999px;background:var(--brand-5);color:#fff;font-family:var(--mono);font-size:12.5px;display:flex;align-items:center;white-space:nowrap;box-shadow:0 8px 24px #3361cc66}
+</style>
+</head>
+<body>
+<canvas id="dots" aria-hidden="true"></canvas>
+<div id="root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/framer-motion@11.11.13/dist/framer-motion.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></script>
+
+<!-- 点阵网格：平时是安静的灰点；AI 干活时从干活的位置点亮成蓝色并扩散 -->
+<script>
+(function () {
+  const cv = document.getElementById('dots'), ctx = cv.getContext('2d');
+  const GAP = 18, LIFE = 2.8, SPEED = 360, BAND = 70;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let W = 0, H = 0, dpr = 1, ripples = [], mouse = null, running = false;
+  function size() {
+    dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); kick();
+  }
+  function draw(now) {
+    const t = now / 1000;
+    ripples = ripples.filter(r => t - r.t0 < LIFE);
+    ctx.clearRect(0, 0, W, H);
+    for (let y = GAP / 2; y < H; y += GAP) {
+      for (let x = GAP / 2; x < W; x += GAP) {
+        let I = 0;
+        for (const r of ripples) {
+          const age = t - r.t0, d = Math.hypot(x - r.x, y - r.y), front = age * SPEED;
+          const k = (d - front) / BAND;
+          const v = Math.exp(-k * k) * (1 - age / LIFE) * r.s;
+          if (v > I) I = v;
+        }
+        if (mouse) { const d = Math.hypot(x - mouse.x, y - mouse.y); if (d < 90) I = Math.max(I, (1 - d / 90) * 0.35); }
+        if (I > 0.03) {
+          ctx.fillStyle = `rgba(125,154,235,${(0.18 + 0.78 * I).toFixed(3)})`;
+          ctx.beginPath(); ctx.arc(x, y, 1 + 1.1 * I, 0, 6.283); ctx.fill();
+        } else {
+          ctx.fillStyle = 'rgba(255,255,255,0.075)';
+          ctx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
+        }
+      }
+    }
+    if (ripples.length || mouse) requestAnimationFrame(draw); else running = false;
+  }
+  function kick() { if (!running) { running = true; requestAnimationFrame(draw); } }
+  // 对外：在 (x, y) 处点亮一圈
+  window.__ripple = (x, y, s = 1) => { if (reduce) return; ripples.push({ x, y, s, t0: performance.now() / 1000 }); kick(); };
+  addEventListener('resize', size);
+  addEventListener('pointermove', e => { mouse = { x: e.clientX, y: e.clientY }; kick(); });
+  document.addEventListener('pointerleave', () => { mouse = null; });
+  size();
+})();
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useLayoutEffect, useCallback } = React;
+const { motion, AnimatePresence, LayoutGroup, useScroll, useSpring } = Motion;
+
+/* ---------- 真实内容 ---------- */
+const SEGS = [
+  { t: 0,   card: '钩子卡 1/3',     text: '吃抗氧化补剂的人，死亡率反而更高一些', img: 'frame_003' },
+  { t: 4,   card: '钩子卡 2/3',     text: '买双色球，每投 1 块钱，长期平均只能拿回五毛一', kind: 'hook2', sub: '长期平均只能拿回五毛一' },
+  { t: 8,   card: '钩子卡 3/3',     text: '帮人收钱取现的兼职，挣几百块，换一份案底', kind: 'hook3', sub: '挣几百块，换一份案底' },
+  { t: 13,  card: '网页截图 B-roll', text: '我平时经常在 GitHub 上面去逛 AI 项目', img: 'frame_022' },
+  { t: 17,  card: '网页截图',       text: '叫《高性价比人生指南》', img: 'frame_022' },
+  { t: 21,  card: '数字网格卡',     text: '这个项目里面一共讲了 650 条', kind: 'grid', sub: '这个项目里面一共讲了 650 条' },
+  { t: 26,  card: '标题字卡',       text: '怎么少花冤枉钱', kind: 'title', sub: '怎么少花冤枉钱' },
+  { t: 30,  card: '知识卡',         text: '每一条信息都告诉你你会失去什么', img: 'frame_038' },
+  { t: 35,  card: '知识卡 · 证据 A', text: '并且它每一条知识都是有证据来源的', img: 'frame_047' },
+  { t: 40,  card: '终端卡',         text: '然后我就很好奇地让 AI 帮我把它读了一遍', kind: 'term', sub: '让 AI 帮我把它读了一遍' },
+  { t: 47,  card: '终端卡',         text: '第一点呢，它就建议我少喝饮料', kind: 'term2', sub: '它就建议我少喝饮料' },
+  { t: 52,  card: 'AI 生图 B-roll', text: '每天喝两瓶饮料以上的人', img: 'frame_062' },
+  { t: 58,  card: '对比条卡',       text: '每天喝两杯代糖饮料以上的', kind: 'compare', sub: '每天喝两杯代糖饮料以上的' },
+  { t: 65,  card: '划线清单卡',     text: '从收入的角度来看，它还提醒我 / 但是要尽可能地减少无用的消费', img: 'frame_080' },
+  { t: 80,  card: '纯人像',         text: '我们这些做 AI 的人呢，那轮到自己的身体和存款', kind: 'portrait', sub: '轮到自己的身体和存款' },
+  { t: 98,  card: '加载动画卡',     text: '由于 GitHub 在国内可能不太方便打开', img: 'frame_101' },
+  { t: 105, card: '评论卡',         text: '想要的朋友呢，就在评论区留言', kind: 'comment', sub: '想要的朋友呢，就在评论区留言' },
+  { t: 112, card: '三连 CTA',       text: '自己该如何更高性价比地生活', img: 'frame_114' },
+];
+const DUR = 117;
+const V2_CHANGED = [1, 12];
+const REAL = ['frame_003','frame_022','frame_038','frame_047','frame_062','frame_080','frame_101','frame_114'];
+const BGS = [
+  ['01-study','书房'],['02-studio','极简工作室'],['03-cafe','咖啡馆'],['04-night-window','夜景落地窗'],['05-tech-dark','科技暗色'],
+  ['06-japanese','日式和室'],['07-balcony','绿植阳台'],['08-library','图书馆'],['09-rooftop','黄昏天台'],['10-concrete','水泥灰墙'],
+];
+const segAt = t => { let i = 0; SEGS.forEach((s, k) => { if (s.t <= t) i = k; }); return i; };
+const segEnd = i => (i < SEGS.length - 1 ? SEGS[i + 1].t : DUR);
+const fmt = s => { s = Math.max(0, Math.floor(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+const EASE = [0.22, 1, 0.36, 1];
+const SPRING = { type: 'spring', stiffness: 420, damping: 34 };
+const rippleAt = (el, s = 1) => { if (!el || !window.__ripple) return; const r = el.getBoundingClientRect(); window.__ripple(r.left + r.width / 2, r.top + r.height / 2, s); };
+
+const Ico = {
+  play: <svg width="11" height="12" viewBox="0 0 11 12"><path d="M1 .8v10.4L10.2 6z" fill="currentColor"/></svg>,
+  pause: <svg width="11" height="12" viewBox="0 0 11 12"><path d="M1.5 1h2.6v10H1.5zM6.9 1h2.6v10H6.9z" fill="currentColor"/></svg>,
+  down: <svg width="13" height="13" viewBox="0 0 14 14"><path d="M3 5.5L7 9.5 11 5.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round"/></svg>,
+  arrow: <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>,
+  ne: <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2.5 7.5l5-5M3.5 2.5h4v4"/></svg>,
+  dl: <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M7 1.5v8M3.8 6.5L7 9.7l3.2-3.2M2 12.5h10"/></svg>,
+  gear: <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>,
+  check: <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2.5 6.2l2.4 2.4 4.6-5"/></svg>,
+};
+
+/* ---------- 成片一格（沿用用户成片的卡片风格；无真实帧的段用 DOM 画，只用口播原文） ---------- */
+function CardTop({ kind, ver }) {
+  if (kind === 'hook2' || kind === 'hook3') {
+    const big = kind === 'hook2' && ver !== 'v1';
+    return (
+      <div className="frm-top k-dark">
+        <div className="ct-hd"><span>这 3 句话都出自 GitHub 近 3.5 万星的《高性价比人生指南》</span><i>{kind === 'hook2' ? '2/3' : '3/3'}</i></div>
+        {kind === 'hook2' ? (
+          <div className="ct-body">
+            <div className="ct-main">买双色球，每投 1 块钱<br />长期平均只能拿回 {!big && <span className="yl">¥0.51</span>}</div>
+            {big && <motion.div className="ct-main yl" style={{ fontSize: '3.4em', lineHeight: 1, marginTop: '.08em' }} initial={{ scale: .5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={SPRING}>¥0.51</motion.div>}
+            <div className="hk"><span>投入</span><div className="b" style={{ width: '100%' }} /><span className="v">¥1.00</span><span>拿回</span><div className="b y" style={{ width: '51%' }} /><span className="v y">¥0.51</span></div>
+          </div>
+        ) : (
+          <div className="ct-body">
+            <div className="ct-main">帮人收钱取现的兼职<br />挣几百块，换一份<span className="yl">案底</span></div>
+            <div className="hk" style={{ gridTemplateColumns: '2.6em 1fr' }}><span>挣到</span><span className="v">几百块</span><span>代价</span><span className="v y">一份案底 · 跟一辈子</span></div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (kind === 'grid') return (
+    <div className="frm-top k-light"><div className="ct-meta">《高性价比人生指南》一共收录</div>
+      <div className="ct-body"><div className="ct-main" style={{ fontSize: '3.4em', lineHeight: 1.05 }}>650<span style={{ fontSize: '.36em', marginLeft: '.2em' }}>条</span></div>
+        <div className="dots">{Array.from({ length: 65 }).map((_, i) => <i key={i} />)}</div><div className="ct-meta" style={{ marginTop: '.5em' }}>每格 10 条</div></div></div>
+  );
+  if (kind === 'title') return (
+    <div className="frm-top k-light"><div className="ct-meta">这 650 条在讲一件事</div>
+      <div className="ct-body"><div className="ct-main" style={{ fontSize: '2.7em', lineHeight: 1.2 }}>怎么少花<br /><span className="ylbg">冤枉钱</span></div></div></div>
+  );
+  if (kind === 'term' || kind === 'term2') return (
+    <div className="frm-top k-light"><div className="ct-meta">让 AI 读完整个项目</div>
+      <div className="ct-body"><div className="tw"><div className="bar"><i /><i /><i /></div>
+        <div><span className="p">›</span> 帮我读完《高性价比人生指南》</div><div>&nbsp; 读取 650 条 … 完成</div><div>&nbsp; 按「会失去什么」排序</div>
+        {kind === 'term2' ? <div className="ok">&nbsp; 第一点：少喝饮料</div> : <div>&nbsp; 整理建议中 ▍</div>}</div></div></div>
+  );
+  if (kind === 'compare') return (
+    <div className="frm-top k-light"><div className="ct-meta">代糖饮料 · 每天</div>
+      {ver === 'v1' ? (
+        <div className="ct-body"><div className="ct-main" style={{ fontSize: '1.3em' }}>两杯以上的人</div>
+          <div className="cmpb"><span>不喝</span><div className="b" style={{ width: '38%' }} /><span>≥ 2 杯</span><div className="b d" style={{ width: '72%' }} /></div></div>
+      ) : (
+        <div className="ct-body">
+          <div style={{ display: 'flex', gap: '.7em', alignItems: 'flex-end' }}><div className="ct-main" style={{ fontSize: '4.6em', lineHeight: .9 }}>2<span style={{ fontSize: '.3em' }}>杯+</span></div>
+            <div className="ct-meta" style={{ paddingBottom: '.4em' }}>原口播：<br />「每天两杯以上」</div></div>
+          <div className="cmpb" style={{ gridTemplateColumns: '3.2em 1fr', fontSize: '.78em' }}><span>不喝</span><div className="b" style={{ width: '36%' }} /><span>2 杯+</span><div className="b y" style={{ width: '100%' }} /></div>
+        </div>
+      )}
+    </div>
+  );
+  if (kind === 'comment') return (
+    <div className="frm-top k-light"><div className="ct-meta">评论区 · 留言</div>
+      <div className="ct-body"><div className="cmt"><div className="av">明</div><div className="ln2"><b>想要的朋友</b><div style={{ width: '90%' }} /><div style={{ width: '62%' }} /></div></div>
+        <div className="cmt" style={{ opacity: .7 }}><div className="av" style={{ background: '#8a8378' }}>友</div><div className="ln2"><div style={{ width: '70%', marginTop: '.2em' }} /><div style={{ width: '40%' }} /></div></div></div></div>
+  );
+  return null;
+}
+function Frame({ seg, ver = 'v2', w }) {
+  const s = SEGS[seg];
+  const style = { width: w, height: w * 16 / 9, fontSize: w / 24 };
+  if (s.img) return <div className="frm" style={style}><img src={`assets/${s.img}.jpg`} alt={s.text} draggable={false} /></div>;
+  if (s.kind === 'portrait') return <div className="frm" style={style}><div className="frm-full"><img src="assets/speaker_bottom.jpg" alt="" draggable={false} /></div><div className="frm-sub" style={{ top: '72%' }}>{s.sub}</div></div>;
+  return <div className="frm" style={style}><CardTop kind={s.kind} ver={ver} /><div className="frm-bot"><img src="assets/speaker_bottom.jpg" alt="" draggable={false} /></div><div className="frm-sub">{s.sub}</div></div>;
+}
+
+/* ---------- 预览浮窗（深色 macOS 窗） ---------- */
+function PreviewWin({ ver, time, setTime, playing, setPlaying, fw, style, onPick, compact }) {
+  const seg = segAt(time);
+  const [hover, setHover] = useState(false);
+  const fh = fw * 16 / 9;
+  const seek = e => { const r = e.currentTarget.getBoundingClientRect(); setTime(Math.max(0, Math.min(DUR - .5, (e.clientX - r.left) / r.width * DUR))); };
+  const title = ver === 'v1' ? 'v1 — 1:57 · 1080×1920' : ver === 'v2' ? 'v2 — 1:57 · 1080×1920' : 'v3 — 显影中';
+  return (
+    <motion.div className="win" style={{ width: fw + 20, ...style }} layout transition={{ duration: .55, ease: EASE }}>
+      <div className="tbar"><i /><i /><i /><span className="ttl">{title}</span></div>
+      <div className="fr-wrap" style={{ width: fw, height: fh, marginTop: 10 }} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onClick={e => ver !== 'v3' && onPick(e)}>
+        <AnimatePresence initial={false}>
+          <motion.div key={ver + seg} style={{ position: 'absolute', inset: 0 }} initial={{ opacity: 0, filter: 'blur(8px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0 }} transition={{ duration: .45, ease: EASE }}>
+            <Frame seg={seg} ver={ver} w={fw} />
+          </motion.div>
+        </AnimatePresence>
+        {ver === 'v3' && (
+          <div className="v3o">
+            <div className="big">62%</div>
+            <div className="i">(夜景落地窗 · 抠像合成中)</div>
+            <div className="rip"><motion.i initial={{ width: 0 }} animate={{ width: '62%' }} transition={{ duration: 1.4, ease: EASE }} /></div>
+          </div>
+        )}
+        <AnimatePresence>{hover && ver !== 'v3' && !compact && (
+          <motion.div className="fr-tip" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }} transition={{ duration: .18 }}>
+            <span className="mono">@{fmt(time)}</span>点一下引用到对话
+          </motion.div>
+        )}</AnimatePresence>
+      </div>
+      <div className="ctrl">
+        <motion.button className="play" whileTap={{ scale: .9 }} onClick={() => setPlaying(!playing)} aria-label={playing ? '暂停' : '播放'}>{playing ? Ico.pause : Ico.play}</motion.button>
+        <span className="tm"><b>{fmt(time)}</b> / 01:57</span>
+        <div className="prog" onClick={seek} role="slider" aria-valuemin={0} aria-valuemax={DUR} aria-valuenow={Math.round(time)} aria-label="播放进度">
+          <div className="tr" />
+          <motion.div className="fi" animate={{ width: `${time / DUR * 100}%` }} transition={{ type: 'spring', stiffness: 300, damping: 36 }} />
+          {ver !== 'v1' && V2_CHANGED.map(i => <span key={i} className="mk" style={{ left: `${(SEGS[i].t + segEnd(i)) / 2 / DUR * 100}%` }} title={`v2 改了：${fmt(SEGS[i].t)} ${SEGS[i].card}`} />)}
+          <motion.span className="kn" animate={{ left: `${time / DUR * 100}%` }} transition={{ type: 'spring', stiffness: 300, damping: 36 }} />
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ---------- 舞台上的终端窗：当前这一帧是什么 ---------- */
+function StageTerm({ ver, time, log, bottom }) {
+  const seg = segAt(time), s = SEGS[seg];
+  const changed = ver === 'v2' && V2_CHANGED.includes(seg);
+  return (
+    <motion.div className="term st-term" style={{ bottom }} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }} transition={{ duration: .45, ease: EASE }}>
+      <div className="tbar"><i /><i /><i /><span className="ttl">明知 — 段 {String(seg + 1).padStart(2, '0')}/18</span></div>
+      <div className="tbody">
+        {log ? log.map((l, i) => (
+          <motion.div key={l + i} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: .3 }}><span className="ok">›</span> {l}</motion.div>
+        )) : (
+          <AnimatePresence mode="wait">
+            <motion.div key={seg + ver} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .2 }}>
+              <div><span className="ok">›</span> <span className="w">seek @{fmt(s.t)}</span> <span className="dim">→ {fmt(segEnd(seg))}</span></div>
+              <div>&nbsp; 卡片 &nbsp;<span className="w">{s.card}</span></div>
+              <div>&nbsp; 字幕 &nbsp;<span className="w">「{s.text.length > 17 ? s.text.slice(0, 17) + '…' : s.text}」</span></div>
+              <div>&nbsp; 版本 &nbsp;{changed ? <span className="ok">v2 改过这一段 ✓</span> : <span className="dim">{ver === 'v3' ? 'v3 合成中 62%' : '未改动'}</span>}</div>
+              <div className="dim">&nbsp; 点画面 → 引用到对话</div>
+            </motion.div>
+          </AnimatePresence>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ---------- 舞台 ---------- */
+function Stage({ ver, setVer, compare, setCompare, time, setTime, playing, setPlaying, onPick, toast, stageLog }) {
+  const ref = useRef(null);
+  const [h, setH] = useState(838), [w, setW] = useState(800);
+  const [menu, setMenu] = useState(false);
+  useLayoutEffect(() => { const el = ref.current; const ro = new ResizeObserver(() => { setH(el.clientHeight); setW(el.clientWidth); }); ro.observe(el); return () => ro.disconnect(); }, []);
+  useEffect(() => { if (!menu) return; const c = () => setMenu(false); addEventListener('click', c); return () => removeEventListener('click', c); }, [menu]);
+  const tabs = [{ id: 'v1', nm: '初版', sc: '8.8' }, { id: 'v2', nm: '改版', sc: '9.0' }, { id: 'v3', nm: '显影中', sc: '62%', dev: true }];
+  const fw = Math.round(Math.min(340, (h - 84 - 30 - 100) * 9 / 16));
+  const fwc = Math.round(Math.min(272, (h - 250 - 100) * 9 / 16));
+  const winH = fw * 16 / 9 + 34 + 10 + 52;
+  return (
+    <section className="stage">
+      <div className="frame-card" ref={ref}>
+        <img className="art" src="assets/art/03-cinema.png" alt="" />
+        <div className="art-shade" />
+        <div className="top">
+          <LayoutGroup id="vt">
+            <div className="seg" role="tablist">
+              {tabs.map(t => (
+                <motion.button key={t.id} role="tab" aria-selected={ver === t.id} className={`vt ${ver === t.id ? 'on' : ''} ${t.dev ? 'dev' : ''}`} onClick={() => setVer(t.id)} whileTap={{ scale: .96 }}>
+                  {ver === t.id && <motion.span layoutId="vtbg" className="bg" transition={SPRING} />}
+                  <span className="n">{t.id}</span>{t.nm}<span className="sc">{t.sc}</span>
+                </motion.button>
+              ))}
+            </div>
+          </LayoutGroup>
+          <motion.button className={`tog ${compare ? 'on' : ''}`} onClick={() => setCompare(!compare)} whileTap={{ scale: .96 }} aria-pressed={compare}>
+            <span className="sw"><motion.i layout transition={SPRING} /></span>对比 v1 · v2
+          </motion.button>
+          <div className="r menu-wrap">
+            <motion.button className="btn-w" style={{ height: 38 }} whileTap={{ scale: .96 }} onClick={e => { e.stopPropagation(); setMenu(!menu); }}>{Ico.dl} 导出</motion.button>
+            <AnimatePresence>{menu && (
+              <motion.div className="menu down" initial={{ opacity: 0, y: -6, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: .16 }} onClick={e => e.stopPropagation()}>
+                <div className="mh">导出 {ver === 'v1' ? 'v1' : 'v2'} <span className="i" style={{ fontSize: 14 }}>(1:57)</span></div>
+                <button className="mi" onClick={() => { setMenu(false); toast(`${ver === 'v1' ? 'v1' : 'v2'} · MP4 1080×1920 已加入导出队列`); }}><span>成片 MP4</span><span className="mono">1080×1920</span></button>
+                <button className="mi" onClick={() => { setMenu(false); toast(`${ver === 'v1' ? 'v1' : 'v2'} · 封面 4:3 + 3:4 已加入导出队列`); }}><span>封面</span><span className="mono">4:3 + 3:4</span></button>
+              </motion.div>
+            )}</AnimatePresence>
+          </div>
+        </div>
+
+        <AnimatePresence>{!compare && (
+          <motion.div className="lead" key="lead" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={{ duration: .45, ease: EASE }}>
+            <h1>高性价比<br />人生指南 <span className="i">(第 2 期)</span></h1>
+            <p>{ver === 'v1' ? <>初版 1:57，自检 8.8。</> : ver === 'v2' ? <>v2 只重渲了 <span className="hl">2 段</span>，38 秒，多花 ¥0.16。</> : <>v3 正在换成夜景落地窗，合成到 62%。</>}
+              点画面任意一处，就能把<span className="hl">那一帧引用到对话里</span>。</p>
+          </motion.div>
+        )}</AnimatePresence>
+
+        <LayoutGroup id="wins">
+          {compare ? (
+            <div style={{ position: 'absolute', left: 0, right: 0, top: 84, display: 'flex', justifyContent: 'center', gap: 28 }}>
+              {['v1', 'v2'].map(v => (
+                <motion.div key={v} layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .5, ease: EASE, delay: v === 'v2' ? .06 : 0 }}>
+                  <div className="cmp-lb"><b>{v}</b><span className="i">({v === 'v1' ? '初版' : '改版'})</span><span>自检 {v === 'v1' ? '8.8' : '9.0'}</span></div>
+                  <PreviewWin ver={v} time={time} setTime={setTime} playing={playing} setPlaying={setPlaying} fw={fwc} style={{ position: 'relative' }} onPick={onPick} compact />
+                  <div className="diff">{v === 'v2' && V2_CHANGED.includes(segAt(time)) ? '● 这一段 v2 改过' : <span style={{ color: 'var(--text-3)' }}>同步播放 · {fmt(time)}</span>}</div>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <PreviewWin key="single" ver={ver} time={time} setTime={setTime} playing={playing} setPlaying={setPlaying} fw={fw} style={{ right: 44, top: Math.max(76, (h - winH) / 2 + 18) }} onPick={onPick} />
+          )}
+        </LayoutGroup>
+        <AnimatePresence>{!compare && <StageTerm key="term" ver={ver} time={time} log={stageLog} bottom={h - (Math.max(76, (h - winH) / 2 + 18) + 34 + 10 + fw * 16 / 9) + 26} />}</AnimatePresence>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- 对话：设置卡 ---------- */
+function Setup() {
+  const [open, setOpen] = useState(false);
+  return (
+    <motion.div layout className="card" transition={{ duration: .45, ease: EASE }}>
+      <div className="setup-row">
+        <div className="th"><img src="assets/speaker_bottom.jpg" alt="" /></div>
+        <div style={{ minWidth: 0 }}><div className="nm">第2期_口播.mov <span className="k" style={{ fontWeight: 400 }}>· 3:42</span></div>
+          <div className="sub">书房 · 刀锋 · 思源黑体 · 预估 ¥3.84 / 上限 ¥10</div></div>
+        <motion.button className="chev" onClick={() => setOpen(!open)} animate={{ rotate: open ? 180 : 0 }} transition={SPRING} aria-expanded={open} aria-label="展开设置">{Ico.down}</motion.button>
+      </div>
+      <AnimatePresence initial={false}>{open && (
+        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: .4, ease: EASE }} style={{ overflow: 'hidden' }}>
+          <div className="bento">
+            <div className="cell"><div className="k">素材</div><div className="v">第2期_口播.mov</div><div className="img"><img src="assets/speaker_bottom.jpg" alt="口播原片" style={{ objectPosition: '50% 25%' }} /></div></div>
+            <div className="cell"><div className="k">背景</div><div className="v">书房</div><div className="img"><img src="assets/bg/01-study.jpg" alt="书房" /></div></div>
+            <div className="cell"><div className="k">字幕</div><div className="subprev">怎么少花<span>冤枉钱</span></div><div className="v" style={{ fontSize: 14, fontWeight: 500 }}>刀锋 · 思源黑体</div></div>
+            <div className="cell"><div className="k">预估花费</div><div className="cost">¥3.84<span className="i">/ 上限 ¥10</span></div><div className="rip"><i style={{ width: '38.4%' }} /></div></div>
+          </div>
+        </motion.div>
+      )}</AnimatePresence>
+      <div className="cta-row">
+        <button className="btn-w" disabled>{Ico.check} 已开始出片</button>
+        <span className="note">(只花 ¥3.84)</span>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ---------- 对话：剪辑直播（终端窗） ---------- */
+const SCRIPT = [
+  [{ c: '然后呢，嗯，', k: '气口' }, '我平时经常在 GitHub 上面去逛 AI 项目'],
+  ['叫《高性价比人生指南》'],
+  ['这个项目里面', { c: '呃，就是，', k: '气口' }, '一共讲了 650 条'],
+  [{ c: '那个，', k: '气口' }, '每一条信息都告诉你你会失去什么'],
+  ['并且它每一条知识都是有证据来源的', { c: '，有证据来源的', k: '重复' }],
+  ['然后我就很好奇地让 AI 帮我把它读了一遍'],
+  ['第一点呢，它就建议我', { c: '少喝，', k: '口误' }, '少喝饮料'],
+];
+const LINE_SEG = [3, 4, 5, 7, 8, 9, 10];
+const PRINT_SEG = [0, 4, 7, 8, 11, 13, 15, 17];
+const SCORES = [['版式', 9.1], ['层级', 8.8], ['动效节奏', 8.6], ['品牌一致性', 9.3]];
+const LINE_AT = i => 300 + i * 560;
+const T_THUMBS = 5300, T_SCORES = 7700, T_FINAL = 9500, T_END = 10400;
+
+function Live({ onCue, onLog }) {
+  const [mode, setMode] = useState('sum');
+  const [t, setT] = useState(0);
+  const timer = useRef(null), boxRef = useRef(null), lastRip = useRef(0);
+  const start = () => {
+    clearInterval(timer.current);
+    const box = boxRef.current, sc = box && box.closest('.scroll');
+    if (sc) sc.scrollTo({ top: sc.scrollTop + box.getBoundingClientRect().top - sc.getBoundingClientRect().top - 12, behavior: 'smooth' });
+    setMode('live'); setT(0);
+    const t0 = performance.now();
+    timer.current = setInterval(() => { const e = performance.now() - t0; setT(e); if (e > T_END) { clearInterval(timer.current); onLog && onLog(null); } }, 60);
+  };
+  useEffect(() => () => clearInterval(timer.current), []);
+  const live = mode === 'live', running = live && t <= T_END;
+  // AI 在干活：每 0.9 秒从终端窗点亮一圈点阵
+  useEffect(() => { if (running && t - lastRip.current > 900) { lastRip.current = t; rippleAt(boxRef.current, 1); } if (!running) lastRip.current = -1e9; }, [t, running]);
+  let cue = null;
+  if (live && t < T_THUMBS) SCRIPT.forEach((_, i) => { if (t >= LINE_AT(i)) cue = LINE_SEG[i]; });
+  if (live && t >= T_THUMBS && t < T_SCORES) cue = PRINT_SEG[Math.min(7, Math.floor((t - T_THUMBS) / 280))];
+  useEffect(() => { if (cue !== null) onCue(SEGS[cue].t); }, [cue]);
+  // 舞台终端窗同步打印剪辑日志
+  const logs = [];
+  if (running) {
+    SCRIPT.forEach((line, i) => line.forEach(tk => { if (typeof tk !== 'string' && t > LINE_AT(i) + 1500) logs.push(`cut  @${fmt(SEGS[LINE_SEG[i]].t)}  「${tk.c.replace(/^，|，$/g, '')}」 ${tk.k}`); }));
+    if (t >= T_THUMBS) logs.push(`storyboard  ${Math.min(8, Math.floor((t - T_THUMBS) / 280) + 1)}/8 张`);
+    if (t >= T_SCORES) logs.push('self-check  版式 9.1 · 层级 8.8 …');
+  }
+  const logKey = logs.join('|');
+  useEffect(() => { if (running) onLog(logs.slice(-5)); }, [logKey, running]);
+  const clamp = x => Math.max(0, Math.min(1, x));
+  const cutsP = clamp((t - 600) / (LINE_AT(6) + 1500 - 600));
+  const scraps = [];
+  if (live) SCRIPT.forEach((line, i) => line.forEach((tk, j) => { if (typeof tk !== 'string' && t > LINE_AT(i) + 1500) scraps.push({ id: i + '-' + j, c: tk.c.replace(/^，|，$/g, ''), k: tk.k }); }));
+  return (
+    <motion.div layout className="term" ref={boxRef} transition={{ duration: .45, ease: EASE }}>
+      <div className="tbar"><i /><i /><i /><span className="ttl">剪辑直播 — {running ? '正在剪…' : '3:42 → 1:57'}</span></div>
+      <AnimatePresence mode="wait" initial={false}>
+        {!live ? (
+          <motion.div key="sum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .25 }}>
+            <div className="tbody">
+              <div className="trow"><span className="ok">✓</span><span className="w">识别</span><span>本机 Paraformer · 字级时间戳</span></div>
+              <div className="trow"><span className="ok">✓</span><span className="w">剪口误</span><span>删除 <span className="w">37</span> 处气口 · <span className="w">12</span> 处口误</span></div>
+              <div className="trow"><span className="ok">✓</span><span className="w">分镜</span><span><span className="w">18</span> 段 · 3:42 → <span className="w">1:57</span></span></div>
+              <div className="trow"><span className="ok">✓</span><span className="w">自检</span><span>版式 <span className="w">9.1</span> · 层级 <span className="w">8.8</span> · 动效节奏 <span className="w">8.6</span> · 品牌一致性 <span className="w">9.3</span></span></div>
+              <div className="strip8">{REAL.map(f => <div className="c" key={f}><img src={`assets/${f}.jpg`} alt="" /></div>)}</div>
+            </div>
+            <div className="tfoot">
+              <motion.button className="btn-g" onClick={start} whileTap={{ scale: .96 }}>{Ico.play} 重播剪辑过程</motion.button>
+              <span className="note" style={{ fontSize: 15 }}>(约 10 秒)</span>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div key="live" className="tbody" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .25 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minHeight: 214 }}>
+              {SCRIPT.map((line, i) => {
+                const at = LINE_AT(i); if (t < at) return null;
+                return (
+                  <motion.div key={i} className="ln" initial={{ opacity: 0, filter: 'blur(6px)', y: 4 }} animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }} transition={{ duration: .7, ease: EASE }}>
+                    <span className="n">{fmt(SEGS[LINE_SEG[i]].t)}</span>
+                    <AnimatePresence initial={false}>
+                      {line.map((tk, j) => {
+                        if (typeof tk === 'string') return <span key={j} className="tok">{tk}</span>;
+                        const marked = t > at + 350, struck = t > at + 800, gone = t > at + 1500;
+                        if (gone) return null;
+                        return (
+                          <motion.span key={j} className="tok cut" animate={{ backgroundColor: marked ? '#303848' : 'rgba(48,56,72,0)', color: struck ? 'rgba(255,255,255,.48)' : marked ? '#adc0eb' : 'rgba(255,255,255,.9)' }}
+                            exit={{ opacity: 0, width: 0, paddingLeft: 0, paddingRight: 0, marginLeft: 0, marginRight: 0, y: 10 }} transition={{ duration: .45, ease: EASE }}>
+                            {tk.c}<motion.span className="st" initial={{ scaleX: 0 }} animate={{ scaleX: struck ? 1 : 0 }} transition={{ duration: .3, ease: EASE }} />
+                          </motion.span>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })}
+            </div>
+            <div className="scraps">
+              <span className="k" style={{ fontFamily: 'var(--sans)' }}>剪掉的</span>
+              <AnimatePresence>{scraps.map(s => (
+                <motion.span key={s.id} layout className="scrap" initial={{ opacity: 0, y: -16, scale: .8 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: 'spring', stiffness: 380, damping: 22, delay: .2 }}><s>{s.c}</s><span className="kd">{s.k}</span></motion.span>
+              ))}</AnimatePresence>
+            </div>
+            <div className="cnt" style={{ fontFamily: 'var(--sans)' }}>
+              <span>气口 <b>{Math.round(37 * cutsP)}</b> / 37</span><span>口误 <b>{Math.round(12 * cutsP)}</b> / 12</span><span>时长 <b>{fmt(222 - 105 * cutsP)}</b></span>
+            </div>
+            {t >= T_THUMBS - 200 && (
+              <div className="strip8">{REAL.map((f, i) => (
+                <div className="c" key={f}>{t >= T_THUMBS + i * 280 && <motion.img src={`assets/${f}.jpg`} alt="" initial={{ opacity: 0, scale: 1.15, filter: 'blur(6px) grayscale(1)' }} animate={{ opacity: 1, scale: 1, filter: 'blur(0px) grayscale(0)' }} transition={{ duration: .9, ease: EASE }} />}</div>
+              ))}</div>
+            )}
+            {t >= T_SCORES && (
+              <div className="scores">{SCORES.map(([k, v], i) => {
+                const p = clamp((t - T_SCORES - i * 300) / 650);
+                return (<div className="score" key={k} style={{ opacity: p > 0 ? 1 : .25 }}><div className="k">{k}</div><div className="v">{(v * p).toFixed(1)}</div><div className="rip" style={{ marginTop: 4 }}><i style={{ width: `${v * 10 * p}%` }} /></div></div>);
+              })}</div>
+            )}
+            <AnimatePresence>{t >= T_FINAL && (
+              <motion.div className="final" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .45, ease: EASE }}>
+                删除 <b>37</b> 处气口 · <b>12</b> 处口误 · 3:42 → <b>1:57</b> · 18 段
+              </motion.div>
+            )}</AnimatePresence>
+            {t > T_END && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, fontFamily: 'var(--sans)' }}>
+                <motion.button className="btn-g" onClick={start} whileTap={{ scale: .96 }}>{Ico.play} 再看一遍</motion.button>
+                <motion.button className="btn-g" onClick={() => setMode('sum')} whileTap={{ scale: .96 }}>收起</motion.button>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+/* ---------- 对话：版本卡 ---------- */
+function VerCard({ v, ver, setVer, toast }) {
+  const [menu, setMenu] = useState(false);
+  useEffect(() => { if (!menu) return; const c = () => setMenu(false); addEventListener('click', c); return () => removeEventListener('click', c); }, [menu]);
+  const one = v === 'v1';
+  return (
+    <div className="card ver">
+      <div className="ths">{one ? ['frame_003', 'frame_022', 'frame_062'].map(f => <div className="c" key={f}><img src={`assets/${f}.jpg`} alt="" /></div>)
+        : V2_CHANGED.map(i => <div className="c" key={i}><Frame seg={i} ver="v2" w={34} /></div>)}</div>
+      <div style={{ minWidth: 0 }}>
+        <h3>{v} <span className="i">({one ? '初版' : '改版'})</span>{ver === v && <span className="now">● 右侧正在播放</span>}</h3>
+        {one ? <div className="meta"><span><b>1:57</b>成片</span><span><b>8.8</b>自检</span><span><b>¥3.84</b>花费</span><span><b>18</b>段</span></div>
+          : <div className="meta"><span>只重渲了 <b>2</b>段</span><span><b>38</b>秒</span><span className="up"><b>+¥0.16</b></span><span><b>9.0</b>自检</span></div>}
+        <div className="acts">
+          <motion.button className="btn-g" onClick={() => setVer(v)} disabled={ver === v} whileTap={{ scale: .96 }}>{ver === v ? '播放中' : '在右侧播放'}</motion.button>
+          <div className="menu-wrap">
+            <motion.button className="btn-g" whileTap={{ scale: .96 }} onClick={e => { e.stopPropagation(); setMenu(!menu); }}>{Ico.dl} 导出</motion.button>
+            <AnimatePresence>{menu && (
+              <motion.div className="menu down-l" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .16 }} onClick={e => e.stopPropagation()}>
+                <div className="mh">导出 {v}</div>
+                <button className="mi" onClick={() => { setMenu(false); toast(`${v} · MP4 1080×1920 已加入导出队列`); }}><span>成片 MP4</span><span className="mono">1080×1920</span></button>
+                <button className="mi" onClick={() => { setMenu(false); toast(`${v} · 封面 4:3 + 3:4 已加入导出队列`); }}><span>封面</span><span className="mono">4:3 + 3:4</span></button>
+              </motion.div>
+            )}</AnimatePresence>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 对话：版式选项 ---------- */
+function Options() {
+  const [sel, setSel] = useState(1);
+  const opts = [
+    ['A', '并列横条', <><div className="t" /><div className="bar1 g" style={{ width: '40%', marginTop: 10 }} /><div className="bar1" style={{ width: '78%' }} /></>],
+    ['B', '大数字 + 比例条', <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: '100%' }}><div style={{ fontWeight: 900, fontSize: 26, lineHeight: 1, color: '#1a1a1a' }}>2<span style={{ fontSize: 11 }}>杯+</span></div><div style={{ flex: 1, paddingBottom: 4 }}><div className="bar1 g" style={{ width: '38%' }} /><div className="bar1 b" style={{ width: '100%' }} /></div></div>],
+    ['C', '左右对照', <div style={{ display: 'flex', gap: 6, height: '100%' }}><div style={{ flex: 1, borderRadius: 4, background: '#c4c4c4' }} /><div style={{ flex: 1, borderRadius: 4, background: '#1a1a1a' }} /></div>],
+  ];
+  return (
+    <>
+      <div className="opts-k">对比条卡 · 选一个版式 <span className="i" style={{ fontSize: 15, color: 'var(--text-3)' }}>(点一下就换)</span></div>
+      <div className="opts">{opts.map(([k, n, lay], i) => (
+        <motion.button key={k} className="opt" onClick={() => setSel(i)} whileHover={{ y: -2 }} whileTap={{ scale: .98 }} transition={SPRING} aria-pressed={sel === i}>
+          <div className="lay">{lay}</div>
+          <div className="lb"><span className="mono">{k}</span>{n}</div>
+          {sel === i && <motion.span layoutId="optring" className="ring" transition={SPRING} />}
+          <AnimatePresence>{sel === i && <motion.span className="chk" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} transition={SPRING}>{Ico.check}</motion.span>}</AnimatePresence>
+        </motion.button>
+      ))}</div>
+    </>
+  );
+}
+
+/* ---------- 对话：处理中 ---------- */
+function Processing() {
+  const full = '正在把「夜景落地窗」合成到人像。抠像已经完成，现在逐段合成，18 段合成完会一起重渲，然后自检。';
+  const [n, setN] = useState(0);
+  const ref = useRef(null);
+  useEffect(() => { const id = setInterval(() => setN(x => (x >= full.length ? x : x + 1)), 42); return () => clearInterval(id); }, []);
+  // AI 正在干活：点阵从这张卡持续点亮
+  useEffect(() => { const go = () => rippleAt(ref.current, .85); const a = setTimeout(go, 900); const id = setInterval(go, 2600); return () => { clearTimeout(a); clearInterval(id); }; }, []);
+  return (
+    <div className="card proc" ref={ref}>
+      <span className="glowb" />
+      <div className="ph">
+        <motion.span className="dot" animate={{ opacity: [1, .35, 1], scale: [1, .8, 1] }} transition={{ duration: 1.6, repeat: Infinity }} />
+        <span className="tt">v3 显影中<span className="i">(夜景落地窗)</span></span>
+        <span className="pct">62%</span>
+      </div>
+      <div className="rip" style={{ marginTop: 10 }}><motion.i initial={{ width: 0 }} animate={{ width: '62%' }} transition={{ duration: 1.6, ease: EASE, delay: .3 }} /></div>
+      <div className="steps"><span className="done">✓ 抠像</span><span className="on">合成 62%</span><span>重渲 18 段</span><span>自检</span></div>
+      <div className="stream">{full.slice(0, n)}{n < full.length && <motion.span className="caret" animate={{ opacity: [1, 0, 1] }} transition={{ duration: .9, repeat: Infinity }} />}</div>
+      <div className="bgs">{BGS.map(([f, nm], i) => {
+        const sel = f === '04-night-window';
+        return (
+          <div key={f} className={`bgc ${sel ? 'sel' : ''}`}>
+            <div className="img"><img src={`assets/bg/${f}.jpg`} alt={nm} />
+              {sel && <><motion.span className="bar2" initial={{ width: 0 }} animate={{ width: '62%' }} transition={{ duration: 1.6, ease: EASE, delay: .3 }} /><span className="lbl">正在应用<br />到人像</span><span className="ring" /></>}
+            </div>
+            <div className="nm">{nm}{i === 0 ? ' · 原' : ''}</div>
+          </div>
+        );
+      })}</div>
+    </div>
+  );
+}
+
+/* ---------- 对话流 ---------- */
+function In({ children, root, className, style }) {
+  return (
+    <motion.div className={className} style={style} initial={{ opacity: 0, y: 14, filter: 'blur(4px)' }} whileInView={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+      viewport={{ root, once: true, amount: .15 }} transition={{ duration: .6, ease: EASE }}>{children}</motion.div>
+  );
+}
+const Who = ({ t, me }) => <div className="who"><span className="av">{me ? '我' : '明'}</span>{me ? '你' : '明知'}<span className="t">{t}</span></div>;
+
+function Chat({ ver, setVer, tags, setTags, inputRef, toast, extra, onSend, chatRef, onCue, onLog }) {
+  const { scrollYProgress } = useScroll({ container: chatRef });
+  const sx = useSpring(scrollYProgress, { stiffness: 120, damping: 30, restDelta: .001 });
+  const [text, setText] = useState('');
+  useEffect(() => {
+    const el = chatRef.current; let pinned = true;
+    const pin = () => { if (pinned) el.scrollTop = el.scrollHeight; };
+    const off = () => { pinned = false; };
+    const ro = new ResizeObserver(pin); Array.from(el.children).forEach(c => ro.observe(c)); pin();
+    ['wheel', 'touchstart', 'pointerdown'].forEach(e => el.addEventListener(e, off, { passive: true }));
+    const st = setTimeout(off, 4000);
+    return () => { ro.disconnect(); clearTimeout(st); ['wheel', 'touchstart', 'pointerdown'].forEach(e => el.removeEventListener(e, off)); };
+  }, []);
+  const send = () => { if (!text.trim() && !tags.length) return; onSend({ text: text.trim(), tags }); setText(''); setTags([]); };
+  return (
+    <section className="chat">
+      <header className="hd">
+        <span className="word">明知<span className="i">(AI 剪辑)</span></span>
+        <span className="bal">算力余额 <b>¥36.27</b><span className="i">(可想 AI)</span></span>
+        <span className="leader-bg" /><motion.span className="leader" style={{ scaleX: sx }} />
+      </header>
+      <div className="scroll" ref={chatRef}>
+        <In root={chatRef}><Who me t="10.13 23:40" /><Setup /></In>
+        <In root={chatRef}><Who t="23:41 → 23:45" /><Live onCue={onCue} onLog={onLog} /></In>
+        <In root={chatRef}><VerCard v="v1" ver={ver} setVer={setVer} toast={toast} /></In>
+        <In root={chatRef} className="me"><div className="bub"><span className="ref">@00:58 对比条卡</span>这张数据太弱了，加上具体比例，再把开头第二张钩子卡的 ¥0.51 放大</div><div className="t">23:52</div></In>
+        <In root={chatRef}>
+          <Who t="23:52" />
+          <div className="ai-text">明白，改两处。对比条卡：原口播说的是<span className="hl">「每天两杯以上」</span>，我把这个比例做成三种版式，你挑一张。钩子卡 2/3：把 ¥0.51 放大到原来的 2.3 倍，别的不动。</div>
+          <div className="refs">
+            <div className="refc"><span className="fr"><Frame seg={1} ver="v1" w={30} /></span><div><div className="k">@00:04</div><div className="n">钩子卡 2/3</div></div></div>
+            <div className="refc"><span className="fr"><Frame seg={12} ver="v1" w={30} /></span><div><div className="k">@00:58</div><div className="n">对比条卡</div></div></div>
+          </div>
+          <Options />
+        </In>
+        <In root={chatRef}><VerCard v="v2" ver={ver} setVer={setVer} toast={toast} /></In>
+        <In root={chatRef} className="me"><div className="bub">背景换成夜景落地窗试试</div><div className="t">23:58</div></In>
+        <In root={chatRef}><Who t="23:58 · 进行中" /><Processing /></In>
+        {extra.map((m, i) => (
+          <motion.div key={i} className={m.role === 'me' ? 'me' : ''} initial={{ opacity: 0, y: 14, filter: 'blur(4px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} transition={{ duration: .5, ease: EASE }}>
+            {m.role === 'me' ? <><div className="bub">{m.tags.map(t => <span key={t} className="ref">{t}</span>)}{m.text}</div><div className="t">刚刚</div></>
+              : <><Who t="刚刚" /><div className="ai-text">{m.text}</div></>}
+          </motion.div>
+        ))}
+      </div>
+      <footer className="compose">
+        <div className="chips">{['节奏再快一点', '换一张 B-roll', '字幕换成得意黑', '导出'].map(c => (
+          <motion.button key={c} className="chip" whileHover={{ y: -1 }} whileTap={{ scale: .95 }} onClick={() => c === '导出' ? toast('v2 · MP4 1080×1920 已加入导出队列') : setText(c)}>{c}</motion.button>
+        ))}</div>
+        <div className="box">
+          <div className="tags"><AnimatePresence>{tags.map(t => (
+            <motion.span key={t} className="intag" layout initial={{ opacity: 0, scale: .6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .6 }} transition={SPRING}>
+              {t}<button onClick={() => setTags(tags.filter(x => x !== t))} aria-label="移除引用">×</button>
+            </motion.span>
+          ))}</AnimatePresence></div>
+          <textarea ref={inputRef} rows={2} value={text} onChange={e => setText(e.target.value)} placeholder="说一句要怎么改，比如「这张换成对比图」"
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+          <div className="bft">
+            <span className="at">@ 点右侧画面引用</span>
+            <span className="est">本轮约 <b>¥0.12</b> <span className="i">(上限 ¥10)</span></span>
+            <motion.button className="send" onClick={send} disabled={!text.trim() && !tags.length} whileTap={{ scale: .9 }} whileHover={{ y: -1 }} aria-label="发送">{Ico.arrow}</motion.button>
+          </div>
+        </div>
+        <div className="legal"><span>明知AI剪辑 · MIT 开源</span><span>语音识别在本机 · 音频不出本机</span></div>
+      </footer>
+    </section>
+  );
+}
+
+/* ---------- Space 栏 ---------- */
+function Rail({ toast }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => { if (!open) return; const c = () => setOpen(false); addEventListener('click', c); return () => removeEventListener('click', c); }, [open]);
+  return (
+    <nav className="rail" aria-label="Spaces">
+      <div className="mark" title="明知AI剪辑">明</div>
+      <hr />
+      <button className="space on" title="第 2 期 · 高性价比人生指南"><span className="th"><img src="assets/art/03-cinema.png" alt="" /></span><span className="lb">02</span></button>
+      <button className="space" title="第 1 期" onClick={() => toast('第 1 期 · 已定稿')}><span className="th"><img src="assets/art/01-studio.png" alt="" /></span><span className="lb">01</span></button>
+      <motion.button className="add" whileTap={{ scale: .92 }} onClick={() => toast('新建 Space：把一条口播拖进来就开始')} aria-label="新建">+</motion.button>
+      <div style={{ marginTop: 'auto' }} className="menu-wrap">
+        <motion.button className="icon-btn" whileTap={{ scale: .92 }} onClick={e => { e.stopPropagation(); setOpen(!open); }} aria-label="设置">{Ico.gear}</motion.button>
+        <AnimatePresence>{open && (
+          <motion.div className="menu side" initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: .16 }} onClick={e => e.stopPropagation()}>
+            <div className="mh">设置</div>
+            <div className="mi"><span>单期预算上限</span><span className="mono">¥10</span></div>
+            <div className="mi"><span>语音识别</span><span className="mono">本机 Paraformer</span></div>
+            <div className="mi"><span>剪口误 / 分镜</span><span className="mono">gemini-3.5-flash</span></div>
+            <div className="mi"><span>生图 / 生视频</span><span className="mono">GPT Image 2 · Seedance</span></div>
+          </motion.div>
+        )}</AnimatePresence>
+      </div>
+    </nav>
+  );
+}
+
+/* ---------- 应用 ---------- */
+function App() {
+  const [ver, setVer] = useState('v2');
+  const [compare, setCompare] = useState(false);
+  const [time, setTime] = useState(2);
+  const [playing, setPlaying] = useState(false);
+  const [tags, setTags] = useState([]);
+  const [fly, setFly] = useState(null);
+  const [toastMsg, setToastMsg] = useState(null);
+  const [extra, setExtra] = useState([]);
+  const [stageLog, setStageLog] = useState(null);
+  const inputRef = useRef(null), chatRef = useRef(null), toastT = useRef(null);
+  const toast = m => { setToastMsg(m); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToastMsg(null), 2400); };
+
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => setTime(t => { if (t + .25 >= DUR) { setPlaying(false); return DUR - .5; } return t + .25; }), 250);
+    return () => clearInterval(id);
+  }, [playing]);
+  const addTag = useCallback((x, y) => {
+    const label = `@${fmt(time)} ${SEGS[segAt(time)].card}`;
+    const box = inputRef.current && inputRef.current.getBoundingClientRect(); if (!box) return;
+    setFly({ label, from: { x: x - 50, y: y - 13 }, to: { x: box.left, y: box.top - 30 }, k: Date.now() });
+  }, [time]);
+  const onPick = e => addTag(e.clientX, e.clientY);
+  const togglePlay = p => {
+    // 暂停也会把当前画面引用到输入框
+    if (!p && playing) { const r = document.querySelector('.fr-wrap'); if (r) { const b = r.getBoundingClientRect(); addTag(b.left + b.width / 2, b.top + b.height / 2); } }
+    setPlaying(p);
+  };
+  useEffect(() => {
+    const k = e => {
+      if (e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') setTime(t => SEGS[Math.min(17, segAt(t) + 1)].t);
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') setTime(t => SEGS[Math.max(0, segAt(t) - 1)].t);
+      if (e.key === ' ') { e.preventDefault(); togglePlay(!playing); }
+    };
+    addEventListener('keydown', k); return () => removeEventListener('keydown', k);
+  });
+  const scrollEnd = () => requestAnimationFrame(() => { const el = chatRef.current; el && el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); });
+  const onSend = ({ text, tags }) => {
+    setExtra(x => [...x, { role: 'me', text, tags }]); scrollEnd();
+    rippleAt(document.querySelector('.box'), 1);
+    setTimeout(() => {
+      setExtra(x => [...x, { role: 'ai', text: `收到。${tags.length ? tags.join('、') + ' ' : ''}「${text || '按引用的画面改'}」排在 v3 之后，只重渲涉及的段落，本轮约 ¥0.12。` }]);
+      scrollEnd();
+    }, 900);
+  };
+  const goProc = () => { const el = chatRef.current, p = document.querySelector('.proc'); if (el && p) el.scrollTo({ top: el.scrollTop + p.getBoundingClientRect().top - el.getBoundingClientRect().top - 40, behavior: 'smooth' }); rippleAt(p, 1); };
+  useEffect(() => { window.__app = { setVer, setCompare, setTime, addTag }; });
+
+  return (
+    <div className="app">
+      <div className="bar">
+        <motion.span className="pulse" animate={{ opacity: [1, .3, 1] }} transition={{ duration: 1.6, repeat: Infinity }} />
+        <span>v3 正在把<b>「夜景落地窗」</b>合成到人像 · 62%，好了会自动换到右侧</span>
+        <motion.button className="pill-black" whileTap={{ scale: .95 }} onClick={goProc}>看进度 {Ico.ne}</motion.button>
+      </div>
+      <Rail toast={toast} />
+      <Chat ver={ver} setVer={setVer} tags={tags} setTags={setTags} inputRef={inputRef} toast={toast} extra={extra} onSend={onSend} chatRef={chatRef}
+        onCue={t => { setPlaying(false); setTime(t); }} onLog={setStageLog} />
+      <Stage ver={ver} setVer={setVer} compare={compare} setCompare={setCompare} time={time} setTime={setTime} playing={playing} setPlaying={togglePlay} onPick={onPick} toast={toast} stageLog={stageLog} />
+      <AnimatePresence>{fly && (
+        <motion.div key={fly.k} className="fly" initial={{ x: fly.from.x, y: fly.from.y, scale: 1.2, opacity: 0 }} animate={{ x: fly.to.x, y: fly.to.y, scale: 1, opacity: 1 }} exit={{ opacity: 0 }}
+          transition={{ type: 'spring', stiffness: 170, damping: 22, mass: .8 }}
+          onAnimationComplete={() => { setTags(t => (t.includes(fly.label) ? t : [...t, fly.label])); setFly(null); inputRef.current && inputRef.current.focus(); rippleAt(inputRef.current, .6); }}>
+          {fly.label}
+        </motion.div>
+      )}</AnimatePresence>
+      <AnimatePresence>{toastMsg && (
+        <motion.div className="toast" style={{ left: 'calc(612px + (100vw - 612px) / 2)', x: '-50%' }} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={SPRING}><i />{toastMsg}</motion.div>
+      )}</AnimatePresence>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+window.__ready = true;
+</script>
+</body>
+</html>

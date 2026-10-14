@@ -1,0 +1,9 @@
+# 本机工具产物
+element_clones/
+logs/
+.DS_Store
+node_modules/
+
+# 会话交接与 SDD 工作区
+docs/handoff.md
+.superpowers/

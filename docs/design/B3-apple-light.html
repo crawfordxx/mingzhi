@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明知AI剪辑 · 第 2 期</title>
+<!--
+  方向 B3 · 苹果风（apple.com 白底 + Mac 原生 App：Freeform / Pages / 照片）
+  · 设计语言取自 apple.com.cn 线上 CSS：字体栈 SF Pro SC → PingFang SC；正文 #1d1d1f，次级 #6e6e73，发丝线 #d2d2d7；
+    填充 #f5f5f7 / #e8e8ed；唯一强调色 #0071e3（灰底上的文字链接用 #0066cc 保证 4.5:1）；胶囊按钮 980px 圆角；
+    导航材质 rgba(250,250,252,.8) + saturate(180%) blur(20px)。
+  · 动效：按 Apple「流畅界面」原则，用弹簧（阻尼比 + 响应时间）生成 CSS linear() 缓动，默认临界阻尼不回弹，
+    只有「被抛出去」的东西（飞入输入框的引用标签）才带一点回弹。
+  · 字体：UI 一律系统字体；只有成片内容（字幕「刀锋 · 思源黑体」、卡片）加载 Noto Sans SC。
+  · 许可证 MIT。
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- 仅供成片内容使用：思源黑体 -->
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#FBFBFD;          /* apple.com 页面底 */
+  --white:#FFFFFF;
+  --fill:#F5F5F7;        /* 分组底 / 预览台 */
+  --fill-2:#E8E8ED;      /* 分段控件轨道 */
+  --label:#1D1D1F;
+  --label-2:#6E6E73;     /* 白底 5.1:1，#F5F5F7 上 4.7:1 */
+  --hair:#D2D2D7;
+  --hair-soft:rgba(0,0,0,.08);
+  --blue:#0071E3;
+  --link:#0066CC;
+  --blue-tint:rgba(0,113,227,.10);
+  --sel:rgba(0,113,227,.18);
+  --sys:-apple-system,BlinkMacSystemFont,"SF Pro SC","SF Pro Display","SF Pro Icons","PingFang SC","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --shadow-1:0 1px 2px rgba(0,0,0,.04),0 4px 14px rgba(0,0,0,.06);
+  --shadow-2:0 2px 6px rgba(0,0,0,.05),0 18px 40px -12px rgba(0,0,0,.22);
+  /* 临界阻尼弹簧（response 0.35s），由下方 JS 也会生成同款 */
+  --spring:linear(0,.009,.035 2.1%,.141 4.4%,.723 15.5%,.938 22.1%,.991,1.005 33.6%,1);
+  --ease:cubic-bezier(.25,.1,.25,1);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--label);font-family:var(--sys);font-size:14px;line-height:1.43;letter-spacing:-.016em;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;letter-spacing:inherit}
+button:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:3px solid rgba(0,113,227,.45);outline-offset:2px;border-radius:8px}
+.num{font-variant-numeric:tabular-nums}
+.app{display:grid;grid-template-columns:68px 552px 1fr;height:100vh;min-height:820px}
+
+/* ========== 侧边栏（Mac 侧边栏材质） ========== */
+.rail{background:rgba(242,242,247,.85);backdrop-filter:saturate(180%) blur(20px);border-right:1px solid var(--hair-soft);display:flex;flex-direction:column;align-items:center;padding:16px 0;gap:6px}
+.appicon{width:40px;height:40px;border-radius:10px;background:linear-gradient(180deg,#2B2B2F,#111113);color:#fff;display:grid;place-items:center;box-shadow:0 1px 2px rgba(0,0,0,.2),inset 0 0 0 .5px rgba(255,255,255,.18);margin-bottom:14px;text-decoration:none}
+.appicon span{font-size:15px;font-weight:600;letter-spacing:.02em;line-height:1}
+.proj{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 4px;border-radius:10px;width:56px;transition:background .2s var(--ease)}
+.proj:hover{background:rgba(0,0,0,.05)}
+.proj:active{transform:scale(.96)}
+.proj.on{background:rgba(0,0,0,.07)}
+.proj .pt{width:30px;height:53px;border-radius:5px;background-size:cover;background-position:center top;box-shadow:0 0 0 .5px rgba(0,0,0,.15),0 1px 3px rgba(0,0,0,.12)}
+.proj span{font-size:12px;color:var(--label-2);letter-spacing:0}
+.proj.on span{color:var(--label);font-weight:600}
+.newp{width:32px;height:32px;border-radius:50%;background:var(--white);box-shadow:0 0 0 .5px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.08);display:grid;place-items:center;margin-top:6px;color:var(--label-2);transition:transform .2s var(--spring),color .2s}
+.newp:hover{color:var(--blue)}
+.newp:active{transform:scale(.92)}
+.rail .lab{font-size:12px;color:var(--label-2);letter-spacing:0}
+.rail .sp{flex:1}
+.gear{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--label-2)}
+.gear:hover{background:rgba(0,0,0,.05);color:var(--label)}
+
+/* ========== 对话列 ========== */
+.chat{background:var(--white);display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--hair-soft);position:relative}
+.ch-hd{flex:none;padding:22px 28px 12px;position:relative;z-index:2;background:rgba(255,255,255,.82);backdrop-filter:saturate(180%) blur(20px)}
+.ch-hd .eyebrow{font-size:12px;color:var(--label-2);letter-spacing:0;display:flex;gap:6px}
+.ch-hd h1{margin:2px 0 0;font-size:28px;line-height:1.14;font-weight:600;letter-spacing:.004em}
+.ch-hd h1 span{color:var(--label-2);font-weight:400}
+.flow{flex:1;overflow-y:auto;padding:4px 28px 24px;scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.18) transparent;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18px,#000 calc(100% - 14px),transparent);mask-image:linear-gradient(to bottom,transparent 0,#000 18px,#000 calc(100% - 14px),transparent)}
+.stamp{text-align:center;font-size:12px;color:var(--label-2);margin:18px 0 10px;letter-spacing:0}
+.stamp b{font-weight:600}
+.msg{margin-bottom:14px}
+.ai-hd{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;font-weight:600}
+.ai-hd .av{width:22px;height:22px;border-radius:6px;background:linear-gradient(180deg,#2B2B2F,#111113);color:#fff;display:grid;place-items:center;font-size:10px;font-weight:600;letter-spacing:0}
+.ai-hd .st{font-weight:400;color:var(--label-2);font-size:12px;letter-spacing:0}
+.ai p{margin:0 0 8px;font-size:15px;line-height:1.47;letter-spacing:-.022em}
+.me{display:flex;justify-content:flex-end}
+.bubble{max-width:82%;background:#F2F2F7;border-radius:18px;padding:9px 14px 10px;font-size:15px;line-height:1.47;letter-spacing:-.022em}
+.enter{animation:enter .5s var(--spring) both}
+@keyframes enter{from{opacity:0;transform:translateY(10px) scale(.985)}}
+
+/* @时间引用：系统蓝的「令牌」（像邮件搜索里的 token） */
+.tg{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px 0 3px;border-radius:7px;background:var(--blue-tint);color:var(--link);font-size:13px;font-weight:500;vertical-align:-5px;cursor:pointer;white-space:nowrap;letter-spacing:-.01em;transition:background .2s,transform .25s var(--spring)}
+.tg:hover{background:rgba(0,113,227,.16)}
+.tg:active{transform:scale(.96)}
+.tg .tt{width:11px;height:19px;border-radius:2.5px;position:relative;overflow:hidden;container-type:inline-size;flex:none;background:#ccc}
+.tg .at{font-variant-numeric:tabular-nums;font-weight:600}
+.tg .x{width:14px;height:14px;border-radius:50%;background:rgba(0,102,204,.18);display:grid;place-items:center;font-size:11px;line-height:1;margin-left:1px}
+.tg .x:hover{background:var(--blue);color:#fff}
+
+/* 分组列表（「设置」App 风格） */
+.group{background:var(--fill);border-radius:12px;overflow:hidden}
+.g-row{display:flex;align-items:center;gap:12px;padding:10px 14px;width:100%;text-align:left;position:relative;min-height:44px}
+.g-row + .g-row::before{content:"";position:absolute;left:14px;right:0;top:0;height:1px;background:var(--hair-soft)}
+.g-row .ic{width:28px;height:28px;border-radius:6px;background-size:cover;background-position:center;flex:none;box-shadow:0 0 0 .5px rgba(0,0,0,.1)}
+.g-row .k{font-size:14px;flex:1;min-width:0}
+.g-row .k small{display:block;font-size:12px;color:var(--label-2);letter-spacing:0}
+.g-row .v{font-size:14px;color:var(--label-2)}
+.chev{color:#AEAEB2;transition:transform .35s var(--spring)}
+.open > .g-row .chev,.g-row[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows .45s var(--spring)}
+.fold.open{grid-template-rows:1fr}
+.fold > div{overflow:hidden;min-height:0}
+.started{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--label-2)}
+.started svg{color:var(--blue)}
+.sub-pv{font-family:"Noto Sans SC",sans-serif;font-weight:900;color:#fff;-webkit-text-stroke:3px #111;paint-order:stroke fill;font-size:15px;letter-spacing:0;background:linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.35)),url(assets/speaker_bottom.jpg) 50% 92%/170% auto;border-radius:6px;padding:3px 10px}
+.sub-pv .hl{color:#D4FF3A}
+
+/* 剪辑完成卡 */
+.panel{border-radius:14px;background:var(--white);box-shadow:0 0 0 1px var(--hair-soft),var(--shadow-1);overflow:hidden}
+.sum{padding:14px 16px 16px}
+.sum .eb{font-size:12px;color:var(--label-2);letter-spacing:0;display:flex;gap:6px;align-items:center}
+.sum .eb svg{color:var(--blue)}
+.dur{display:flex;align-items:baseline;gap:10px;margin-top:4px}
+.dur .was{font-size:22px;font-weight:500;color:var(--label-2);letter-spacing:-.01em}
+.dur .ar{color:#AEAEB2;font-size:18px}
+.dur .now{font-size:44px;font-weight:600;letter-spacing:-.03em;line-height:1.05}
+.sum .cap{font-size:14px;color:var(--label-2);margin-top:2px}
+.sum .cap b{color:var(--label);font-weight:600}
+/* 照片 App 式网格 */
+.pgrid{display:grid;grid-template-columns:repeat(18,1fr);gap:2px;margin-top:12px;border-radius:8px;overflow:hidden}
+.pgrid .f{aspect-ratio:9/16;position:relative;overflow:hidden;container-type:inline-size;background:#ddd;cursor:pointer}
+.pgrid .f::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,0);transition:background .2s}
+.pgrid .f:hover::after{background:rgba(255,255,255,.18)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 15px;border-radius:980px;font-size:14px;font-weight:500;white-space:nowrap;transition:background .2s,transform .2s var(--spring),box-shadow .2s;letter-spacing:-.01em}
+.pill:active{transform:scale(.96)}
+.pill.blue{background:var(--blue);color:#fff}
+.pill.blue:hover{background:#0077ED}
+.pill.tint{background:var(--blue-tint);color:var(--link)}
+.pill.tint:hover{background:rgba(0,113,227,.16)}
+.pill.gray{background:var(--fill-2);color:var(--label)}
+.pill.gray:hover{background:#DEDEE3}
+.pill.sm{height:28px;padding:0 12px;font-size:13px}
+.sum .acts{display:flex;gap:8px;margin-top:14px;align-items:center}
+.sum .acts .meta{margin-left:auto;font-size:12px;color:var(--label-2);letter-spacing:0}
+
+/* 重播舞台 */
+.stage{padding:14px 16px 16px}
+.steps{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--label-2);letter-spacing:0;flex-wrap:nowrap}
+.steps span{padding:3px 8px;border-radius:980px;transition:background .25s,color .25s;white-space:nowrap}
+.steps span.on{background:var(--label);color:#fff}
+.steps span.ok{color:var(--label)}
+.steps .clk{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--label);font-weight:600}
+.counters{display:flex;gap:8px;margin:12px 0 6px}
+.counter{display:flex;align-items:baseline;gap:5px;background:var(--fill);border-radius:980px;padding:4px 12px;font-size:12px;color:var(--label-2);letter-spacing:0}
+.counter b{font-size:17px;font-weight:600;color:var(--label);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tr{margin-top:4px;min-height:170px}
+.tl{display:flex;align-items:baseline;gap:10px;min-height:32px;padding:4px 0;border-bottom:1px solid var(--hair-soft)}
+.tl .tc{font-size:12px;color:var(--label-2);font-variant-numeric:tabular-nums;width:36px;flex:none;letter-spacing:0}
+.tl .tx{flex:1;font-size:15px;letter-spacing:-.022em;white-space:nowrap;overflow:hidden}
+.tl .mg{font-size:12px;color:var(--label-2);letter-spacing:0;opacity:0;transform:translateY(3px);transition:opacity .3s,transform .4s var(--spring);white-space:nowrap}
+.tl .mg.on{opacity:1;transform:none}
+.ch{display:inline-block;animation:mat .42s var(--spring) both}
+@keyframes mat{from{opacity:0;filter:blur(4px);transform:translateY(3px)}}
+.fl{display:inline-block;position:relative;white-space:nowrap;vertical-align:bottom;border-radius:4px;transition:background .2s,color .2s}
+.fl.hit{background:var(--sel)}
+.fl.cut{color:var(--label-2)}
+.fl .strike{position:absolute;left:0;right:0;top:54%;height:1.5px;background:var(--label);transform:scaleX(0);transform-origin:left}
+.tiles{display:grid;grid-template-columns:repeat(9,1fr);gap:3px;margin-top:12px;border-radius:8px;overflow:hidden}
+.tiles .f{aspect-ratio:9/16;position:relative;overflow:hidden;container-type:inline-size;background:#eee;opacity:0}
+.tiles .f.br::before{content:"";position:absolute;inset:0;z-index:2;box-shadow:inset 0 0 0 2px var(--blue)}
+.rings{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
+.ring{display:flex;flex-direction:column;align-items:center;gap:4px;opacity:0}
+.ring .rc{position:relative;width:58px;height:58px}
+.ring svg{width:58px;height:58px;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:5;stroke-linecap:round}
+.ring .bg{stroke:var(--fill-2)}
+.ring .fg{stroke:var(--blue);stroke-dasharray:100;stroke-dashoffset:100}
+.ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:17px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.ring span{font-size:12px;color:var(--label-2);letter-spacing:0}
+.done{display:flex;align-items:center;gap:14px;margin-top:14px;padding-top:14px;border-top:1px solid var(--hair-soft);opacity:0}
+.done .ck{width:40px;height:40px;flex:none}
+.done .ck circle{fill:var(--blue);transform-origin:center;transform:scale(0)}
+.done .ck path{fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;stroke-dashoffset:1}
+.done .big{font-size:30px;font-weight:600;letter-spacing:-.03em;line-height:1.1;white-space:nowrap}
+.done .big span{color:var(--label-2);font-weight:500;font-size:20px;letter-spacing:-.01em}
+.done p{margin:0;font-size:13px;color:var(--label-2);letter-spacing:0}
+.done p b{color:var(--label);font-weight:600}
+.stage-ft{display:flex;justify-content:flex-end;margin-top:10px}
+.lnk{color:var(--link);font-size:13px;letter-spacing:0}
+.lnk:hover{text-decoration:underline}
+
+/* 版本卡：像「照片」里的一张作品 */
+.ver{display:grid;grid-template-columns:62px 1fr;gap:14px;padding:12px;border-radius:14px;background:var(--white);box-shadow:0 0 0 1px var(--hair-soft),var(--shadow-1);position:relative;transition:box-shadow .3s var(--ease),transform .35s var(--spring)}
+.ver:hover{box-shadow:0 0 0 1px var(--hair-soft),var(--shadow-2);transform:translateY(-1px)}
+.ver.on{box-shadow:0 0 0 2px var(--blue),var(--shadow-1)}
+.ver .vt{width:62px;aspect-ratio:9/16;border-radius:8px;overflow:hidden;position:relative;container-type:inline-size;cursor:pointer;box-shadow:0 0 0 .5px rgba(0,0,0,.12)}
+.ver .vh{display:flex;align-items:center;gap:8px}
+.ver .vh strong{font-size:17px;font-weight:600;letter-spacing:-.022em}
+.ver .vh .badge{font-size:12px;letter-spacing:0;color:var(--link);background:var(--blue-tint);padding:1px 8px;border-radius:980px;font-weight:500}
+.ver .vh .badge.g{color:var(--label-2);background:var(--fill)}
+.ver .vn{font-size:13px;color:var(--label-2);margin-top:1px;letter-spacing:0}
+.ver .vs{display:flex;gap:0;margin-top:8px}
+.ver .vs div{display:flex;flex-direction:column;padding:0 14px;border-left:1px solid var(--hair-soft);line-height:1.2}
+.ver .vs div:first-child{padding-left:0;border-left:0}
+.ver .vs b{font-size:19px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.ver .vs small{font-size:12px;color:var(--label-2);letter-spacing:0}
+.ver .vd{display:flex;gap:6px;align-items:center;margin-top:8px;font-size:12px;color:var(--label-2);letter-spacing:0;flex-wrap:wrap}
+.ver .va{display:flex;gap:8px;margin-top:10px}
+
+/* 被引段落 + 内联选项 */
+.refs{display:flex;flex-direction:column;gap:2px;margin:2px 0 12px;background:var(--fill);border-radius:12px;padding:4px 0}
+.ref{display:flex;gap:12px;align-items:center;padding:6px 12px;font-size:14px}
+.ref + .ref{border-top:1px solid var(--hair-soft)}
+.ref .rt{width:24px;aspect-ratio:9/16;border-radius:4px;overflow:hidden;position:relative;container-type:inline-size;flex:none}
+.ref .d{color:var(--label-2);font-size:13px;letter-spacing:0}
+.opts-q{font-size:13px;font-weight:600;margin:0 0 8px}
+.opts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.opt{text-align:left;border-radius:12px;padding:0;position:relative}
+.opt .ot{display:block;aspect-ratio:432/384;border-radius:10px;overflow:hidden;position:relative;container-type:inline-size;box-shadow:0 0 0 1px var(--hair-soft);transition:box-shadow .25s var(--ease),transform .35s var(--spring)}
+.opt:hover .ot{transform:translateY(-2px);box-shadow:0 0 0 1px var(--hair-soft),var(--shadow-1)}
+.opt:active .ot{transform:scale(.98)}
+.opt.sel .ot{box-shadow:0 0 0 2.5px var(--blue)}
+.opt .ck{position:absolute;right:6px;top:6px;width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.9);box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.25);display:grid;place-items:center;transition:transform .35s var(--spring)}
+.opt.sel .ck{background:var(--blue);box-shadow:0 0 0 2px #fff}
+.opt .ck svg{opacity:0;transition:opacity .15s}
+.opt.sel .ck svg{opacity:1}
+.opt .on{display:block;margin-top:6px;font-size:13px;font-weight:500}
+.opt .on small{display:block;font-size:12px;color:var(--label-2);font-weight:400;letter-spacing:0}
+.opt.sel .on{color:var(--link)}
+.opt-ft{font-size:13px;color:var(--label-2);margin-top:10px;letter-spacing:0}
+.opt-ft b{color:var(--label);font-weight:600}
+
+/* 处理中 */
+.sws{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;margin:4px 0 6px}
+.sw{aspect-ratio:1;border-radius:7px;position:relative;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+.sw.photo{background:url(assets/speaker_bottom.jpg) 4% 30%/300% auto}
+.sw.sel{box-shadow:0 0 0 2px var(--white),0 0 0 4px var(--blue)}
+.sw-l{display:flex;justify-content:space-between;font-size:12px;color:var(--label-2);letter-spacing:0}
+.sw-l b{color:var(--label);font-weight:600}
+.work{margin-top:12px;background:var(--fill);border-radius:12px;padding:12px 14px}
+.work .row{display:flex;align-items:center;gap:10px}
+.spin{width:16px;height:16px;position:relative;flex:none;animation:spin 1s steps(8) infinite}
+.spin i{position:absolute;left:7px;top:0;width:2px;height:5px;border-radius:1px;background:var(--label-2);transform-origin:1px 8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.work .row b{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.work .row span{font-size:13px;color:var(--label-2);letter-spacing:0}
+.work .row .pill{margin-left:auto}
+.pbar{height:4px;border-radius:2px;background:var(--fill-2);margin-top:10px;overflow:hidden}
+.pbar i{display:block;height:100%;width:62%;background:var(--blue);border-radius:2px;transition:width .6s var(--spring)}
+.wsteps{display:flex;gap:14px;margin-top:8px;font-size:12px;color:var(--label-2);letter-spacing:0}
+.wsteps .ok{color:var(--label)}
+.wsteps .now{color:var(--link);font-weight:600}
+.wsteps .r{margin-left:auto}
+
+/* 输入框（信息 App / Apple 智能） */
+.composer{flex:none;padding:10px 28px 18px;background:rgba(255,255,255,.86);backdrop-filter:saturate(180%) blur(20px)}
+.chips{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.chip{height:28px;padding:0 12px;border-radius:980px;font-size:13px;color:var(--label);box-shadow:inset 0 0 0 1px var(--hair);transition:background .2s,transform .2s var(--spring);letter-spacing:-.01em}
+.chip:hover{background:var(--fill)}
+.chip:active{transform:scale(.95)}
+.box{border-radius:20px;box-shadow:inset 0 0 0 1px var(--hair);background:var(--white);padding:9px 10px 8px 14px;transition:box-shadow .2s}
+.box:focus-within{box-shadow:inset 0 0 0 1px var(--blue),0 0 0 4px rgba(0,113,227,.15)}
+.box .tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.box .tags:empty{display:none}
+.box textarea{display:block;width:100%;border:0;outline:none;resize:none;font:inherit;font-size:15px;letter-spacing:-.022em;line-height:1.47;color:var(--label);background:transparent;height:44px;padding:0}
+.box textarea::placeholder{color:var(--label-2)}
+.box-ft{display:flex;align-items:center;gap:10px}
+.box-ft .est{font-size:12px;color:var(--label-2);letter-spacing:0}
+.box-ft .est b{color:var(--label);font-weight:600}
+.send{margin-left:auto;width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;display:grid;place-items:center;transition:transform .25s var(--spring),background .2s,opacity .2s}
+.send:hover{background:#0077ED}
+.send:active{transform:scale(.9)}
+.send[disabled]{background:#C7C7CC;cursor:default}
+
+/* ========== 预览台 ========== */
+.pv{background:var(--fill);display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.toolbar{height:56px;flex:none;display:flex;align-items:center;gap:14px;padding:0 24px;background:rgba(245,245,247,.8);backdrop-filter:saturate(180%) blur(20px);position:relative;z-index:4}
+/* 分段控件：滑块跟随 */
+.seg{position:relative;display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--fill-2);border-radius:9px;padding:2px}
+.seg .thumb{position:absolute;top:2px;bottom:2px;left:2px;border-radius:7px;background:var(--white);box-shadow:0 1px 3px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.04);transition:transform .4s var(--spring),width .4s var(--spring)}
+.seg button{position:relative;z-index:1;height:28px;padding:0 16px;font-size:13px;font-weight:500;white-space:nowrap;display:flex;align-items:center;gap:6px;justify-content:center;color:var(--label);letter-spacing:-.01em}
+.seg button:active{opacity:.6}
+.seg .pc{font-size:12px;color:var(--link);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:0}
+.seg .dot{width:6px;height:6px;border-radius:50%;background:var(--blue);animation:breath 1.6s ease-in-out infinite}
+@keyframes breath{50%{opacity:.35}}
+/* macOS 开关：跟随强调色 */
+.switch{display:flex;align-items:center;gap:8px;font-size:13px;letter-spacing:-.01em}
+.switch i{width:38px;height:22px;border-radius:11px;background:var(--fill-2);box-shadow:inset 0 0 0 .5px rgba(0,0,0,.08);position:relative;transition:background .25s}
+.switch i::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .4s var(--spring)}
+.switch[aria-pressed="true"] i{background:var(--blue)}
+.switch[aria-pressed="true"] i::after{transform:translateX(16px)}
+.toolbar .sp{flex:1}
+.bal{font-size:13px;color:var(--label-2);letter-spacing:0;white-space:nowrap}
+.bal b{color:var(--label);font-weight:600;font-variant-numeric:tabular-nums;margin-left:4px}
+.exp{position:relative}
+.menu{position:absolute;right:0;top:calc(100% + 8px);width:232px;padding:5px;border-radius:12px;background:rgba(252,252,253,.86);backdrop-filter:saturate(180%) blur(24px);box-shadow:0 0 0 .5px rgba(0,0,0,.12),0 12px 32px rgba(0,0,0,.18);transform-origin:top right;transform:scale(.94);opacity:0;pointer-events:none;transition:transform .35s var(--spring),opacity .18s}
+.menu.open{transform:none;opacity:1;pointer-events:auto}
+.menu button{display:flex;flex-direction:column;width:100%;text-align:left;padding:7px 10px;border-radius:7px}
+.menu button:hover{background:var(--blue);color:#fff}
+.menu button:hover small{color:rgba(255,255,255,.85)}
+.menu b{font-size:13px;font-weight:500}
+.menu small{font-size:12px;color:var(--label-2);letter-spacing:0}
+.menu hr{border:0;height:1px;background:var(--hair-soft);margin:4px 8px}
+
+.stagewrap{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:center;gap:48px;padding:14px 32px 0}
+.pwrap{display:flex;flex-direction:column;gap:12px}
+.players{display:flex;gap:28px}
+.pl{display:flex;flex-direction:column;gap:10px;align-items:center}
+.pl .lb{display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600;height:22px;letter-spacing:-.01em}
+.pl .lb .chg{font-size:12px;font-weight:500;color:var(--link);background:var(--blue-tint);padding:1px 8px;border-radius:980px;opacity:0;transition:opacity .2s;letter-spacing:0}
+.pl .lb .chg.on{opacity:1}
+.screen{position:relative;height:690px;aspect-ratio:9/16;background:#111;overflow:hidden;container-type:inline-size;border-radius:22px;cursor:pointer;box-shadow:0 0 0 1px rgba(0,0,0,.06),0 30px 60px -24px rgba(0,0,0,.35),0 8px 20px -10px rgba(0,0,0,.15)}
+.is-cmp .screen{height:620px}
+.single .pl .lb{display:none}
+.layer{position:absolute;inset:0}
+.layer img.full{width:100%;height:100%;object-fit:cover;display:block}
+.layer .top{position:absolute;left:0;right:0;top:0;height:50%;container-type:size}
+.layer .bot{position:absolute;left:0;right:0;bottom:0;height:50%;background:url(assets/speaker_bottom.jpg) center/cover}
+.layer .portrait{position:absolute;inset:0;background:url(assets/speaker_bottom.jpg) 50% 20%/auto 100%}
+.burn{position:absolute;left:8%;right:8%;top:44.5%;text-align:center;text-wrap:balance;font-size:5.6cqw;line-height:1.3;color:#fff;font-weight:900;font-family:"Noto Sans SC",sans-serif;-webkit-text-stroke:.9cqw #111;paint-order:stroke fill;pointer-events:none;letter-spacing:0}
+/* 悬停：材质胶囊提示「点按引用」 */
+.hov{position:absolute;left:50%;top:16px;transform:translate(-50%,-6px);opacity:0;z-index:3;pointer-events:none;background:rgba(30,30,32,.62);backdrop-filter:blur(16px) saturate(180%);color:#fff;font-size:12px;padding:5px 11px;border-radius:980px;white-space:nowrap;transition:opacity .2s,transform .4s var(--spring);letter-spacing:0}
+.screen:hover .hov{opacity:1;transform:translate(-50%,0)}
+.ripple{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;border:2px solid #fff;pointer-events:none;z-index:3}
+.gen{position:absolute;inset:0;z-index:2;pointer-events:none}
+.gen .half{position:absolute;left:0;right:0;bottom:0;height:50%;background:rgba(20,28,48,.35);backdrop-filter:blur(14px) saturate(140%)}
+.gen .lbl{position:absolute;left:50%;top:75%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;color:#fff}
+.gen .lbl svg{width:52px;height:52px;transform:rotate(-90deg)}
+.gen .lbl circle{fill:none;stroke-width:4;stroke-linecap:round}
+.gen .lbl b{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.gen .lbl span{font-size:12px;opacity:.9;letter-spacing:0}
+.ctl{display:flex;align-items:center;gap:12px;padding:0 4px}
+.pbtn{width:34px;height:34px;border-radius:50%;background:var(--white);box-shadow:0 0 0 .5px rgba(0,0,0,.1),0 1px 3px rgba(0,0,0,.1);display:grid;place-items:center;flex:none;transition:transform .25s var(--spring)}
+.pbtn:active{transform:scale(.9)}
+.tc{font-size:13px;font-variant-numeric:tabular-nums;font-weight:500;white-space:nowrap;letter-spacing:0}
+.tc em{font-style:normal;color:var(--label-2);font-weight:400}
+.scrub{flex:1;height:20px;position:relative;cursor:pointer}
+.scrub::before{content:"";position:absolute;left:0;right:0;top:8px;height:4px;border-radius:2px;background:rgba(0,0,0,.1)}
+.scrub .fill{position:absolute;left:0;top:8px;height:4px;border-radius:2px;background:var(--label)}
+.scrub:hover::before,.scrub:hover .fill{top:7px;height:6px;border-radius:3px}
+/* 画面右侧信息（照片 App 的「信息」面板） */
+.info{width:268px;padding-top:4px;display:flex;flex-direction:column;height:730px}
+.is-cmp .info{display:none}
+.info .eb{font-size:12px;color:var(--label-2);letter-spacing:0}
+.info .tcb{font-size:56px;font-weight:600;letter-spacing:-.035em;line-height:1.07;margin-top:2px;font-variant-numeric:tabular-nums}
+.info .tcb small{font-size:17px;color:var(--label-2);font-weight:400;letter-spacing:-.01em;margin-left:4px}
+.info .sg{font-size:14px;color:var(--label-2);margin-top:4px;letter-spacing:-.01em}
+.info .sg b{color:var(--label);font-weight:600}
+.info blockquote{margin:20px 0 0;font-size:21px;line-height:1.38;font-weight:600;letter-spacing:.011em;text-wrap:balance}
+.info .diff{display:none;margin-top:14px;gap:8px;align-items:flex-start;font-size:13px;color:var(--label-2);letter-spacing:0;line-height:1.5}
+.info .diff.on{display:flex}
+.info .diff i{font-style:normal;flex:none;color:var(--link);background:var(--blue-tint);padding:0 8px;border-radius:980px;font-weight:600;line-height:20px}
+.info .hint{margin-top:auto;font-size:13px;color:var(--label-2);letter-spacing:0;line-height:1.6}
+.info .hint .tg{margin-top:6px;pointer-events:none}
+.facts{display:flex;margin-top:18px;padding-top:14px;border-top:1px solid var(--hair)}
+.facts div{display:flex;flex-direction:column;flex:1;line-height:1.25}
+.facts b{font-size:19px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.facts small{font-size:12px;color:var(--label-2);letter-spacing:0}
+
+/* ========== 成片卡片复刻（成片内容，用思源黑体） ========== */
+.ct{position:absolute;inset:0;overflow:hidden;font-family:"Noto Sans SC",sans-serif;color:#141414;line-height:1.2;letter-spacing:0}
+.ct.warm{background:radial-gradient(120% 90% at 70% 30%,#F1EBE1 0%,#DCD2C2 70%,#CFC3AF 100%)}
+.ct .win{position:absolute;left:7cqw;right:7cqw;top:8cqw;background:#fff;border-radius:3cqw;box-shadow:0 1.5cqw 4cqw rgba(60,40,20,.16);padding:5cqw}
+.ct.hook{background:#0F0F0D;color:#fff;padding:8cqw 7cqw}
+.ct.hook .src{position:absolute;left:7cqw;top:6cqw;right:24cqw;background:#D4FF3A;color:#111;font-size:3.6cqw;font-weight:700;padding:1cqw 2cqw;border-radius:1cqw;white-space:nowrap;overflow:hidden}
+.ct.hook .tag{position:absolute;top:6cqw;right:6cqw;font-size:4.4cqw;border:.5cqw solid rgba(255,255,255,.5);padding:.6cqw 2.4cqw;border-radius:9cqw}
+.ct.hook .k{font-size:5cqw;color:#D4FF3A;font-weight:700;margin-top:9cqw}
+.ct.hook .big{font-size:26cqw;font-weight:900;color:#D4FF3A;line-height:1;letter-spacing:-.02em;margin-top:2cqw}
+.ct.hook .big.xl{font-size:31cqw;letter-spacing:-.04em;margin-top:1cqw}
+.ct.hook .t{font-size:11cqw;font-weight:900;line-height:1.18;margin-top:6cqw}
+.ct.hook .t .hl{color:#D4FF3A}
+.ct.hook .vs{margin-top:3cqw;font-size:4.4cqw;color:#ddd}
+.ct.hook .vs i{display:block;height:3.6cqw;margin:1cqw 0 2cqw;background:#5A5A55;border-radius:.6cqw}
+.ct.hook .vs i.l{background:#D4FF3A}
+.ct .url{font-size:3.8cqw;color:#666;background:#F2F2F0;border-radius:9cqw;padding:1.4cqw 3cqw}
+.ct .h{font-size:7cqw;font-weight:900;margin-top:4cqw}
+.ct .ln2{display:flex;justify-content:space-between;font-size:4cqw;padding:2.4cqw 0;border-bottom:.3cqw solid #eee}
+.ct .ln2 i{font-style:normal;color:#888}
+.ct .six{font-size:28cqw;font-weight:900;letter-spacing:-.03em;line-height:1}
+.ct .six small{font-size:8cqw;margin-left:1cqw}
+.ct .dots{height:16cqw;margin-top:3cqw;background-image:radial-gradient(circle,#141414 .55cqw,transparent .65cqw);background-size:2.6cqw 2.6cqw}
+.ct .title{position:absolute;inset:0;display:grid;place-items:center;font-weight:900;font-size:11cqw}
+.ct .win.term{background:#161616;color:#E8E6E1;font-family:ui-monospace,Menlo,monospace;font-size:4.2cqw;line-height:1.7}
+.ct .term .p{color:#E28B67}
+.ct .term .g{color:#8A8A85}
+.ct .term .y{color:#D4FF3A}
+.ct .cmp .r{margin-top:4cqw;font-size:4.4cqw}
+.ct .cmp .r i{display:block;height:5cqw;margin-top:1.4cqw;border-radius:1cqw;background:#141414}
+.ct .cmp .r.a i{background:#E0482B}
+.ct .cmp .r em{font-style:normal;font-weight:900;float:right}
+.ct .duo{display:grid;grid-template-columns:1fr 1fr;gap:3cqw;margin-top:3cqw}
+.ct .duo div{border-top:.8cqw solid #141414;padding-top:2cqw}
+.ct .duo div.a{border-color:#E0482B}
+.ct .duo b{display:block;font-size:17cqw;font-weight:900;letter-spacing:-.03em;line-height:1}
+.ct .duo div.a b{color:#E0482B}
+.ct .duo span{font-size:4cqw;color:#555}
+.ct .ppl{display:grid;grid-template-columns:repeat(10,1fr);gap:1.4cqw;margin-top:3cqw}
+.ct .ppl i{aspect-ratio:1/1.6;background:#D9D3C8;border-radius:40% 40% 1cqw 1cqw}
+.ct .ppl i.a{background:#E0482B}
+.ct .ppl i.b{background:#141414}
+.ct .cmt{display:flex;gap:3cqw;align-items:center;margin-top:4cqw}
+.ct .cmt .av{width:9cqw;height:9cqw;border-radius:50%;background:#D8CCBA;flex:none}
+.ct .cmt .bx{flex:1;border:.4cqw solid #ddd;border-radius:9cqw;padding:2cqw 3.5cqw;font-size:4.4cqw;color:#999}
+
+.fly{position:fixed;z-index:30;pointer-events:none;left:0;top:0}
+.toast{position:fixed;left:50%;top:18px;transform:translate(-50%,-12px) scale(.96);opacity:0;background:rgba(30,30,32,.78);backdrop-filter:blur(20px) saturate(180%);color:#fff;font-size:13px;padding:9px 16px;border-radius:980px;transition:transform .45s var(--spring),opacity .2s;pointer-events:none;z-index:40;letter-spacing:0}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+@media (prefers-reduced-transparency:reduce){.toolbar,.ch-hd,.composer,.menu,.rail{backdrop-filter:none;background:#fff}}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 侧边栏 -->
+  <nav class="rail" aria-label="项目">
+    <a class="appicon" href="#" title="明知AI剪辑 · Mingzhi"><span>明知</span></a>
+    <button class="proj on" title="第 2 期 · 高性价比人生指南"><span class="pt" style="background-image:url(assets/frame_003.jpg)"></span><span>第 2 期</span></button>
+    <button class="proj" title="第 1 期" data-toast="打开第 1 期（演示）"><span class="pt" style="background-image:url(assets/speaker_bottom.jpg)"></span><span>第 1 期</span></button>
+    <button class="newp" title="新建" data-toast="拖入一条竖屏口播即可开始"><svg width="14" height="14" viewBox="0 0 14 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 2v10M2 7h10"/></svg></button>
+    <span class="lab">新建</span>
+    <span class="sp"></span>
+    <button class="gear" title="设置" data-toast="设置：可想 AI、模型、导出位置"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
+  </nav>
+
+  <!-- 对话 -->
+  <section class="chat">
+    <header class="ch-hd">
+      <div class="eyebrow"><span>明知AI剪辑</span><span>·</span><span>MIT 开源 · 本机运行</span></div>
+      <h1>第 2 期 <span>高性价比人生指南</span></h1>
+    </header>
+    <div class="flow" id="flow">
+      <div class="stamp"><b>今天</b> 22:51</div>
+
+      <!-- 1 设置卡 -->
+      <div class="msg me">
+        <div class="group" style="width:84%" id="setup">
+          <button class="g-row" id="setupBtn" aria-expanded="false">
+            <span class="ic" style="background-image:url(assets/speaker_bottom.jpg)"></span>
+            <span class="k">第2期_口播.mov<small>3:42 · 书房 · 刀锋 · 思源黑体 · 预估 ¥3.84 / 上限 ¥10</small></span>
+            <svg class="chev" width="8" height="13" viewBox="0 0 8 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1.5 1.5l5 5-5 5"/></svg>
+          </button>
+          <div class="fold" id="setupFold"><div>
+            <div class="g-row"><span class="ic" style="background:url(assets/speaker_bottom.jpg) 4% 30%/300% auto"></span><span class="k">背景</span><span class="v">书房</span></div>
+            <div class="g-row"><span class="k">字幕样式<small>刀锋 · 思源黑体</small></span><span class="sub-pv">怎么少花<span class="hl">冤枉钱</span></span></div>
+            <div class="g-row"><span class="k">模型<small>本机 Paraformer 识别（音频不出本机）· gemini-3.5-flash 剪辑与分镜 · GPT Image 2 · Seedance</small></span></div>
+            <div class="g-row"><span class="k">预估花费</span><span class="v num">¥3.84 / 上限 ¥10</span></div>
+            <div class="g-row"><span class="k">开始出片</span><span class="started"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="7" fill="currentColor"/><path d="M4 7.2l2 2 4-4.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>已确认</span></div>
+          </div></div>
+        </div>
+      </div>
+
+      <!-- 2 剪辑完成 / 重播 -->
+      <div class="msg ai">
+        <div class="ai-hd"><span class="av">明知</span>明知<span class="st">22:52 – 23:06</span></div>
+        <div class="panel" id="live">
+          <div class="fold open" id="liveSum"><div><div class="sum">
+            <div class="eb"><svg width="13" height="13" viewBox="0 0 14 14"><circle cx="7" cy="7" r="7" fill="currentColor"/><path d="M4 7.2l2 2 4-4.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>剪辑完成 · 用时 14 分 16 秒</div>
+            <div class="dur"><span class="was num">3:42</span><span class="ar">→</span><span class="now num">1:57</span></div>
+            <div class="cap">删除 <b>37</b> 处气口 · <b>12</b> 处口误 · <b>18</b> 段</div>
+            <div class="pgrid" id="pgrid"></div>
+            <div class="acts"><button class="pill tint sm" id="replayBtn"><svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.5v9l7.5-4.5z"/></svg>重播剪辑过程</button><span class="meta">自检 版式 9.1 · 层级 8.8 · 动效 8.6 · 品牌 9.3</span></div>
+          </div></div></div>
+          <div class="fold" id="liveStage"><div><div class="stage" id="stage"></div></div></div>
+        </div>
+      </div>
+
+      <!-- 3 v1 -->
+      <div class="msg ai"><div class="ver" data-v="1" id="ver1"></div></div>
+
+      <div class="stamp">23:09</div>
+      <!-- 4 用户 -->
+      <div class="msg me"><div class="bubble"><span class="tg" data-t="58"></span> 这张数据太弱了，加上具体比例，再把开头第二张钩子卡的 ¥0.51 放大</div></div>
+
+      <!-- 5 AI 确认 + 选项 -->
+      <div class="msg ai">
+        <div class="ai-hd"><span class="av">明知</span>明知</div>
+        <p>好的，改这两处，其余 16 段保持不变。</p>
+        <div class="refs" id="refs"></div>
+        <div class="opts-q">对比卡想用哪种版式？</div>
+        <div class="opts" id="opts"></div>
+        <div class="opt-ft" id="optFt">已选 <b>大数字对比</b> · 只重渲染 2 段，预计 +¥0.16</div>
+      </div>
+
+      <!-- 6 v2 -->
+      <div class="msg ai"><div class="ver on" data-v="2" id="ver2"></div></div>
+
+      <div class="stamp">23:14</div>
+      <!-- 7 用户 -->
+      <div class="msg me"><div class="bubble">背景换成夜景落地窗试试</div></div>
+
+      <!-- 8 处理中 -->
+      <div class="msg ai">
+        <div class="ai-hd"><span class="av">明知</span>明知<span class="st">正在生成版本 3</span></div>
+        <p>好，换成「夜景落地窗」。只重做人像这半屏，卡片和字幕不动。</p>
+        <div class="sws" id="sws"></div>
+        <div class="sw-l"><span>原来：书房</span><span>已选：<b>夜景落地窗</b></span></div>
+        <div class="work">
+          <div class="row"><span class="spin" id="spin"></span><b id="pct">62%</b><span>抠像合成中 · 第 11 / 18 段</span><button class="pill gray sm" data-toast="已停止，版本 2 不受影响">停止</button></div>
+          <div class="pbar"><i id="pbar"></i></div>
+          <div class="wsteps"><span class="ok">生成背景 ✓</span><span class="now">抠像合成</span><span>重渲染</span><span>自检</span><span class="r">预计 +¥0.12 · 约 1 分钟</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 输入 -->
+    <div class="composer">
+      <div class="chips" id="chips"><button class="chip">节奏再快一点</button><button class="chip">换一张 B-roll</button><button class="chip">字幕换成得意黑</button><button class="chip" data-export>导出</button></div>
+      <div class="box">
+        <div class="tags" id="tags"></div>
+        <textarea id="ta" rows="2" placeholder="告诉明知怎么改，或点按右侧画面引用某一刻"></textarea>
+        <div class="box-ft"><span class="est" id="est">本轮预估 <b>¥0.00</b></span>
+          <button class="send" id="send" aria-label="发送" disabled><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12V2.5M2.8 6.5L7 2.3l4.2 4.2"/></svg></button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 预览 -->
+  <section class="pv">
+    <header class="toolbar">
+      <div class="seg" id="seg" role="tablist"><span class="thumb"></span>
+        <button data-v="1" role="tab">版本 1</button>
+        <button data-v="2" role="tab">版本 2</button>
+        <button data-v="3" role="tab"><span class="dot"></span>版本 3 <span class="pc" id="v3pc">62%</span></button>
+      </div>
+      <button class="switch" id="cmp" aria-pressed="false"><i></i>对比</button>
+      <span class="sp"></span>
+      <span class="bal">可想 AI 余额<b>¥36.27</b></span>
+      <div class="exp">
+        <button class="pill blue" id="expBtn">导出</button>
+        <div class="menu" id="menu">
+          <button data-toast="正在导出 MP4 · 1080×1920"><b>MP4 视频</b><small>1080×1920 · 1:57</small></button>
+          <hr>
+          <button data-toast="已导出封面 4:3 与 3:4"><b>封面</b><small>4:3 + 3:4</small></button>
+        </div>
+      </div>
+    </header>
+    <div class="stagewrap" id="sw">
+      <div class="pwrap" id="pwrap">
+        <div class="players single" id="players"></div>
+        <div class="ctl">
+          <button class="pbtn" id="pbtn" aria-label="播放"><svg id="picon" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.5v9l7.5-4.5z"/></svg></button>
+          <span class="tc" id="tc"></span>
+          <div class="scrub" id="scrub"><div class="fill"></div></div>
+        </div>
+      </div>
+      <aside class="info">
+        <div class="eb" id="infoVer"></div>
+        <div class="tcb" id="infoTc"></div>
+        <div class="sg" id="infoSeg"></div>
+        <blockquote id="infoTxt"></blockquote>
+        <div class="diff" id="infoDiff"><i id="infoDiffV">版本 2 已改</i><span id="infoDiffT"></span></div>
+        <div class="hint">点按画面或暂停，<br>就能在对话里引用这一刻。<br><span class="tg" id="hintTag"></span></div>
+        <div class="facts" id="facts"></div>
+      </aside>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 弹簧 → CSS linear() 缓动（Apple：阻尼比 + 响应时间） ================= */
+function spring(damping = 1, response = .4){
+  const w = 2 * Math.PI / response, z = damping;
+  const x = t => z >= 1 ? 1 - Math.exp(-w*t) * (1 + w*t)
+    : 1 - Math.exp(-z*w*t) * (Math.cos(w*Math.sqrt(1-z*z)*t) + z/Math.sqrt(1-z*z) * Math.sin(w*Math.sqrt(1-z*z)*t));
+  let T = .1; while (T < 3 && Math.abs(1 - x(T)) > .001) T += .02;
+  const n = 40, pts = [];
+  for (let i = 0; i <= n; i++) pts.push(+(x(T*i/n)).toFixed(4));
+  pts[n] = 1;
+  return { easing:`linear(${pts.join(',')})`, duration: Math.round(T * 1000) };
+}
+const SPR = spring(1, .4), FAST = spring(1, .26), BOUNCE = spring(.8, .45);
+
+/* ================= 真实内容 ================= */
+const SEGS = [
+  {t:0,   text:'吃抗氧化补剂的人，死亡率反而更高一些', tpl:'钩子卡 1/3', frame:'frame_003'},
+  {t:4,   text:'买双色球，每投 1 块钱，长期平均只能拿回五毛一', tpl:'钩子卡 2/3', card:'hook2'},
+  {t:8,   text:'帮人收钱取现的兼职，挣几百块，换一份案底', tpl:'钩子卡 3/3', card:'hook3'},
+  {t:13,  text:'我平时经常在 GitHub 上面去逛 AI 项目', tpl:'网页截图', card:'web', broll:1},
+  {t:17,  text:'叫《高性价比人生指南》', tpl:'网页截图', frame:'frame_022', broll:1},
+  {t:21,  text:'这个项目里面一共讲了 650 条', tpl:'数字网格卡', card:'grid'},
+  {t:26,  text:'怎么少花冤枉钱', tpl:'大字标题卡', card:'title'},
+  {t:30,  text:'每一条信息都告诉你你会失去什么', tpl:'知识卡', frame:'frame_038'},
+  {t:35,  text:'并且它每一条知识都是有证据来源的', tpl:'知识卡 · 证据 A', frame:'frame_047'},
+  {t:40,  text:'然后我就很好奇地让 AI 帮我把它读了一遍', tpl:'终端卡', card:'term1'},
+  {t:47,  text:'第一点呢，它就建议我少喝饮料', tpl:'终端卡', card:'term2'},
+  {t:52,  text:'每天喝两瓶饮料以上的人', tpl:'AI 生图', frame:'frame_062', broll:1},
+  {t:58,  text:'每天喝两杯代糖饮料以上的', tpl:'对比条卡', card:'compare'},
+  {t:65,  text:'从收入的角度来看，它还提醒我 / 但是要尽可能地减少无用的消费', tpl:'划线清单卡', frame:'frame_080'},
+  {t:80,  text:'我们这些做 AI 的人呢，那轮到自己的身体和存款', tpl:'纯人像', card:'portrait'},
+  {t:98,  text:'由于 GitHub 在国内可能不太方便打开', tpl:'加载动画卡', frame:'frame_101', broll:1},
+  {t:105, text:'想要的朋友呢，就在评论区留言', tpl:'评论卡', card:'comment'},
+  {t:112, text:'自己该如何更高性价比地生活', tpl:'三连 CTA', frame:'frame_114'},
+];
+const END = 117;
+const CHANGED = {1:'¥0.51 放大到占卡片六成宽', 12:'换成「大数字对比」，加上具体比例'};
+const VERS = {
+  1:{score:'8.8', cost:'¥3.84', costK:'花费', note:'全片 18 段 · 14 分 16 秒'},
+  2:{score:'9.0', cost:'+¥0.16', costK:'本轮', note:'只重渲了 2 段 · 38 秒'},
+  3:{score:'—', cost:'+¥0.12', costK:'预计', note:'夜景落地窗 · 生成中'},
+};
+const BGS = [
+  {n:'书房', photo:1},{n:'极简工作室', c:'linear-gradient(160deg,#EEEBE4,#CFC9BD)'},{n:'咖啡馆', c:'linear-gradient(160deg,#A27B5C,#5E402D)'},
+  {n:'夜景落地窗', c:'radial-gradient(circle at 30% 40%,#F2C46B 0 1px,transparent 1.6px),radial-gradient(circle at 70% 62%,#E9E3C8 0 1px,transparent 1.6px),linear-gradient(180deg,#121A2B,#2C3B5A)'},
+  {n:'科技暗色', c:'linear-gradient(160deg,#2A2E33,#131517)'},{n:'木质茶室', c:'linear-gradient(160deg,#C3A57F,#7E5F40)'},
+  {n:'绿植阳台', c:'linear-gradient(160deg,#A9BE97,#4F6B4A)'},{n:'图书馆', c:'linear-gradient(160deg,#87705A,#3F3226)'},
+  {n:'城市天台', c:'linear-gradient(180deg,#C9D3DC,#7F93A8)'},{n:'纯色灰墙', c:'linear-gradient(160deg,#BDB9B2,#8F8B85)'},
+];
+// 重播用的原文：f = 要删的（b 气口 / e 口误）
+const MS = [
+  ['00:00', ['吃抗氧化补剂的人，', {f:'嗯，', k:'b'}, '死亡率反而更高一些']],
+  ['00:13', [{f:'然后呢，嗯，', k:'b'}, '我平时经常在 GitHub 上面去逛 AI 项目']],
+  ['00:17', [{f:'叫《高性价比…… ', k:'e'}, '叫《高性价比人生指南》']],
+  ['00:21', ['这个项目里面一共讲了', {f:'，呃，', k:'b'}, ' 650 条']],
+  ['00:47', [{f:'那个……', k:'b'}, '第一点呢，它就建议我', {f:'少喝，', k:'e'}, '少喝饮料']],
+];
+const STEPS = ['识别','剪口误','换背景','分镜','B-roll','渲染','自检'];
+const DIMS = [['版式',9.1],['层级',8.8],['动效节奏',8.6],['品牌一致性',9.3]];
+
+/* ================= 工具 ================= */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const fmt = s => { s = Math.max(0, Math.floor(s)); return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); };
+const segAt = t => { let i = SEGS.length - 1; while (i > 0 && SEGS[i].t > t) i--; return i; };
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const state = { v:2, t:4, playing:false, cmp:false, shown:{} };
+let tt; function toast(m){ const el = $('#toast'); el.textContent = m; el.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => el.classList.remove('show'), 2200); }
+
+/* ================= 成片卡片复刻 ================= */
+const SRC = '<span class="src">近 3 句都出自《高性价比人生指南》</span>';
+function cardHTML(type){
+  switch(type){
+    case 'hook2': return `<div class="ct hook">${SRC}<span class="tag">2 / 3</span><div class="k">双色球 · 长期平均回报</div><div class="big">¥0.51</div><div class="vs">每投 ¥1.00<i></i>只拿回 ¥0.51<i class="l" style="width:51%"></i></div></div>`;
+    case 'hook2xl': return `<div class="ct hook">${SRC}<span class="tag">2 / 3</span><div class="k">双色球 · 每投 1 块钱，平均拿回</div><div class="big xl">¥0.51</div><div class="vs"><i class="l" style="width:51%;margin-top:3cqw"></i></div></div>`;
+    case 'hook3': return `<div class="ct hook">${SRC}<span class="tag">3 / 3</span><div class="k">帮人收钱取现的兼职</div><div class="t">挣几百块<br>换一份<span class="hl">案底</span></div></div>`;
+    case 'web': return `<div class="ct warm"><div class="win"><span class="url">github.com/trending · AI</span><div class="h">Trending</div><div class="ln2"><b>eternity4719 / HowToLiveBetter</b><i>3.5 万 ★</i></div><div class="ln2"><b>AI 项目 · 今日上榜</b><i>…</i></div></div></div>`;
+    case 'grid': return `<div class="ct warm"><div class="win"><div class="six">650<small>条</small></div><div class="dots"></div></div></div>`;
+    case 'title': return `<div class="ct warm"><div class="title">怎么少花冤枉钱</div></div>`;
+    case 'term1': return `<div class="ct warm"><div class="win term"><div class="g">~/HowToLiveBetter</div><div><span class="p">❯</span> 帮我把这个项目读一遍</div><div class="g">● 读取 650 条 …</div><div class="y">● 完成</div></div></div>`;
+    case 'term2': return `<div class="ct warm"><div class="win term"><div><span class="p">❯</span> 给我三条建议</div><div class="y">01 少喝饮料</div><div class="g">02 ……</div><div class="g">03 ……</div></div></div>`;
+    case 'compare': return `<div class="ct warm"><div class="win cmp"><div class="h" style="margin-top:0">代糖饮料</div><div class="r a">每天 ≥ 2 杯<i style="width:88%"></i></div><div class="r">很少喝<i style="width:46%"></i></div></div></div>`;
+    // 三种版式；比例为示意数据，正式版从原文证据中取
+    case 'cmpA': return `<div class="ct warm"><div class="win cmp"><div class="h" style="margin-top:0">代糖饮料</div><div class="r a">每天 ≥ 2 杯<em>31%</em><i style="width:88%"></i></div><div class="r">很少喝<em>18%</em><i style="width:51%"></i></div></div></div>`;
+    case 'cmpB': return `<div class="ct warm"><div class="win"><div class="h" style="margin-top:0">代糖饮料 · 风险对比</div><div class="duo"><div class="a"><b>31%</b><span>每天 ≥ 2 杯</span></div><div><b>18%</b><span>很少喝</span></div></div></div></div>`;
+    case 'cmpC': return `<div class="ct warm"><div class="win"><div class="h" style="margin-top:0">每 10 人里</div><div class="ppl">${'<i class="a"></i>'.repeat(3)}${'<i></i>'.repeat(7)}</div><div class="ppl">${'<i class="b"></i>'.repeat(2)}${'<i></i>'.repeat(8)}</div></div></div>`;
+    case 'comment': return `<div class="ct warm"><div class="win"><div class="h" style="margin-top:0">评论区留言</div><div class="cmt"><span class="av"></span><span class="bx">想要的朋友，留言…</span></div><div class="cmt"><span class="av"></span><span class="bx">想要 +1</span></div></div></div>`;
+  }
+  return '';
+}
+function cardOf(i, v){
+  const s = SEGS[i];
+  if (v >= 2 && s.card === 'hook2') return 'hook2xl';
+  if (v >= 2 && s.card === 'compare') return 'cmpB';
+  return s.card;
+}
+function frameHTML(i, v){
+  const s = SEGS[i];
+  if (s.frame) return `<img class="full" src="assets/${s.frame}.jpg" alt="${s.text}">`;
+  const burn = `<div class="burn">${s.text.replace(' / ','<br>')}</div>`;
+  if (s.card === 'portrait') return `<div class="portrait"></div>${burn}`;
+  return `<div class="top">${cardHTML(cardOf(i, v))}</div><div class="bot"></div>${burn}`;
+}
+const miniHTML = (i, v) => `<div class="layer">${frameHTML(i, v)}</div>`;
+
+/* ================= @时间引用 ================= */
+function tagHTML(t, v, removable){
+  const i = segAt(t);
+  return `<span class="tt">${miniHTML(i, v)}</span><span class="at">@${fmt(t)}</span><span>${SEGS[i].tpl}</span>${removable ? '<span class="x" role="button" aria-label="移除">×</span>' : ''}`;
+}
+function fillTag(el, t, v){ el.dataset.t = t; el.innerHTML = tagHTML(t, v || state.v, false); el.title = '跳到 ' + fmt(t); }
+document.addEventListener('click', e => { const tg = e.target.closest('.flow .tg'); if (tg){ setPlay(false, true); seek(+tg.dataset.t); } });
+
+/* ================= 预览 ================= */
+function buildPlayers(){
+  const vs = state.cmp ? [1, 2] : [state.v];
+  $('#sw').classList.toggle('is-cmp', state.cmp);
+  $('#players').className = 'players' + (state.cmp ? '' : ' single');
+  $('#players').innerHTML = vs.map(v => `
+    <div class="pl" data-v="${v}">
+      <div class="lb">版本 ${v}<span class="chg">此段已改</span></div>
+      <div class="screen"><span class="hov">点按以在对话中引用此刻</span>${v === 3 ? `<div class="gen"><div class="half"></div><div class="lbl"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" stroke="rgba(255,255,255,.3)"/><circle class="gfg" cx="26" cy="26" r="22" stroke="#fff" pathLength="100" stroke-dasharray="100" stroke-dashoffset="38"/></svg><b class="num gpc">62%</b><span>夜景落地窗 · 抠像合成中</span></div></div>` : ''}</div>
+    </div>`).join('');
+  $$('.screen').forEach(sc => sc.addEventListener('click', e => {
+    const r = sc.getBoundingClientRect();
+    const rp = document.createElement('span'); rp.className = 'ripple'; rp.style.left = (e.clientX - r.left) + 'px'; rp.style.top = (e.clientY - r.top) + 'px'; sc.appendChild(rp);
+    rp.animate([{transform:'scale(.4)', opacity:.9},{transform:'scale(1.6)', opacity:0}], {duration:500, easing:'ease-out'}).finished.then(() => rp.remove());
+    setPlay(false, true); addTag(state.t, e.clientX, e.clientY);
+  }));
+  state.shown = {}; paint(true);
+}
+function paint(force){
+  const i = segAt(state.t);
+  $$('.pl[data-v]').forEach(pl => {
+    const v = +pl.dataset.v, sc = pl.querySelector('.screen'), key = i + ':' + v;
+    if (force || state.shown[v] !== key){
+      state.shown[v] = key;
+      const old = sc.querySelectorAll('.layer');
+      const el = document.createElement('div'); el.className = 'layer'; el.innerHTML = frameHTML(i, v);
+      sc.insertBefore(el, sc.firstChild);
+      el.animate([{opacity:0},{opacity:1}], {duration: old.length ? 220 : 0, easing:'ease-out'}).finished.then(() => old.forEach(o => o.remove()));
+    }
+    pl.querySelector('.chg').classList.toggle('on', v >= 2 && CHANGED[i] !== undefined);
+  });
+  $('#scrub .fill').style.width = (state.t / END * 100) + '%';
+  $('#tc').innerHTML = `${fmt(state.t)} <em>/ 01:57</em>`;
+  const s = SEGS[i];
+  $('#infoVer').textContent = `版本 ${state.v} · 1080 × 1920`;
+  $('#infoTc').innerHTML = `${fmt(state.t)}<small>/ 1:57</small>`;
+  $('#infoSeg').innerHTML = `第 ${i+1} 段，共 18 段 · <b>${s.tpl}</b>`;
+  $('#infoTxt').textContent = '“' + s.text.replace(' / ', '，') + '”';
+  const ch = state.v >= 2 && CHANGED[i] !== undefined;
+  $('#infoDiff').classList.toggle('on', ch); if (ch) $('#infoDiffT').textContent = CHANGED[i];
+  fillTag($('#hintTag'), state.t);
+}
+function seek(t){ state.t = Math.max(0, Math.min(END, t)); paint(); }
+let last = 0;
+function tick(now){ if (!state.playing) return; state.t += (now - last) / 1000; last = now; if (state.t >= END){ state.t = END; setPlay(false, true); } paint(); requestAnimationFrame(tick); }
+// quiet = 不自动插入引用（例如点击对话里的标签）
+function setPlay(on, quiet){
+  const was = state.playing; state.playing = on;
+  $('#picon').innerHTML = on ? '<path d="M3 1.8h2.2v8.4H3zM6.8 1.8H9v8.4H6.8z"/>' : '<path d="M3 1.5v9l7.5-4.5z"/>';
+  $('#pbtn').setAttribute('aria-label', on ? '暂停' : '播放');
+  if (on){ if (state.t >= END) state.t = 0; last = performance.now(); requestAnimationFrame(tick); }
+  else if (was && !quiet) addTag(state.t);
+}
+$('#pbtn').addEventListener('click', () => setPlay(!state.playing));
+$('#scrub').addEventListener('click', e => { const r = e.currentTarget.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * END); });
+
+// 分段控件：白色滑块按弹簧移动到选中项
+function moveThumb(){
+  const btn = $(`#seg button[data-v="${state.cmp ? 2 : state.v}"]`), th = $('#seg .thumb');
+  th.style.width = btn.offsetWidth + 'px'; th.style.transform = `translateX(${btn.offsetLeft - 2}px)`;
+}
+function setVer(v){
+  state.v = v;
+  if (v === 3 && state.cmp){ state.cmp = false; $('#cmp').setAttribute('aria-pressed', 'false'); }
+  $$('.ver').forEach(c => c.classList.toggle('on', +c.dataset.v === v));
+  const V = VERS[v];
+  $('#facts').innerHTML = `<div><b>1:57</b><small>时长</small></div><div><b>${V.score}</b><small>自检</small></div><div><b>${V.cost}</b><small>${V.costK}</small></div>`;
+  moveThumb(); buildPlayers();
+}
+$$('#seg button').forEach(b => b.addEventListener('click', () => { if (state.cmp && +b.dataset.v !== 3){ state.v = +b.dataset.v; moveThumb(); return; } setVer(+b.dataset.v); }));
+$('#cmp').addEventListener('click', () => {
+  state.cmp = !state.cmp; $('#cmp').setAttribute('aria-pressed', state.cmp);
+  if (state.cmp && state.v === 3) state.v = 2;
+  moveThumb(); buildPlayers();
+});
+$('#expBtn').addEventListener('click', e => { e.stopPropagation(); $('#menu').classList.toggle('open'); });
+document.addEventListener('click', e => { if (!e.target.closest('.exp')) $('#menu').classList.remove('open'); });
+
+/* ================= 输入框 ================= */
+const tags = [];
+function renderTags(){
+  $('#tags').innerHTML = tags.map((t,k) => `<span class="tg" data-k="${k}">${tagHTML(t, state.v, true)}</span>`).join('');
+  $$('#tags .x').forEach(x => x.addEventListener('click', e => { e.stopPropagation(); tags.splice(+x.closest('.tg').dataset.k, 1); renderTags(); est(); }));
+}
+function addTag(t, x, y){
+  t = Math.floor(t);
+  if (tags.length >= 3 || tags.some(a => segAt(a) === segAt(t))){ $('#ta').focus({preventScroll:true}); return; }
+  tags.push(t); renderTags(); est();
+  if (x !== undefined){
+    // 被「抛」进输入框：带一点回弹的弹簧（因为是一次带动量的动作）
+    const target = $$('#tags .tg').pop(), r = target.getBoundingClientRect();
+    const f = document.createElement('span'); f.className = 'tg fly'; f.innerHTML = tagHTML(t, state.v, false);
+    document.body.appendChild(f); target.style.opacity = 0;
+    const fx = x - f.offsetWidth / 2, fy = y - f.offsetHeight / 2;
+    f.animate([{transform:`translate(${fx}px,${fy}px) scale(.6)`, opacity:0},{transform:`translate(${r.left}px,${r.top}px) scale(1)`, opacity:1}],
+      {duration:BOUNCE.duration, easing:BOUNCE.easing, fill:'forwards'}).finished.then(() => { f.remove(); target.style.opacity = 1; });
+  }
+  $('#ta').focus({preventScroll:true});
+}
+function est(){
+  const has = $('#ta').value.trim() || tags.length;
+  const v = tags.length ? .08 * tags.length : .12;
+  $('#est').innerHTML = has ? `本轮预估 <b>≈ ¥${v.toFixed(2)}</b> · 只重渲染涉及的段落` : `本轮预估 <b>¥0.00</b>`;
+  $('#send').disabled = !has;
+}
+$('#ta').addEventListener('input', est);
+$('#ta').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); } });
+$('#send').addEventListener('click', send);
+$$('#chips .chip').forEach(c => c.addEventListener('click', e => {
+  if (c.hasAttribute('data-export')){ e.stopPropagation(); $('#menu').classList.add('open'); return; }
+  const ta = $('#ta'); ta.value = (ta.value ? ta.value + '，' : '') + c.textContent; ta.focus(); est();
+}));
+async function send(){
+  const txt = $('#ta').value.trim();
+  if (!txt && !tags.length) return;
+  const flow = $('#flow');
+  const me = document.createElement('div'); me.className = 'msg me enter';
+  me.innerHTML = `<div class="bubble">${tags.map(t => `<span class="tg" data-t="${t}">${tagHTML(t, state.v, false)}</span>`).join(' ')} ${txt.replace(/</g,'&lt;')}</div>`;
+  flow.appendChild(me);
+  const refs = tags.slice(); tags.length = 0; renderTags(); $('#ta').value = ''; est();
+  flow.scrollTo({top:flow.scrollHeight, behavior:'smooth'});
+  await wait(450);
+  const ai = document.createElement('div'); ai.className = 'msg ai enter';
+  ai.innerHTML = `<div class="ai-hd"><span class="av">明知</span>明知<span class="st">正在思考…</span></div><p class="st2"></p>`;
+  flow.appendChild(ai); flow.scrollTo({top:flow.scrollHeight, behavior:'smooth'});
+  const msg = refs.length ? `明白。我会改 ${refs.map(t => '@' + fmt(t)).join('、')} 这 ${refs.length} 段，其余不动。等版本 3 完成后，接着生成版本 4。` : `明白。这条会影响整片，我先列出要改的段落请你确认，再开始。`;
+  const p = ai.querySelector('.st2');
+  for (const ch of msg){ const s = document.createElement('span'); s.className = 'ch'; s.textContent = ch; p.appendChild(s); await wait(18); }
+  ai.querySelector('.st').textContent = '';
+  const ok = document.createElement('div'); ok.style.cssText = 'display:flex;gap:8px';
+  ok.innerHTML = `<button class="pill blue sm">开始修改 · ≈ ¥${(refs.length ? .08 * refs.length : .12).toFixed(2)}</button><button class="pill gray sm">先不改</button>`;
+  ok.querySelector('.blue').onclick = () => toast('已排队，版本 3 完成后开始');
+  ok.querySelector('.gray').onclick = () => ok.remove();
+  ai.appendChild(ok); ok.animate([{opacity:0, transform:'translateY(6px)'},{opacity:1, transform:'none'}], SPR);
+  flow.scrollTo({top:flow.scrollHeight, behavior:'smooth'});
+}
+
+/* ================= 对话静态内容 ================= */
+const CK = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2l2.4 2.4 4.6-5"/></svg>';
+function verCard(v){
+  const el = $('#ver' + v), V = VERS[v];
+  el.innerHTML = `
+    <div class="vt" title="在右侧预览">${miniHTML(v === 2 ? 1 : 0, v)}</div>
+    <div>
+      <div class="vh"><strong>版本 ${v}</strong>${v === 2 ? '<span class="badge">最新</span>' : '<span class="badge g">初稿</span>'}</div>
+      <div class="vn">${V.note}</div>
+      <div class="vs"><div><b>1:57</b><small>时长</small></div><div><b>${V.score}</b><small>自检</small></div><div><b>${V.cost}</b><small>${V.costK}</small></div></div>
+      ${v === 2 ? '<div class="vd">改了 <span class="tg" data-t="4"></span><span class="tg" data-t="58"></span></div>' : ''}
+      <div class="va"><button class="pill gray sm" data-pv>在右侧预览</button><button class="pill tint sm" data-ex>导出…</button></div>
+    </div>`;
+  el.querySelectorAll('.tg').forEach(t => fillTag(t, +t.dataset.t, v));
+  el.querySelector('[data-pv]').onclick = el.querySelector('.vt').onclick = () => setVer(v);
+  el.querySelector('[data-ex]').onclick = e => { e.stopPropagation(); setVer(v); $('#menu').classList.add('open'); };
+}
+$$('.bubble .tg[data-t]').forEach(t => fillTag(t, +t.dataset.t, 1));
+$('#refs').innerHTML = [[1,'把 ¥0.51 放大'],[12,'加上具体比例，换个版式']].map(([i,d]) =>
+  `<div class="ref"><span class="rt">${miniHTML(i,1)}</span><span><span class="tg" data-t="${SEGS[i].t}"></span></span><span class="d">${d}</span></div>`).join('');
+$$('#refs .tg').forEach(t => fillTag(t, +t.dataset.t, 1));
+const OPTS = [['cmpA','双横条','条形 + 百分比'],['cmpB','大数字对比','两个数字并排'],['cmpC','人形格','每 10 人里']];
+$('#opts').innerHTML = OPTS.map((o,k) => `<button class="opt${k===1?' sel':''}" data-k="${k}" aria-pressed="${k===1}"><span class="ot">${cardHTML(o[0])}</span><span class="ck">${CK}</span><span class="on">${o[1]}<small>${o[2]}</small></span></button>`).join('');
+$$('.opt').forEach(o => o.addEventListener('click', () => {
+  $$('.opt').forEach(x => { x.classList.toggle('sel', x === o); x.setAttribute('aria-pressed', x === o); });
+  o.querySelector('.ck').animate([{transform:'scale(.6)'},{transform:'scale(1)'}], BOUNCE);
+  $('#optFt').innerHTML = `已选 <b>${OPTS[+o.dataset.k][1]}</b> · 只重渲染 2 段，预计 +¥0.16`;
+}));
+$('#sws').innerHTML = BGS.map((b,k) => `<span class="sw${b.photo?' photo':''}${k===3?' sel':''}" title="${b.n}" style="${b.photo?'':'background:'+b.c}"></span>`).join('');
+$('#pgrid').innerHTML = SEGS.map((s,i) => `<span class="f" title="${fmt(s.t)} ${s.tpl}" data-t="${s.t}">${miniHTML(i,1)}</span>`).join('');
+$$('#pgrid .f').forEach(f => f.addEventListener('click', () => { setVer(1); seek(+f.dataset.t); }));
+$('#setupBtn').addEventListener('click', e => { const o = $('#setupFold').classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', o); });
+$$('[data-toast]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); toast(b.dataset.toast); $('#menu').classList.remove('open'); }));
+// 版本 3 进度缓慢前进，表示仍在流式处理
+let pc = 62; setInterval(() => { if (pc >= 69) return; pc++; $('#pct').textContent = pc + '%'; $('#pbar').style.width = pc + '%'; $('#v3pc').textContent = pc + '%'; $$('.gpc').forEach(b => b.textContent = pc + '%'); $$('.gfg').forEach(c => c.style.strokeDashoffset = 100 - pc); }, 6000);
+
+// 系统活动指示器：8 根辐条，逐根变淡
+$('#spin').innerHTML = [...Array(8)].map((_,k) => `<i style="transform:rotate(${k*45}deg);opacity:${1 - k*.11}"></i>`).join('');
+
+/* ================= 重播剪辑过程 ================= */
+let run = 0;
+function stageHTML(){
+  return `<div class="steps" id="steps">${STEPS.map(s => `<span>${s}</span>`).join('')}<span class="clk" id="clk">0:00</span></div>
+    <div class="counters"><span class="counter"><b id="cb">0</b>/ 37 处气口</span><span class="counter"><b id="ce">0</b>/ 12 处口误</span></div>
+    <div class="tr" id="tr"></div>
+    <div class="tiles" id="tiles">${SEGS.map((s,i) => `<span class="f${s.broll?' b':''}">${miniHTML(i,1)}</span>`).join('')}</div>
+    <div class="rings" id="rings">${DIMS.map(d => `<div class="ring"><div class="rc"><svg viewBox="0 0 58 58"><circle class="bg" cx="29" cy="29" r="25"/><circle class="fg" cx="29" cy="29" r="25" pathLength="100"/></svg><b>0.0</b></div><span>${d[0]}</span></div>`).join('')}</div>
+    <div class="done" id="done"><svg class="ck" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20"/><path pathLength="1" d="M12 20.5l5.5 5.5L28.5 14"/></svg>
+      <div><div class="big"><span>3:42 → </span>1:57</div><p>删除 <b>37</b> 处气口 · <b>12</b> 处口误 · <b>18</b> 段</p></div></div>
+    <div class="stage-ft"><button class="lnk" id="foldBtn">完成</button></div>`;
+}
+function setStep(k){ $$('#steps span:not(.clk)').forEach((s,j) => { s.classList.toggle('on', j === k); s.classList.toggle('ok', j < k); }); }
+function countTo(el, from, to, ms){ const t0 = performance.now(); return new Promise(r => { const f = now => { const p = Math.min(1, (now - t0) / ms); el.textContent = Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3))); p < 1 ? requestAnimationFrame(f) : r(); }; requestAnimationFrame(f); }); }
+async function replay(){
+  const id = ++run, alive = () => id === run;
+  $('#stage').innerHTML = stageHTML();
+  $('#foldBtn').onclick = () => { run++; $('#liveStage').classList.remove('open'); $('#liveSum').classList.add('open'); };
+  $('#liveSum').classList.remove('open'); $('#liveStage').classList.add('open');
+  await wait(60); $('#live').scrollIntoView({block:'start', behavior:'smooth'});
+  const T0 = performance.now(), DUR = 8600;
+  (function clock(now){ if (!alive()) return; const p = Math.min(1, (now - T0) / DUR); const s = Math.floor(856 * p); $('#clk').textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); if (p < 1) requestAnimationFrame(clock); else $('#clk').textContent = '14:16'; })(T0);
+  await wait(300);
+  // 1 识别：逐字「显影」
+  setStep(0);
+  const tr = $('#tr'), strikes = [];
+  for (const [tc, parts] of MS){
+    if (!alive()) return;
+    const ln = document.createElement('div'); ln.className = 'tl';
+    ln.innerHTML = `<span class="tc">${tc}</span><span class="tx"></span><span class="mg"></span>`;
+    tr.appendChild(ln);
+    const tx = ln.querySelector('.tx');
+    for (const part of parts){
+      const isF = typeof part === 'object';
+      const host = document.createElement('span'); if (isF){ host.className = 'fl'; strikes.push({host, part, ln}); }
+      tx.appendChild(host);
+      for (const ch of (isF ? part.f : part)){ if (!alive()) return; const s = document.createElement('span'); s.className = 'ch'; s.textContent = ch === ' ' ? ' ' : ch; host.appendChild(s); await wait(8); }
+    }
+  }
+  // 2 剪口误：选中（系统蓝选区）→ 删除线 → 弹簧收拢
+  setStep(1);
+  let nb = 0, ne = 0;
+  for (const s of strikes){
+    if (!alive()) return;
+    s.host.classList.add('hit'); await wait(130);
+    const line = document.createElement('i'); line.className = 'strike'; s.host.appendChild(line);
+    s.host.classList.add('cut');
+    await line.animate([{transform:'scaleX(0)'},{transform:'scaleX(1)'}], {duration:240, easing:'cubic-bezier(.4,0,.2,1)', fill:'forwards'}).finished;
+    const mg = s.ln.querySelector('.mg'); mg.textContent = mg.textContent ? mg.textContent + ' · ' + (s.part.k === 'b' ? '气口' : '口误') : (s.part.k === 'b' ? '气口' : '口误'); mg.classList.add('on');
+    s.part.k === 'b' ? $('#cb').textContent = ++nb : $('#ce').textContent = ++ne;
+    const w = s.host.offsetWidth; s.host.style.overflow = 'hidden';
+    await s.host.animate([{width:w + 'px', opacity:1},{width:'0px', opacity:0}], {duration:FAST.duration * .7, easing:FAST.easing, fill:'forwards'}).finished;
+  }
+  await Promise.all([countTo($('#cb'), nb, 37, 700), countTo($('#ce'), ne, 12, 700)]);
+  if (!alive()) return;
+  // 3 换背景 → 4 分镜：照片网格逐张落位
+  setStep(2); await wait(220);
+  setStep(3);
+  const fs = $$('#tiles .f');
+  fs.forEach((f,k) => f.animate([{opacity:0, transform:'scale(.86)'},{opacity:1, transform:'none'}], {duration:SPR.duration, easing:SPR.easing, delay:k * 45, fill:'forwards'}));
+  await wait(18 * 45 + 320); if (!alive()) return;
+  // 5 B-roll：被替换的段落描蓝边
+  setStep(4); fs.forEach(f => f.classList.toggle('br', f.classList.contains('b'))); await wait(520); fs.forEach(f => f.classList.remove('br'));
+  setStep(5); await wait(420); if (!alive()) return;
+  // 7 自检：四个圆环依次合拢
+  setStep(6);
+  const rings = $$('#rings .ring');
+  for (let k = 0; k < rings.length; k++){
+    if (!alive()) return;
+    const r = rings[k], to = DIMS[k][1], b = r.querySelector('b');
+    r.animate([{opacity:0, transform:'scale(.9)'},{opacity:1, transform:'none'}], {duration:SPR.duration, easing:SPR.easing, fill:'forwards'});
+    r.querySelector('.fg').animate([{strokeDashoffset:100},{strokeDashoffset:100 - to * 10}], {duration:700, easing:SPR.easing, fill:'forwards'});
+    const t0 = performance.now();
+    await new Promise(res => { const f = now => { const p = Math.min(1, (now - t0) / 380); b.textContent = (to * (1 - Math.pow(1 - p, 3))).toFixed(1); p < 1 ? requestAnimationFrame(f) : res(); }; requestAnimationFrame(f); });
+  }
+  setStep(7);
+  // 结论：蓝色勾选画出
+  const done = $('#done');
+  done.animate([{opacity:0, transform:'translateY(6px)'},{opacity:1, transform:'none'}], {duration:SPR.duration, easing:SPR.easing, fill:'forwards'});
+  done.querySelector('circle').animate([{transform:'scale(0)'},{transform:'scale(1)'}], {duration:BOUNCE.duration, easing:BOUNCE.easing, fill:'forwards'});
+  await wait(200);
+  done.querySelector('path').animate([{strokeDashoffset:1},{strokeDashoffset:0}], {duration:320, easing:'cubic-bezier(.4,0,.2,1)', fill:'forwards'});
+}
+$('#replayBtn').addEventListener('click', replay);
+
+/* ================= 启动 ================= */
+verCard(1); verCard(2);
+setVer(2); seek(4);
+requestAnimationFrame(() => { const f = $('#flow'); f.scrollTop = f.scrollHeight; moveThumb(); });
+document.fonts && document.fonts.ready.then(moveThumb);
+document.addEventListener('keydown', e => { if (e.key === ' ' && !e.target.matches('textarea,button')){ e.preventDefault(); setPlay(!state.playing); } });
+</script>
+</body>
+</html>

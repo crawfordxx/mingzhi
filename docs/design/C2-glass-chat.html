@@ -1,0 +1,952 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明知AI剪辑 · 对话出片</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   明知AI剪辑 · C2 液态玻璃 + 3D（对话式）
+   标杆：Igloo Inc（Awwwards SOTD 2024-07-23，abeto × Bureaux）
+   风格 DNA：冷灰蓝低照度 / 冰体玻璃 / 色差转场 / 冰尘粒子 / 一镜胶片带 / 49 片冰晶
+   唯一暖色 = 用户书房台灯，只标记「选中 · 当前 · 用户的手」
+   3D：氛围层 + 一处 hero —— 胶片带横穿播放器（播放器即镜头）
+   ============================================================ */
+:root{
+  --txt:#eef1f6; --txt2:#b7bdca; --txt3:#9aa2b3;
+  --mist:#b6bac5; --warm:#ffc27a; --ice:#cfe0ff; --pass:#b9e6d3;
+  --glass:rgba(17,20,28,.62); --glass-hi:rgba(255,255,255,.075);
+  --stroke:rgba(214,224,245,.11); --stroke-hi:rgba(214,224,245,.22);
+  --ease-out:cubic-bezier(.22,1,.36,1); --spring:cubic-bezier(.34,1.56,.64,1);
+  --mono:"Geist Mono",ui-monospace,monospace;
+  --sans:"Geist","Noto Sans SC","PingFang SC",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:radial-gradient(120% 90% at 70% -10%,#1b2030 0%,#0b0d13 55%,#06070a 100%);color:var(--txt);
+  font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+button:focus-visible,textarea:focus-visible{outline:1.5px solid var(--warm);outline-offset:2px}
+#gl{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;display:block}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.t3{color:var(--txt3);font-size:12px}
+
+/* ---------- 骨架：项目栏 / 对话 / 舞台 ---------- */
+.app{position:relative;z-index:1;height:100vh;display:grid;grid-template-columns:56px 548px minmax(0,1fr);gap:12px;padding:12px}
+
+.glass{position:relative;border-radius:16px;
+  background:linear-gradient(180deg,var(--glass-hi),rgba(255,255,255,.015) 40%),var(--glass);
+  backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);
+  border:1px solid var(--stroke);box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 20px 50px -24px rgba(0,0,0,.7)}
+/* 指针跟随的边缘高光 */
+.glass::after{content:"";position:absolute;inset:-1px;border-radius:inherit;padding:1px;pointer-events:none;
+  background:radial-gradient(240px circle at var(--mx,-999px) var(--my,-999px),rgba(232,240,255,.5),transparent 62%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
+
+/* ---------- 极窄项目栏 ---------- */
+.rail{display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:14px}
+.mono-mark{width:36px;height:36px;display:grid;place-items:center;position:relative}
+.mono-mark b{font-family:"Noto Sans SC";font-weight:900;font-size:17px;letter-spacing:0}
+.mono-mark i{position:absolute;right:-3px;top:0;font-style:normal;font-family:Geist;font-weight:600;font-size:9px;color:var(--mist)}
+.mono-mark svg{position:absolute;inset:0}
+.rail hr{width:24px;border:0;border-top:1px solid var(--stroke)}
+.proj{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;color:var(--txt3)}
+.proj .pt{width:30px;height:53px;border-radius:6px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.14);transition:transform .35s var(--spring)}
+.proj:hover .pt{transform:translateY(-2px)}
+.proj .pt img{width:100%;height:100%;object-fit:cover}
+.proj.on{color:var(--txt)}
+.proj.on .pt{box-shadow:0 0 0 1.5px var(--warm),0 0 14px -2px rgba(255,194,122,.5)}
+.new{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;border:1px dashed var(--stroke-hi);color:var(--txt2);transition:border-color .2s,color .2s,transform .35s var(--spring)}
+.new:hover{border-color:var(--warm);color:var(--warm);transform:rotate(90deg)}
+.rail .grow{flex:1}
+
+/* ---------- 对话列 ---------- */
+.chat{display:flex;flex-direction:column;min-height:0}
+.chat-h{display:flex;align-items:center;gap:12px;padding:14px 18px 12px;border-bottom:1px solid var(--stroke)}
+.chat-h h1{font-size:15px;font-weight:600}
+.chat-h .t3{margin-left:auto}
+.flow{flex:1;overflow-y:auto;padding:14px 18px 22px;display:flex;flex-direction:column;gap:14px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent;
+  -webkit-mask:linear-gradient(180deg,transparent,#000 16px,#000 calc(100% - 16px),transparent);mask:linear-gradient(180deg,transparent,#000 16px,#000 calc(100% - 16px),transparent)}
+.stamp{align-self:center;font-family:var(--mono);font-size:12px;color:var(--txt3)}
+
+/* 卡片（冰板） */
+.card{border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--stroke);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.card-h{display:flex;align-items:center;gap:10px;padding:11px 14px}
+.card-h b{font-weight:600;font-size:14px}
+.chev{margin-left:auto;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:var(--txt2);transition:transform .4s var(--ease-out),background .2s}
+.chev:hover{background:rgba(255,255,255,.07)}
+[aria-expanded="true"] > .chev,.open .chev{transform:rotate(180deg)}
+.tagok{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--pass)}
+
+/* 1 设置卡 */
+.setup-sum{display:flex;flex-wrap:wrap;gap:6px 14px;padding:0 14px 12px;font-size:13px;color:var(--txt2)}
+.setup-sum span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.setup-sum img{width:20px;height:20px;border-radius:4px;object-fit:cover;object-position:0 0}
+.collapse{display:grid;grid-template-rows:0fr;transition:grid-template-rows .45s var(--ease-out)}
+.collapse>div{overflow:hidden}
+.open > .collapse{grid-template-rows:1fr}
+.setup-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 14px 14px}
+.sbox{border-radius:10px;background:rgba(0,0,0,.25);border:1px solid var(--stroke);padding:9px 10px;min-height:76px;display:flex;flex-direction:column;justify-content:space-between}
+.sbox .t3{line-height:1.3}
+.sbox b{font-weight:500;font-size:13px;line-height:1.35}
+.bladeprev{font-family:"Noto Sans SC";font-weight:900;font-size:13px;color:#fff;text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000}
+.bladeprev em{font-style:normal;color:#ffd54a}
+.startbtn{margin:0 14px 14px;height:34px;border-radius:9px;width:calc(100% - 28px);background:rgba(255,255,255,.08);color:var(--txt2);font-size:13px;cursor:default;display:flex;align-items:center;justify-content:center;gap:8px}
+
+/* 2 剪辑直播 */
+.live .meta{padding:0 14px;font-family:var(--mono);font-size:12px;color:var(--txt3)}
+.verdict{padding:6px 14px 0;font-size:14px;color:var(--txt)}
+.verdict b{font-family:var(--mono);font-weight:500}
+.verdict .arr{color:var(--txt3)}
+.strip{display:flex;gap:3px;padding:10px 14px 12px}
+.strip i{flex:1;aspect-ratio:9/16;border-radius:3px;background-size:cover;background-position:center;box-shadow:0 0 0 1px rgba(255,255,255,.1)}
+.replay{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:9px;font-size:13px;font-weight:500;
+  background:linear-gradient(180deg,#fff,#dde3ee);color:#0b0d12;position:relative;overflow:hidden;transition:transform .35s var(--spring)}
+.replay:hover{transform:translateY(-1px)}
+.replay svg{transition:transform .6s var(--ease-out)}
+.replay:hover svg{transform:rotate(-200deg)}
+.replay::before{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 35%,rgba(255,255,255,.95) 50%,transparent 65%);transform:translateX(-120%);transition:transform .8s var(--ease-out)}
+.replay:hover::before{transform:translateX(120%)}
+/* 重播舞台 */
+.rp{padding:4px 14px 14px}
+.rp-top{display:flex;align-items:baseline;gap:14px;font-family:var(--mono);font-size:12px;color:var(--txt3);padding:6px 0 8px}
+.rp-top b{font-weight:500;color:var(--txt);font-size:13px}
+.rp-top .dur{margin-left:auto;color:var(--txt)}
+.rp-top .dur b{font-size:16px}
+.tx{list-style:none;display:flex;flex-direction:column;gap:3px;min-height:156px}
+.tx li{display:grid;grid-template-columns:44px 1fr;gap:8px;font-size:14px;line-height:23px;opacity:0;transform:translateY(6px);filter:blur(4px)}
+.tx li.in{opacity:1;transform:none;filter:none;transition:opacity .35s,transform .45s var(--ease-out),filter .45s}
+.tx .tc{font-family:var(--mono);font-size:12px;color:var(--txt3)}
+.cut{position:relative;display:inline-block;white-space:nowrap;vertical-align:top;overflow:hidden;transition:max-width .5s var(--ease-out) .55s,opacity .4s .6s,margin .5s .55s}
+.cut::after{content:"";position:absolute;left:0;right:0;top:50%;height:1.5px;background:currentColor;transform:scaleX(0);transform-origin:left;transition:transform .32s var(--ease-out) .15s}
+.cut.breath{color:var(--ice)} .cut.slip{color:var(--warm)}
+.cut.struck::after{transform:scaleX(1)}
+.cut.gone{max-width:0!important;opacity:0}
+.cut.keep{max-width:none}
+.spark{position:absolute;width:6px;height:6px;pointer-events:none;transform:rotate(45deg);z-index:3}
+.sb{display:grid;grid-template-columns:repeat(18,1fr);gap:3px;margin-top:12px}
+.sb i{aspect-ratio:9/16;border-radius:3px;background-size:cover;background-position:center;box-shadow:0 0 0 1px rgba(255,255,255,.12);opacity:0;transform:translateY(8px) scale(.85);filter:blur(6px)}
+.sb i.in{opacity:1;transform:none;filter:none;transition:opacity .35s,transform .55s var(--spring),filter .4s}
+.sc{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.sc div{display:flex;align-items:center;gap:8px;opacity:.25;transition:opacity .3s}
+.sc div.in{opacity:1}
+.sc b{display:block;font-family:Geist;font-weight:400;font-size:18px;line-height:1}
+.sc span{font-size:12px;color:var(--txt3);white-space:nowrap}
+.sc circle.arc{transition:stroke-dasharray .9s var(--ease-out)}
+.fin{margin-top:12px;padding:9px 12px;border-radius:10px;background:rgba(255,255,255,.05);font-size:14px;position:relative;overflow:hidden;opacity:0;transform:translateY(6px)}
+.fin.in{opacity:1;transform:none;transition:opacity .4s,transform .5s var(--ease-out)}
+.fin.in::after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.22) 50%,transparent 70%);animation:glint 1.2s var(--ease-out) .2s both}
+@keyframes glint{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.fin b{font-family:var(--mono);font-weight:500}
+
+/* 3/6 版本卡 */
+.ver{display:grid;grid-template-columns:auto 1fr auto;gap:14px;padding:12px 14px;align-items:center}
+.vthumb{position:relative;width:46px;height:82px}
+.vthumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.16)}
+.vthumb .fan{transform-origin:50% 100%;opacity:.9}
+.ver.cur .vthumb > img:last-of-type{box-shadow:0 0 0 1.5px var(--warm)}
+.vname{display:flex;align-items:baseline;gap:8px}
+.vname b{font-family:Geist;font-weight:300;font-size:26px;line-height:1;letter-spacing:-.02em}
+.vname .pill{font-size:12px;padding:1px 8px;border-radius:99px;border:1px solid rgba(255,194,122,.45);color:var(--warm)}
+.vmeta{font-family:var(--mono);font-size:12px;color:var(--txt3);margin-top:5px}
+.vdiff{font-size:13px;color:var(--txt);margin-top:3px}
+.vdiff b{font-family:var(--mono);font-weight:500}
+.vscore{display:flex;flex-direction:column;align-items:center;gap:2px}
+.vscore b{font-family:Geist;font-weight:400;font-size:20px;line-height:1}
+.vacts{grid-column:1/-1;display:flex;gap:6px;border-top:1px solid var(--stroke);margin:0 -14px -12px;padding:8px 10px}
+.vbtn{height:28px;padding:0 11px;border-radius:8px;font-size:13px;color:var(--txt2);display:inline-flex;align-items:center;gap:6px;transition:background .2s,color .2s}
+.vbtn:hover{background:rgba(255,255,255,.07);color:var(--txt)}
+.vbtn.exp{margin-left:auto}
+
+/* 消息 */
+.me{align-self:flex-end;max-width:84%;padding:10px 14px;border-radius:14px 14px 4px 14px;background:rgba(230,236,248,.12);border:1px solid rgba(230,236,248,.14)}
+.me p{font-size:14px}
+.ai{display:grid;grid-template-columns:24px 1fr;gap:10px}
+.ai .av{width:24px;height:24px;margin-top:1px}
+.ai p{font-size:14px;color:var(--txt)}
+.ref{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px 0 3px;border-radius:7px;vertical-align:1px;margin-right:4px;
+  background:rgba(255,194,122,.12);border:1px solid rgba(255,194,122,.38);color:var(--warm);font-size:12px;white-space:nowrap}
+.ref img{width:12px;height:20px;border-radius:2px;object-fit:cover}
+.ref .mono{color:#ffe1bb}
+.todo{list-style:none;margin:8px 0 2px;display:flex;flex-direction:column;gap:6px}
+.todo li{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--stroke);font-size:13px;color:var(--txt2)}
+.todo li img{width:24px;height:42px;border-radius:4px;object-fit:cover;box-shadow:0 0 0 1px rgba(255,255,255,.14)}
+.todo li b{color:var(--txt);font-weight:500}
+.opts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.opt{border-radius:11px;padding:7px;text-align:left;background:rgba(255,255,255,.035);border:1px solid var(--stroke);transition:transform .35s var(--spring),border-color .2s,background .2s;position:relative}
+.opt:hover{transform:translateY(-2px);border-color:var(--stroke-hi)}
+.opt.on{border-color:var(--warm);background:rgba(255,194,122,.07);box-shadow:0 6px 18px -8px rgba(255,194,122,.5)}
+.opt .mini{height:64px;border-radius:7px;background:#f4f1ea;padding:7px 8px;display:flex;flex-direction:column;justify-content:center;gap:4px;overflow:hidden}
+.opt .mini .r{display:flex;align-items:center;gap:5px;font-size:9px;color:#333;font-weight:700}
+.opt .mini .bar{height:7px;border-radius:2px;background:#cfd2d8}
+.opt .mini .bar.hi{background:#e25b3c}
+.opt .mini .big{font-family:Geist;font-weight:600;font-size:20px;color:#e25b3c;line-height:1;letter-spacing:-.02em}
+.opt .lab{display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;font-size:12px;color:var(--txt2)}
+.opt .lab b{font-weight:500;color:var(--txt)}
+.opt .ck{position:absolute;right:-5px;top:-5px;width:18px;height:18px;border-radius:50%;background:var(--warm);display:none;place-items:center}
+.opt.on .ck{display:grid}
+.picked{font-size:12px;color:var(--txt3);margin-top:6px}
+/* 8 处理中 */
+.proc .bgs{display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin-top:8px}
+.proc .bgs i{height:30px;border-radius:5px;opacity:.38;box-shadow:0 0 0 1px rgba(255,255,255,.1);transition:opacity .3s}
+.proc .bgs i.on{opacity:1;box-shadow:0 0 0 1.5px var(--warm),0 0 12px -2px rgba(255,194,122,.6);transform:translateY(-2px)}
+.proc .bgname{display:flex;justify-content:space-between;font-size:12px;color:var(--txt3);margin-top:6px}
+.proc .bgname b{color:var(--warm);font-weight:500}
+.prog{margin-top:10px;height:4px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden;position:relative}
+.prog i{position:absolute;left:0;top:0;bottom:0;width:62%;border-radius:2px;background:linear-gradient(90deg,var(--mist),#fff);overflow:hidden}
+.prog i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.9),transparent);animation:run 1.4s linear infinite}
+@keyframes run{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.steps{display:flex;gap:14px;margin-top:8px;font-size:12px;color:var(--txt3)}
+.steps .done{color:var(--pass)} .steps .now{color:var(--txt)}
+.dots{display:inline-flex;gap:3px;margin-left:4px;vertical-align:middle}
+.dots i{width:4px;height:4px;border-radius:50%;background:var(--txt2);animation:blink 1.2s infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.typing::after{content:"▍";color:var(--txt3);animation:blink 1s infinite}
+
+/* 9 输入框 */
+.composer{margin:0 12px 12px;padding:10px 12px 10px;border-radius:14px;background:rgba(0,0,0,.3);border:1px solid var(--stroke-hi);transition:border-color .25s,box-shadow .25s}
+.composer:focus-within{border-color:rgba(255,255,255,.3);box-shadow:0 0 0 4px rgba(255,255,255,.04)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;min-height:0}
+.tags:empty{display:none}
+.tags .ref{height:26px}
+.tags .ref button{width:16px;height:16px;border-radius:4px;display:grid;place-items:center;color:var(--warm);margin-left:2px}
+.tags .ref button:hover{background:rgba(255,194,122,.2)}
+textarea{width:100%;resize:none;border:0;outline:0;background:none;color:var(--txt);font:inherit;font-size:14px;line-height:22px;height:44px;margin-top:6px}
+textarea::placeholder{color:var(--txt3)}
+.crow{display:flex;align-items:center;gap:6px}
+.chips{display:flex;gap:6px;flex-wrap:nowrap;overflow:hidden}
+.chipq{height:28px;padding:0 10px;border-radius:99px;font-size:12px;color:var(--txt2);border:1px solid var(--stroke);white-space:nowrap;transition:border-color .2s,color .2s,transform .3s var(--spring)}
+.chipq:hover{border-color:var(--stroke-hi);color:var(--txt);transform:translateY(-1px)}
+.est{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--txt3);white-space:nowrap}
+.send{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--txt);color:#0b0d12;flex:none;transition:transform .35s var(--spring)}
+.send:hover{transform:scale(1.07)}
+.send:active{transform:scale(.93)}
+
+/* ---------- 舞台（右） ---------- */
+.stage{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}
+.topbar{display:flex;align-items:center;gap:10px;height:52px;padding:0 8px 0 8px}
+.vsw{position:relative;display:flex;padding:4px;border-radius:12px;gap:2px}
+.vsw .ind{position:absolute;top:4px;bottom:4px;border-radius:9px;background:rgba(255,255,255,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.15);transition:left .45s var(--spring),width .45s var(--spring)}
+.vt{position:relative;z-index:1;height:34px;padding:0 13px;border-radius:9px;display:flex;align-items:center;gap:7px;font-size:13px;color:var(--txt2);transition:color .2s}
+.vt b{font-family:Geist;font-weight:500;font-size:14px}
+.vt.on{color:var(--txt)}
+.vt[disabled]{cursor:not-allowed;color:var(--txt3)}
+.vt .ring{width:14px;height:14px}
+.sw{display:flex;align-items:center;gap:9px;height:44px;padding:0 14px;border-radius:12px;font-size:13px;color:var(--txt2)}
+.sw .tg{width:32px;height:18px;border-radius:99px;background:rgba(255,255,255,.14);position:relative;transition:background .25s}
+.sw .tg::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .4s var(--spring)}
+.sw[aria-pressed="true"]{color:var(--txt)}
+.sw[aria-pressed="true"] .tg{background:var(--warm)}
+.sw[aria-pressed="true"] .tg::after{transform:translateX(14px)}
+.bal{margin-left:auto;height:44px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:12px;font-size:12px;color:var(--txt3);white-space:nowrap}
+.bal b{font-family:var(--mono);font-weight:400;font-size:14px;color:var(--txt)}
+.expbtn{height:44px;padding:0 16px;border-radius:12px;display:flex;align-items:center;gap:8px;background:linear-gradient(180deg,#fff,#dde3ee);color:#0b0d12;font-weight:600;font-size:14px;transition:transform .35s var(--spring)}
+.expbtn:hover{transform:translateY(-1px)}
+.pop{position:fixed;z-index:20;width:260px;padding:6px;border-radius:14px;opacity:0;transform:translateY(-6px) scale(.98);pointer-events:none;transition:opacity .2s,transform .35s var(--ease-out)}
+.pop.show{opacity:1;transform:none;pointer-events:auto}
+.pop button{width:100%;display:flex;align-items:center;gap:12px;padding:10px;border-radius:10px;text-align:left;transition:background .2s}
+.pop button:hover{background:rgba(255,255,255,.07)}
+.pop b{display:block;font-weight:500;font-size:14px}
+.pop span{font-family:var(--mono);font-size:12px;color:var(--txt3)}
+.pop .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:rgba(255,255,255,.07);flex:none}
+
+.theater{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;gap:24px;container-type:size;padding:10px 0 4px}
+.pl{position:relative;height:100cqh;aspect-ratio:9/16;transition:height .55s var(--ease-out)}
+.compare .pl{height:min(100cqh, calc((100cqw - 24px) / 2 * 16 / 9))}
+.pl.b{display:none}
+.compare .pl.b{display:block;animation:slidein .55s var(--ease-out)}
+@keyframes slidein{from{opacity:0;transform:translateX(-30px) scale(.96)}to{opacity:1;transform:none}}
+.bezel{position:absolute;inset:0;padding:7px;border-radius:22px}
+.scr{position:relative;width:100%;height:100%;border-radius:15px;overflow:hidden;background:#000;cursor:crosshair}
+.scr > img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.vlabel{position:absolute;left:12px;top:12px;z-index:3;font-family:Geist;font-weight:500;font-size:13px;padding:3px 9px;border-radius:8px;background:rgba(8,9,13,.62);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:var(--txt)}
+.changed{position:absolute;right:12px;top:12px;z-index:3;font-size:12px;padding:4px 9px;border-radius:8px;background:rgba(255,194,122,.9);color:#1a1208;font-weight:500;opacity:0;transform:translateY(-4px);transition:opacity .3s,transform .4s var(--ease-out)}
+.changed.show{opacity:1;transform:none}
+/* 钩子卡 2/3 的版本化渲染（叠在真实帧上半屏） */
+.hook{position:absolute;left:0;right:0;top:0;height:50%;background:linear-gradient(180deg,#0e0f0b,#151611);padding:7% 7% 0;display:none;flex-direction:column;z-index:2}
+.hook.show{display:flex}
+.hook .banner{align-self:flex-start;font-size:clamp(7px,1.6cqh,10px);font-weight:700;color:#141a00;background:#d4ff3a;border-radius:3px;padding:1px 5px;white-space:nowrap}
+.hook .pg{position:absolute;right:7%;top:6.5%;font-family:var(--mono);font-size:clamp(7px,1.5cqh,10px);color:#d4ff3a;border:1px solid #d4ff3a;border-radius:3px;padding:0 4px}
+.hook h3{font-family:"Noto Sans SC";font-weight:900;color:#fff;line-height:1.2;margin-top:6%}
+.hook .num{font-family:"Noto Sans SC";font-weight:900;color:#d4ff3a;line-height:1;letter-spacing:-.02em}
+.hook .sub{color:#e8eadf;font-weight:700;line-height:1.3}
+.hook .capt{position:absolute;left:0;right:0;bottom:5%;text-align:center;font-family:"Noto Sans SC";font-weight:900;color:#fff;line-height:1.25;
+  text-shadow:-1.5px 0 #000,1.5px 0 #000,0 -1.5px #000,0 1.5px #000}
+.hook[data-v="1"] h3{font-size:6.6cqh}
+.pl .hook h3{font-size:calc(var(--h) * .062)}
+.frost{position:absolute;inset:0;opacity:0;pointer-events:none;z-index:4;mix-blend-mode:screen;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 .85 0 0 0 0 .9 0 0 0 0 1 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.ripple{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;border:1.5px solid #fff;pointer-events:none;z-index:5;animation:rip .6s var(--ease-out) forwards}
+@keyframes rip{to{transform:scale(7);opacity:0}}
+.hint{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:3;font-size:12px;padding:5px 10px;border-radius:99px;background:rgba(8,9,13,.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:var(--txt);white-space:nowrap;opacity:0;transition:opacity .25s}
+.scr:hover .hint{opacity:1}
+.transport{display:grid;grid-template-columns:40px auto minmax(0,1fr) auto;align-items:center;gap:14px;height:64px;padding:0 18px;margin:8px auto 0;width:min(100%,560px);border-radius:16px}
+.play{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--txt);color:#0b0d12;transition:transform .35s var(--spring)}
+.play:hover{transform:scale(1.07)}
+.play:active{transform:scale(.93)}
+.track{position:relative;height:24px;cursor:pointer}
+.track .rail2{position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}
+.track .fill{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--mist),#fff)}
+.track .tk{position:absolute;top:8px;width:1px;height:8px;background:rgba(8,9,13,.9)}
+.track .mk{position:absolute;top:-1px;width:6px;height:6px;margin-left:-3px;transform:rotate(45deg);background:var(--warm);transition:opacity .3s}
+.track .head{position:absolute;top:6px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#fff;box-shadow:0 0 0 4px rgba(255,255,255,.12);transition:transform .25s var(--spring)}
+.track:hover .head{transform:scale(1.25)}
+.nowseg{font-size:13px;color:var(--txt2);white-space:nowrap}
+.nowseg b{font-family:var(--mono);font-weight:500;color:var(--txt)}
+
+.toast{position:fixed;left:calc(56px + 548px + 36px + (100vw - 652px) / 2);bottom:110px;transform:translate(-50%,16px);opacity:0;z-index:30;padding:9px 14px;border-radius:12px;font-size:13px;pointer-events:none;transition:opacity .3s,transform .5s var(--spring);white-space:nowrap}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.enter{animation:enter .9s var(--ease-out) both}
+@keyframes enter{from{opacity:0;filter:blur(10px);transform:translateY(8px)}to{opacity:1;filter:none;transform:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<canvas id="gl" aria-hidden="true"></canvas>
+<!-- 色差滤镜：切版本时 R/B 通道错开再合拢 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="ca" x="-5%" y="0" width="110%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix in="SourceGraphic" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="r"/>
+    <feOffset in="r" id="caR" dx="0" result="r2"/>
+    <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0" result="g"/>
+    <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0" result="b"/>
+    <feOffset in="b" id="caB" dx="0" result="b2"/>
+    <feBlend in="r2" in2="g" mode="screen" result="rg"/><feBlend in="rg" in2="b2" mode="screen"/>
+  </filter>
+</svg>
+<!-- 品牌标志：一道连续的光（成片）穿过镜片 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="lens" viewBox="0 0 30 30"><circle cx="15" cy="15" r="11" fill="none" stroke="#b6bac5" stroke-width="1.4"/><circle cx="15" cy="15" r="5.5" fill="none" stroke="#eef1f6" stroke-width="1.4" opacity=".55"/><path d="M1 15h28" stroke="#eef1f6" stroke-width="2" stroke-linecap="round"/><path d="M19 15h4" stroke="#ffc27a" stroke-width="2" stroke-linecap="round"/></symbol>
+</svg>
+
+<div class="app">
+  <!-- ======== 极窄项目栏 ======== -->
+  <aside class="rail glass enter" aria-label="项目">
+    <div class="mono-mark" title="明知AI剪辑 · Mingzhi"><b>明</b><i>AI</i></div>
+    <hr>
+    <button class="proj on" aria-current="true" title="第 2 期 · 高性价比人生指南"><span class="pt"><img src="assets/frame_003.jpg" alt=""></span>第2期</button>
+    <button class="proj" title="第 1 期"><span class="pt" style="background:linear-gradient(170deg,#3a4152,#171a22)"></span>第1期</button>
+    <button class="new" aria-label="新建项目"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+    <div class="grow"></div>
+    <svg width="22" height="22" aria-hidden="true"><use href="#lens"/></svg>
+  </aside>
+
+  <!-- ======== 对话流 ======== -->
+  <section class="chat glass enter" style="animation-delay:.08s" aria-label="对话">
+    <header class="chat-h">
+      <h1>第 2 期 · 高性价比人生指南</h1>
+      <span class="t3">3 个版本 · 当前 v2</span>
+    </header>
+    <div class="flow" id="flow">
+      <span class="stamp">23:07</span>
+
+      <!-- 1 设置卡（折叠） -->
+      <div class="card setup" id="setup">
+        <div class="card-h"><b>出片设置</b><span class="tagok"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2.5 6.2l2.3 2.3 4.8-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>已开始出片</span>
+          <button class="chev" aria-expanded="false" aria-label="展开设置"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+        <div class="setup-sum">
+          <span><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="1.5" width="10" height="11" rx="2"/><path d="M6 5.2v3.6L9 7z" fill="currentColor"/></svg>第2期_口播.mov · 3:42</span>
+          <span><img src="assets/speaker_bottom.jpg" alt="">书房</span>
+          <span>刀锋 · 思源黑体</span>
+          <span class="mono">¥3.84 / 上限 ¥10</span>
+        </div>
+        <div class="collapse"><div>
+          <div class="setup-grid">
+            <div class="sbox"><span class="t3">口播素材</span><b>第2期_口播.mov<br><span class="mono t3">3:42 · 1080×1920</span></b></div>
+            <div class="sbox" style="background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.7)),url(assets/speaker_bottom.jpg) 0 0/300% auto"><span class="t3" style="color:#d9dde6">背景</span><b>书房</b></div>
+            <div class="sbox"><span class="t3">字幕样式</span><span class="bladeprev">怎么少花<em>冤枉钱</em></span><b style="font-size:12px;color:var(--txt2)">刀锋 · 思源黑体</b></div>
+            <div class="sbox"><span class="t3">预估花费</span><b class="mono" style="font-size:16px">¥3.84</b><span class="t3">上限 ¥10 · 可想 AI</span></div>
+          </div>
+          <button class="startbtn" disabled><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2.5 6.2l2.3 2.3 4.8-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>开始出片 · 已于 23:07 确认</button>
+        </div></div>
+      </div>
+
+      <!-- 2 剪辑直播（折叠为摘要，可重播） -->
+      <div class="card live" id="live">
+        <div class="card-h"><b>剪辑直播</b><span class="tagok">已完成 · 9 分 30 秒</span>
+          <button class="replay" id="replayBtn" style="margin-left:auto"><svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6a4 4 0 1 0 1.2-2.85M2 1.5v2.2h2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>重播剪辑过程</button></div>
+        <div class="meta">Paraformer 本机识别（音频不出本机）· gemini-3.5-flash 剪口误 / 分镜</div>
+        <div class="verdict" id="verdictSum">删除 <b>37</b> 处气口 · <b>12</b> 处口误 · <b>3:42</b> <span class="arr">→</span> <b>1:57</b> · <b>18</b> 段</div>
+        <div class="strip" id="strip"></div>
+        <div class="rp" id="rp" hidden>
+          <div class="rp-top"><span>气口 <b id="cB">0</b></span><span>口误 <b id="cS">0</b></span><span class="dur">时长 <b id="cD">3:42</b></span></div>
+          <ol class="tx" id="tx"></ol>
+          <div class="sb" id="sb"></div>
+          <div class="sc" id="sc"></div>
+          <div class="fin" id="fin">删除 <b>37</b> 处气口 · <b>12</b> 处口误 · <b>3:42 → 1:57</b> · <b>18</b> 段</div>
+        </div>
+      </div>
+
+      <!-- 3 v1 -->
+      <div class="card ver" data-ver="1">
+        <div class="vthumb"><img src="assets/frame_003.jpg" alt="v1 封面帧"></div>
+        <div><div class="vname"><b>v1</b><span class="t3">首版</span></div>
+          <div class="vmeta">1:57 · 18 段 · ¥3.84</div>
+          <div class="vdiff">全自动出片，无人工干预</div></div>
+        <div class="vscore"><svg width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="2.5"/><circle cx="20" cy="20" r="16" fill="none" stroke="#dfe6f2" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="88.5 100.5" transform="rotate(-90 20 20)"/><text x="20" y="24.5" text-anchor="middle" fill="#eef1f6" font-family="Geist" font-size="12">8.8</text></svg><span class="t3">自检</span></div>
+        <div class="vacts"><button class="vbtn" data-show="1">在右侧预览</button><button class="vbtn" data-cmp>对比 v2</button><button class="vbtn exp" data-exp>导出 <svg width="10" height="10" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <span class="stamp">23:16</span>
+      <!-- 4 用户：带时间引用 -->
+      <div class="me"><p><span class="ref"><img src="assets/frame_062.jpg" alt=""><span class="mono">@00:58</span>对比条卡</span>这张数据太弱了，加上具体比例，再把开头第二张钩子卡的 ¥0.51 放大</p></div>
+
+      <!-- 5 AI 回复 + 内联选项 -->
+      <div class="ai">
+        <svg class="av" aria-hidden="true"><use href="#lens"/></svg>
+        <div>
+          <p>明白，改两处，其余 16 段不动：</p>
+          <ul class="todo">
+            <li><img src="assets/frame_062.jpg" alt=""><span><b>@00:58 对比条卡</b> · 补上原文里的具体比例，改成更强的对比版式</span></li>
+            <li><img src="assets/frame_003.jpg" alt=""><span><b>@00:04 钩子卡 2/3</b> · 「¥0.51」放大为主视觉</span></li>
+          </ul>
+          <p style="margin-top:10px">对比条卡选一个版式：</p>
+          <div class="opts" id="opts">
+            <button class="opt" data-o="0"><span class="ck"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.2l2 2 4-4.4" fill="none" stroke="#1a1208" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+              <div class="mini"><div class="r">代糖<span class="bar hi" style="width:70%"></span></div><div class="r">不喝<span class="bar" style="width:42%"></span></div></div>
+              <div class="lab"><b>① 双条对比</b><span>保守</span></div></button>
+            <button class="opt on" data-o="1" aria-pressed="true"><span class="ck"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.2l2 2 4-4.4" fill="none" stroke="#1a1208" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+              <div class="mini"><div class="big">+%</div><div class="r"><span class="bar hi" style="width:78%"></span></div><div class="r" style="font-weight:500;color:#666">比例取自原文</div></div>
+              <div class="lab"><b>② 大比例 + 条</b><span>推荐</span></div></button>
+            <button class="opt" data-o="2"><span class="ck"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.2l2 2 4-4.4" fill="none" stroke="#1a1208" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+              <div class="mini" style="align-items:center"><svg width="56" height="32" viewBox="0 0 56 32"><path d="M6 30a22 22 0 0 1 44 0" fill="none" stroke="#cfd2d8" stroke-width="6"/><path d="M6 30a22 22 0 0 1 36-17" fill="none" stroke="#e25b3c" stroke-width="6"/></svg></div>
+              <div class="lab"><b>③ 半环仪表</b><span>醒目</span></div></button>
+          </div>
+          <div class="picked" id="picked">你选了 ② · 预计只重渲 2 段，约 ¥0.16</div>
+        </div>
+      </div>
+
+      <!-- 6 v2 -->
+      <div class="card ver cur" data-ver="2">
+        <div class="vthumb"><img class="fan" src="assets/frame_062.jpg" alt="" style="transform:rotate(-9deg) translateX(-5px)"><img src="assets/frame_003.jpg" alt="v2 封面帧"></div>
+        <div><div class="vname"><b>v2</b><span class="pill">当前</span></div>
+          <div class="vmeta">1:57 · 18 段 · 自检 9.0</div>
+          <div class="vdiff">只重渲了 <b>2</b> 段 · <b>38</b> 秒 · <b>+¥0.16</b></div></div>
+        <div class="vscore"><svg width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="2.5"/><circle cx="20" cy="20" r="16" fill="none" stroke="#dfe6f2" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="90.5 100.5" transform="rotate(-90 20 20)"/><text x="20" y="24.5" text-anchor="middle" fill="#eef1f6" font-family="Geist" font-size="12">9.0</text></svg><span class="t3">自检</span></div>
+        <div class="vacts"><button class="vbtn" data-show="2">在右侧预览</button><button class="vbtn" data-cmp>对比 v1</button><button class="vbtn exp" data-exp>导出 <svg width="10" height="10" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+      </div>
+
+      <span class="stamp">23:21</span>
+      <!-- 7 用户 -->
+      <div class="me"><p>背景换成夜景落地窗试试</p></div>
+
+      <!-- 8 AI 处理中 -->
+      <div class="ai proc">
+        <svg class="av" aria-hidden="true"><use href="#lens"/></svg>
+        <div>
+          <p>好的，人像段统一换成「夜景落地窗」，卡片段不受影响<span class="dots"><i></i><i></i><i></i></span></p>
+          <div class="bgs" id="bgs"></div>
+          <div class="bgname"><span>10 个预设</span><b>夜景落地窗 · 首次使用，正在生成</b></div>
+          <div class="prog"><i id="progBar"></i></div>
+          <div class="steps"><span class="done">✓ 生成背景</span><span class="now">抠像合成中 <b class="mono" id="pct">62%</b></span><span>重渲人像段</span><span>自检</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9 输入框 -->
+    <div class="composer" id="composer">
+      <div class="tags" id="tags"></div>
+      <textarea id="ta" rows="2" placeholder="继续说要改哪里…点一下右侧画面，可引用那一刻"></textarea>
+      <div class="crow">
+        <div class="chips" id="chips">
+          <button class="chipq">节奏再快一点</button><button class="chipq">换一张 B-roll</button><button class="chipq">字幕换成得意黑</button><button class="chipq" data-exp>导出</button>
+        </div>
+        <span class="est" id="est">本轮约 ¥0.08</span>
+        <button class="send" id="send" aria-label="发送"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 12V2M2.5 6.5L7 2l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======== 舞台 ======== -->
+  <section class="stage enter" style="animation-delay:.16s" aria-label="预览">
+    <div class="topbar">
+      <div class="vsw glass" id="vsw" role="tablist" aria-label="版本">
+        <span class="ind" id="ind"></span>
+        <button class="vt" role="tab" data-v="1"><b>v1</b><span class="mono">8.8</span></button>
+        <button class="vt on" role="tab" data-v="2" aria-selected="true"><b>v2</b><span class="mono">9.0</span></button>
+        <button class="vt" role="tab" data-v="3" disabled title="生成中"><svg class="ring" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="2"/><circle cx="8" cy="8" r="6" fill="none" stroke="#ffc27a" stroke-width="2" stroke-dasharray="23.4 37.7" transform="rotate(-90 8 8)"/></svg><b>v3</b><span class="mono">62%</span></button>
+      </div>
+      <button class="sw glass" id="cmp" aria-pressed="false"><span class="tg"></span>对比</button>
+      <div class="bal glass">算力余额 <b>¥36.27</b> 可想 AI</div>
+      <button class="expbtn" data-exp>导出 <svg width="11" height="11" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+
+    <div class="theater" id="theater">
+      <div class="pl b" data-side="v1"><div class="bezel glass"><div class="scr"><img alt="v1 预览"><div class="hook" data-v="1"></div><span class="vlabel">v1</span><span class="changed"></span><div class="frost"></div><span class="hint">点画面 → 引用到对话</span></div></div></div>
+      <div class="pl a" data-side="main"><div class="bezel glass"><div class="scr"><img alt="成片预览"><div class="hook" data-v="2"></div><span class="vlabel">v2</span><span class="changed"></span><div class="frost"></div><span class="hint">点画面 → 引用到对话</span></div></div></div>
+    </div>
+
+    <div class="transport glass">
+      <button class="play" id="play" aria-label="播放"><svg id="pico" width="14" height="14" viewBox="0 0 14 14"><path d="M3 1.5v11l9-5.5z" fill="currentColor"/></svg></button>
+      <span class="mono" id="tnow" style="font-size:13px">00:04</span>
+      <div class="track" id="track" role="slider" aria-label="播放进度" aria-valuemin="0" aria-valuemax="117"><div class="rail2"><div class="fill" id="fill"></div></div><div id="tks"></div><div class="head" id="head"></div></div>
+      <span class="nowseg" id="nowseg"></span>
+    </div>
+  </section>
+</div>
+
+<div class="pop glass" id="pop" role="menu">
+  <button role="menuitem"><span class="ic"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3" y="1" width="8" height="12" rx="1.5"/><path d="M6 5v4l3-2z" fill="currentColor"/></svg></span><span><b>MP4 视频</b><span>1080×1920 · 1:57</span></span></button>
+  <button role="menuitem"><span class="ic"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="3" width="8" height="6" rx="1"/><rect x="9" y="4" width="4" height="8" rx="1"/></svg></span><span><b>封面</b><span>4:3 + 3:4</span></span></button>
+</div>
+<div class="toast glass" id="toast" role="status"></div>
+
+<script>
+/* ============================================================
+   界面逻辑（普通脚本：WebGL 失败也完整可用）
+   ============================================================ */
+(function(){
+  'use strict';
+  const $ = s=>document.querySelector(s), $$ = s=>[...document.querySelectorAll(s)];
+  const FR = ['frame_003','frame_022','frame_038','frame_047','frame_062','frame_080','frame_101','frame_114'];
+  const src = f=> f<0 ? 'assets/speaker_bottom.jpg' : `assets/${FR[f]}.jpg`;
+  const fmt = t=>{t=Math.max(0,Math.floor(t));return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0')};
+  // 18 段（真实字幕时间码 + 卡片模板 + 最近的真实帧）
+  const SEGS = [
+    [0,'钩子卡 1/3',0],[4,'钩子卡 2/3',0],[8,'钩子卡 3/3',0],[13,'网页截图 B-roll',1],[17,'网页截图',1],[21,'数字网格卡',2],
+    [26,'人像 + 关键词',2],[30,'知识卡',2],[35,'知识卡 · 证据 A',3],[40,'终端卡',3],[47,'终端卡',3],[52,'AI 生图 B-roll',4],
+    [58,'对比条卡',4],[65,'划线清单卡',5],[80,'纯人像',-1],[98,'加载动画卡',6],[105,'评论卡',6],[112,'三连 CTA',7]
+  ].map(([t,n,f])=>({t,n,f}));
+  const TOTAL = 117, CHANGED = [1,12];      // v2 改动的段：00:04 钩子卡 2/3、00:58 对比条卡
+  const segAt = t=>{let k=0;SEGS.forEach((g,i)=>{if(t>=g.t)k=i});return k};
+
+  // ---------- 提示 ----------
+  let tt=0; const toast = m=>{const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2400)};
+
+  // ---------- 预览：版本 / 对比 / 播放 ----------
+  let ver = 2, time = 4, playing = false, compare = false;
+  const plA = $('.pl.a'), plB = $('.pl.b');
+  // 钩子卡 2/3：按版本渲染（v1 ¥0.51 混在句中；v2 放大成主视觉）——真实字幕内容
+  function hookHTML(v){
+    return `<span class="banner">这 3 句话都出自 GitHub 近 3.5 万星的《高性价比人生指南》</span><span class="pg">2 / 3</span>`+
+      (v===1
+        ? `<h3>买双色球<br>每投 1 块钱<br>长期平均只拿回 <span style="color:#d4ff3a">¥0.51</span></h3>`
+        : `<h3 style="font-size:calc(var(--h)*.045)">买双色球，每投 1 块钱<br>长期平均只能拿回</h3><div class="num" style="font-size:calc(var(--h)*.16);margin-top:2%">¥0.51</div>`)+
+      `<div class="capt" style="font-size:calc(var(--h)*.034)">买双色球，每投 1 块钱<br>长期平均只能拿回五毛一</div>`;
+  }
+  function paintPlayer(pl, v){
+    const k = segAt(time), g = SEGS[k];
+    const img = pl.querySelector('.scr > img'), hook = pl.querySelector('.hook');
+    const url = src(g.f);
+    if (!img.src.endsWith(url)) img.src = url;
+    img.style.objectPosition = g.f<0 ? '50% 30%' : '';
+    hook.classList.toggle('show', k===1);
+    if (k===1 && hook.dataset.v !== String(v)){ hook.dataset.v = v; hook.innerHTML = hookHTML(v); }
+    if (k===1 && !hook.innerHTML) hook.innerHTML = hookHTML(v);
+    pl.querySelector('.vlabel').textContent = 'v'+v;
+    const ch = pl.querySelector('.changed');
+    ch.textContent = k===1 ? '本段已改 · ¥0.51 放大' : '本段已改 · 版式 ②';
+    ch.classList.toggle('show', v===2 && CHANGED.includes(k));
+  }
+  function sizeVars(){ $$('.scr').forEach(s=>s.style.setProperty('--h', s.clientHeight+'px')); }
+  function paint(){
+    paintPlayer(plA, compare ? 2 : ver);
+    if (compare) paintPlayer(plB, 1);
+    const p = time/TOTAL*100;
+    $('#fill').style.width = p+'%'; $('#head').style.left = p+'%';
+    $('#tnow').textContent = fmt(time);
+    const g = SEGS[segAt(time)];
+    $('#nowseg').innerHTML = `<b>${String(segAt(time)+1).padStart(2,'0')}</b> / 18 · ${g.n}`;
+    $('#track').setAttribute('aria-valuenow', Math.round(time));
+  }
+  // 刻度 + v2 改动标记
+  $('#tks').innerHTML = SEGS.slice(1).map(g=>`<i class="tk" style="left:${g.t/TOTAL*100}%"></i>`).join('') +
+    CHANGED.map(k=>`<i class="mk" style="left:${(SEGS[k].t+2)/TOTAL*100}%"></i>`).join('');
+
+  // 色差 + 起雾转场
+  function glitch(pl){
+    const img = pl.querySelector('.scr'), frost = pl.querySelector('.frost');
+    const R = document.getElementById('caR'), B = document.getElementById('caB');
+    const t0 = performance.now(), D = 560;
+    img.style.filter = 'url(#ca)';
+    (function step(now){
+      const k = Math.min(1,(now-t0)/D), e = 1-Math.pow(1-k,3);
+      R.setAttribute('dx', (1-e)*8); B.setAttribute('dx', -(1-e)*8);
+      frost.style.opacity = Math.sin(k*Math.PI)*.4;
+      if (k<1) requestAnimationFrame(step); else { img.style.filter=''; frost.style.opacity=0; }
+    })(t0);
+  }
+  function setVer(v){
+    if (v===ver && !compare) return;
+    ver = v;
+    $$('.vt').forEach(b=>{const on=+b.dataset.v===v; b.classList.toggle('on',on); b.setAttribute('aria-selected',on)});
+    moveInd();
+    if (compare) setCompare(false);
+    paint(); glitch(plA);
+    window.dispatchEvent(new CustomEvent('fx:pulse'));
+  }
+  function moveInd(){ const b = $(`.vt[data-v="${ver}"]`), ind = $('#ind'); ind.style.left = b.offsetLeft+'px'; ind.style.width = b.offsetWidth+'px'; }
+  function setCompare(on){
+    compare = on;
+    $('#cmp').setAttribute('aria-pressed', on);
+    $('#theater').classList.toggle('compare', on);
+    if (on){ ver = 2; $$('.vt').forEach(b=>b.classList.toggle('on', +b.dataset.v===2)); moveInd(); }
+    requestAnimationFrame(()=>{ sizeVars(); paint(); window.dispatchEvent(new Event('resize')); });
+  }
+  $('#vsw').addEventListener('click', e=>{const b=e.target.closest('.vt'); if(b && !b.disabled) setVer(+b.dataset.v)});
+  $('#cmp').addEventListener('click', ()=>setCompare(!compare));
+
+  // 播放（对比时两路同步，同一个时钟）
+  let last=0;
+  function loop(now){ if(!playing) return; time += Math.min(.1,(now-last)/1000); last=now;
+    if (time>=TOTAL){ time=TOTAL; setPlay(false); } paint(); requestAnimationFrame(loop); }
+  function setPlay(v){
+    playing = v; $('#play').setAttribute('aria-label', v?'暂停':'播放');
+    $('#pico').innerHTML = v ? '<path d="M3.5 2h2.5v10H3.5zM8 2h2.5v10H8z" fill="currentColor"/>' : '<path d="M3 1.5v11l9-5.5z" fill="currentColor"/>';
+    if (v){ if(time>=TOTAL) time=0; last=performance.now(); requestAnimationFrame(loop); }
+    else addTag(time, null, true);           // 暂停 → 自动引用当前时刻
+  }
+  $('#play').addEventListener('click', ()=>setPlay(!playing));
+  $('#track').addEventListener('click', e=>{const r=e.currentTarget.getBoundingClientRect(); time=Math.max(0,Math.min(TOTAL,(e.clientX-r.left)/r.width*TOTAL)); paint();});
+
+  // ---------- @时间引用：点画面 → 标签飞进输入框 ----------
+  const tags = $('#tags');
+  function addTag(t, from, quiet){
+    const k = segAt(t), g = SEGS[k], key = fmt(t)+g.n;
+    if (tags.querySelector(`[data-key="${key}"]`)) return;
+    if (tags.children.length >= 3) tags.firstElementChild.remove();
+    const el = document.createElement('span');
+    el.className = 'ref'; el.dataset.key = key;
+    el.innerHTML = `<img src="${src(g.f)}" alt=""><span class="mono">@${fmt(t)}</span>${g.n}<button aria-label="移除引用"><svg width="8" height="8" viewBox="0 0 8 8"><path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>`;
+    tags.appendChild(el);
+    if (from){
+      // FLIP：从点击处飞到输入框
+      const to = el.getBoundingClientRect();
+      const ghost = el.cloneNode(true); ghost.style.cssText = `position:fixed;left:${to.left}px;top:${to.top}px;z-index:40;margin:0;pointer-events:none`;
+      document.body.appendChild(ghost); el.style.opacity = 0;
+      ghost.animate([{transform:`translate(${from.x-to.left-to.width/2}px,${from.y-to.top-to.height/2}px) scale(.6)`,opacity:.2},
+        {transform:`translate(${(from.x-to.left)/2}px,${(from.y-to.top)/2 - 60}px) scale(1.08)`,opacity:1,offset:.55},{transform:'none',opacity:1}],
+        {duration:620,easing:'cubic-bezier(.22,1,.36,1)'}).onfinish = ()=>{ ghost.remove(); el.style.opacity=''; el.animate([{transform:'scale(1.12)'},{transform:'none'}],{duration:300,easing:'cubic-bezier(.34,1.56,.64,1)'}); };
+    }
+    if (!quiet) $('#ta').focus({preventScroll:true});
+  }
+  tags.addEventListener('click', e=>{const b=e.target.closest('button'); if(b){ const r=b.closest('.ref'); r.animate([{opacity:1},{opacity:0,transform:'scale(.8)'}],{duration:180}).onfinish=()=>r.remove(); }});
+  $$('.scr').forEach(s=>s.addEventListener('click', e=>{
+    const r = s.getBoundingClientRect(), rp = document.createElement('span');
+    rp.className='ripple'; rp.style.left=(e.clientX-r.left)+'px'; rp.style.top=(e.clientY-r.top)+'px'; s.appendChild(rp); setTimeout(()=>rp.remove(),650);
+    if (playing) setPlay(false);
+    addTag(time, {x:e.clientX, y:e.clientY});
+  }));
+
+  // ---------- 导出浮层（版本卡 / 顶栏 / chips 共用） ----------
+  const pop = $('#pop');
+  document.addEventListener('click', e=>{
+    const b = e.target.closest('[data-exp]');
+    if (b){ e.stopPropagation(); const r=b.getBoundingClientRect();
+      const top = r.bottom + 8 + 120 > innerHeight ? r.top - 128 : r.bottom + 8;
+      pop.style.left = Math.min(innerWidth-272, r.right-260)+'px'; pop.style.top = top+'px'; pop.classList.toggle('show'); return; }
+    if (e.target.closest('#pop button')){ pop.classList.remove('show'); toast(`已加入导出队列 · v${ver}`); return; }
+    if (!e.target.closest('#pop')) pop.classList.remove('show');
+  });
+
+  // ---------- 版本卡 ----------
+  $('#flow').addEventListener('click', e=>{
+    const s = e.target.closest('[data-show]'); if (s){ setVer(+s.dataset.show); return; }
+    if (e.target.closest('[data-cmp]')){ setCompare(true); return; }
+    const o = e.target.closest('.opt');
+    if (o){ $$('.opt').forEach(x=>{const on=x===o; x.classList.toggle('on',on); x.setAttribute('aria-pressed',on)});
+      $('#picked').textContent = `你选了 ${['①','②','③'][+o.dataset.o]} · 预计只重渲 2 段，约 ¥0.16`; return; }
+    const ch = e.target.closest('.chev');
+    if (ch){ const c = ch.closest('.card'); const open = c.classList.toggle('open'); ch.setAttribute('aria-expanded', open); }
+  });
+
+  // 背景缩略（处理中卡片）：10 个预设，「夜景落地窗」被选中
+  const BG = ['url(assets/speaker_bottom.jpg) 0 0/300% auto','linear-gradient(160deg,#e3ddd3,#b4ab9e)','linear-gradient(160deg,#c48b5c,#5a3b28)',
+    'radial-gradient(circle at 70% 30%,#8ea0e0 0 1.5px,transparent 2.5px),radial-gradient(circle at 30% 55%,#e9c37a 0 1.5px,transparent 2.5px),linear-gradient(170deg,#1a2550,#080c1c)',
+    'linear-gradient(160deg,#25303d,#0c0f14)','linear-gradient(160deg,#d8c69e,#8a744c)','linear-gradient(160deg,#c9d7ae,#55704a)','linear-gradient(160deg,#f1f0ec,#c9c7c0)',
+    'radial-gradient(circle at 50% 35%,#6a6e78,#2a2c32)','linear-gradient(175deg,#f0a868,#a86a6c 55%,#4a3d63)'];
+  const BGN = ['书房','极简工作室','咖啡馆','夜景落地窗','科技暗色','日式和室','绿植阳台','白墙极简','演播室灰幕','黄昏天台'];
+  $('#bgs').innerHTML = BG.map((b,i)=>`<i class="${i===3?'on':''}" style="background:${b}" title="${BGN[i]}"></i>`).join('');
+  // 进度：62% 附近缓慢爬升（流式感），不越过 70%
+  let pct = 62; setInterval(()=>{ if (pct<69){ pct+= .25; $('#pct').textContent = Math.floor(pct)+'%'; $('#progBar').style.width = pct+'%'; } }, 900);
+
+  // 摘要缩略条 + 分镜格
+  const segThumb = g=>`background-image:url(${src(g.f)})${g.f<0?';background-position:50% 30%':''}`;
+  $('#strip').innerHTML = SEGS.map(g=>`<i style="${segThumb(g)}"></i>`).join('');
+
+  // ---------- 重播剪辑过程（惊艳时刻） ----------
+  // 真实字幕 + 被识别出的气口（冷）/ 口误（暖）
+  const TX = [
+    ['00:00', [['吃抗氧化补剂的人，'],['呃，','breath'],['死亡率反而更高一些']]],
+    ['00:04', [['买双色球，'],['就是说，','breath'],['每投 1 块钱，长期平均只能拿回五毛一']]],
+    ['00:13', [['然后呢，嗯，','breath'],['我平时经常在 GitHub 上面去逛 AI 项目']]],
+    ['00:17', [['有一个，有一个','slip'],['叫《高性价比人生指南》']]],
+    ['00:21', [['这个项目里面一共讲了 '],['六百，','slip'],['650 条']]],
+    ['00:40', [['然后我就很好奇地'],['那个，','breath'],['让 AI 帮我把它读了一遍']]],
+  ];
+  const DIMS = [['版式',9.1],['层级',8.8],['动效节奏',8.6],['品牌一致性',9.3]];
+  const C = 2*Math.PI*13;
+  let replayRun = 0;
+  const wait = ms=>new Promise(r=>setTimeout(r,ms));
+  function countTo(el, from, to, ms, f=v=>Math.round(v)){
+    const t0=performance.now(); return new Promise(res=>{(function s(n){const k=Math.min(1,(n-t0)/ms),e=1-Math.pow(1-k,3); el.textContent=f(from+(to-from)*e); k<1?requestAnimationFrame(s):res()})(t0)});
+  }
+  function sparks(el, warm){
+    // 被剪掉的字迸出冰晶碎片（与 3D 层的 49 片冰晶同源）
+    const r = el.getBoundingClientRect();
+    for (let i=0;i<5;i++){
+      const s = document.createElement('i'); s.className='spark';
+      s.style.cssText += `left:${r.left+r.width*Math.random()}px;top:${r.top+r.height/2}px;position:fixed;background:${warm?'#ffc27a':'#cfe0ff'};box-shadow:0 0 8px ${warm?'#ffc27a':'#cfe0ff'}`;
+      document.body.appendChild(s);
+      s.animate([{transform:'rotate(45deg) scale(1)',opacity:1},{transform:`translate(${(Math.random()-.5)*60}px,${20+Math.random()*40}px) rotate(${200+Math.random()*200}deg) scale(.2)`,opacity:0}],
+        {duration:700+Math.random()*300,easing:'cubic-bezier(.2,.7,.3,1)'}).onfinish=()=>s.remove();
+    }
+  }
+  async function replay(){
+    const run = ++replayRun, alive = ()=>run===replayRun;
+    const rp = $('#rp'); rp.hidden = false; $('#strip').hidden = true; $('#verdictSum').hidden = true;
+    $('#live').scrollIntoView({block:'start', behavior:'smooth'});
+    window.dispatchEvent(new CustomEvent('fx:replay'));
+    const tx = $('#tx'), sb = $('#sb'), sc = $('#sc'), fin = $('#fin');
+    tx.innerHTML = TX.map(([tc,parts])=>`<li><span class="tc">${tc}</span><span>${parts.map(([s,k])=>k?`<span class="cut ${k}" style="max-width:${s.length*15}px">${s}</span>`:s).join('')}</span></li>`).join('');
+    sb.innerHTML = SEGS.map(g=>`<i style="${segThumb(g)}"></i>`).join('');
+    sc.innerHTML = DIMS.map(([n])=>`<div><svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="2.5"/><circle class="arc" cx="16" cy="16" r="13" fill="none" stroke="#dfe6f2" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0 ${C}" transform="rotate(-90 16 16)"/></svg><span><b>0.0</b><span>${n}</span></span></div>`).join('');
+    fin.classList.remove('in');
+    $('#cB').textContent='0'; $('#cS').textContent='0'; $('#cD').textContent='3:42';
+    await wait(450);
+    // 阶段 A：文字稿逐行出现，气口/口误被划掉并收拢（切口）
+    let b=0, s=0; const lines = [...tx.children];
+    const totalCuts = lines.reduce((n,l)=>n+l.querySelectorAll('.cut').length,0);
+    let cutIdx = 0;
+    for (const li of lines){
+      if (!alive()) return;
+      li.classList.add('in'); await wait(260);
+      for (const c of li.querySelectorAll('.cut')){
+        c.classList.add('struck'); await wait(330);
+        sparks(c, c.classList.contains('slip'));
+        window.dispatchEvent(new CustomEvent('fx:cut',{detail:{warm:c.classList.contains('slip')}}));
+        c.classList.add('gone'); cutIdx++;
+        // 计数器按比例推进到 37 / 12，时长从 3:42 收缩到 1:57
+        const nb = Math.round(37*cutIdx/totalCuts), ns = Math.round(12*cutIdx/totalCuts);
+        countTo($('#cB'), b, nb, 300); countTo($('#cS'), s, ns, 300); b=nb; s=ns;
+        const d0 = 222 - (222-117)*(cutIdx-1)/totalCuts, d1 = 222 - (222-117)*cutIdx/totalCuts;
+        countTo($('#cD'), d0, d1, 380, v=>`${Math.floor(v/60)}:${String(Math.round(v%60)).padStart(2,'0')}`);
+      }
+      await wait(120);
+    }
+    if (!alive()) return;
+    // 阶段 B：分镜缩略图一张张落位
+    for (const i of sb.children){ if(!alive()) return; i.classList.add('in'); await wait(70); }
+    await wait(250);
+    // 阶段 C：自检四维逐项跳出
+    for (const [k,el] of [...sc.children].entries()){
+      if (!alive()) return;
+      el.classList.add('in');
+      el.querySelector('.arc').setAttribute('stroke-dasharray', `${C*DIMS[k][1]/10} ${C}`);
+      countTo(el.querySelector('b'), 0, DIMS[k][1], 800, v=>v.toFixed(1));
+      await wait(260);
+    }
+    await wait(500);
+    // 阶段 D：结论 + 掠光
+    fin.classList.add('in');
+  }
+  $('#replayBtn').addEventListener('click', replay);
+
+  // ---------- 发送（假回复，流式打字） ----------
+  async function send(text){
+    text = (text||'').trim(); const refs = [...tags.children];
+    if (!text && !refs.length){ $('#ta').focus(); toast('先说一句要改什么'); return; }
+    const flow = $('#flow');
+    const me = document.createElement('div'); me.className='me';
+    me.innerHTML = `<p>${refs.map(r=>{const c=r.cloneNode(true); c.querySelector('button')?.remove(); return c.outerHTML}).join('')}${text.replace(/</g,'&lt;')}</p>`;
+    flow.appendChild(me); me.animate([{opacity:0,transform:'translateY(10px) scale(.98)'},{opacity:1,transform:'none'}],{duration:420,easing:'cubic-bezier(.22,1,.36,1)'});
+    tags.innerHTML=''; $('#ta').value='';
+    const ai = document.createElement('div'); ai.className='ai';
+    ai.innerHTML = `<svg class="av" aria-hidden="true"><use href="#lens"/></svg><div><p class="typing"></p></div>`;
+    await wait(500); flow.appendChild(ai); flow.scrollTo({top:flow.scrollHeight,behavior:'smooth'});
+    const p = ai.querySelector('p');
+    const where = refs.length ? refs.map(r=>r.querySelector('.mono').textContent).join('、') : '相关段落';
+    const reply = `收到。我会只改 ${where}，其余段落保持 v2 不动。等「夜景落地窗」这一轮完成后排队执行，预计约 ¥0.08。`;
+    for (let i=1;i<=reply.length;i++){ p.textContent = reply.slice(0,i); await wait(22); }
+    p.classList.remove('typing'); flow.scrollTo({top:flow.scrollHeight,behavior:'smooth'});
+  }
+  $('#send').addEventListener('click', ()=>send($('#ta').value));
+  $('#ta').addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey && !e.isComposing){ e.preventDefault(); send($('#ta').value);} });
+  $('#chips').addEventListener('click', e=>{const c=e.target.closest('.chipq'); if(c && !c.dataset.hasOwnProperty('exp')){ $('#ta').value=c.textContent; $('#ta').focus(); }});
+
+  // ---------- 玻璃边缘高光 ----------
+  document.addEventListener('pointermove', e=>{
+    for (const g of document.querySelectorAll('.glass')){ const r=g.getBoundingClientRect();
+      g.style.setProperty('--mx',(e.clientX-r.left)+'px'); g.style.setProperty('--my',(e.clientY-r.top)+'px'); }
+  }, {passive:true});
+
+  // 初始：v2，暂停在 00:04（¥0.51 已放大）；输入框里已有一枚引用标签
+  addEventListener('resize', ()=>{ sizeVars(); moveInd(); });
+  sizeVars(); moveInd(); paint();
+  addTag(4, null, true);
+  const flow = $('#flow'); flow.scrollTop = flow.scrollHeight;
+  window.__ui = {replay, setCompare, setVer};
+})();
+</script>
+
+<script type="module">
+/* ============================================================
+   3D 氛围层（Three.js r160）
+   - 背景：冷灰蓝渐变 + 左上体积光束 + 播放器背后的台灯暖光
+   - 冰尘粒子
+   - Hero：一镜胶片带横穿播放器（播放器 = 镜头），帧来自真实成片；
+           49 片冰晶从带下沿剥落 = 37 气口（冷）+ 12 口误（暖）
+   - 联动：重播剪辑过程 → 胶片带加速、碎片成批剥落；每划掉一处，掉一片；切版本 → 色差脉冲
+   ============================================================ */
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+const canvas = document.getElementById('gl');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function init(){
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({canvas, antialias:true, powerPreference:'high-performance'}); }
+  catch(err){ console.warn('WebGL 不可用，已降级为静态背景：', err.message); canvas.remove(); return; }
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(35, innerWidth/innerHeight, .1, 60);
+  camera.position.set(0,0,10);
+  const halfH = Math.tan(THREE.MathUtils.degToRad(17.5))*10;
+  const NOISE = `
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+    float noise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
+      return mix(mix(hash(i),hash(i+vec2(1,0)),f.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x), f.y); }
+    float fbm(vec2 p){ float v=0., a=.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.03; a*=.5; } return v; }`;
+
+  // ---------- 背景 ----------
+  const bgMat = new THREE.ShaderMaterial({ depthWrite:false, depthTest:false,
+    uniforms:{ uTime:{value:0}, uRes:{value:new THREE.Vector2(innerWidth,innerHeight)}, uWarm:{value:new THREE.Vector2(.7,.5)} },
+    vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,.999,1.); }`,
+    fragmentShader:`uniform float uTime; uniform vec2 uRes, uWarm; varying vec2 vUv; ${NOISE}
+      void main(){
+        float asp=uRes.x/uRes.y; vec2 p=vec2(vUv.x*asp, vUv.y);
+        vec3 col = mix(vec3(.022,.025,.034), vec3(.105,.118,.155), smoothstep(-.1,1.1,vUv.y));
+        vec2 d = p - vec2(.78*asp, 1.25);                      // 光源在右上画外，照向舞台
+        float ang = atan(d.x,-d.y), dist = length(d);
+        col += vec3(.62,.70,.86) * pow(fbm(vec2(ang*7.5, uTime*.025)),2.6)*1.6 * exp(-dist*1.05) * .42;
+        vec2 w = p - vec2(uWarm.x*asp, uWarm.y);
+        col += vec3(.95,.62,.32) * .06 * exp(-dot(w,w)*4.);   // 台灯暖光，落在播放器背后
+        col *= 1. - .38*smoothstep(.35,1.15,length((vUv-.5)*vec2(1.25,1.)));
+        col += (hash(gl_FragCoord.xy+fract(uTime))-.5)/255.*2.;
+        gl_FragColor = vec4(col,1.);
+      }` });
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(2,2), bgMat); bg.frustumCulled=false; bg.renderOrder=-10; scene.add(bg);
+
+  // ---------- 冰尘 ----------
+  const N=900, pos=new Float32Array(N*3), seed=new Float32Array(N);
+  for(let i=0;i<N;i++){ pos[i*3]=(Math.random()*2-1)*8; pos[i*3+1]=(Math.random()*2-1)*4.5; pos[i*3+2]=-4+Math.random()*6.5; seed[i]=Math.random(); }
+  const pg=new THREE.BufferGeometry(); pg.setAttribute('position',new THREE.BufferAttribute(pos,3)); pg.setAttribute('aSeed',new THREE.BufferAttribute(seed,1));
+  const pMat=new THREE.ShaderMaterial({ transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    uniforms:{uTime:{value:0},uDpr:{value:renderer.getPixelRatio()}},
+    vertexShader:`attribute float aSeed; uniform float uTime,uDpr; varying float vA;
+      void main(){ vec3 p=position; p.y=mod(p.y+uTime*.045*(.3+aSeed)+4.5,9.)-4.5; p.x+=sin(uTime*.12+aSeed*20.)*.25;
+        vec4 mv=modelViewMatrix*vec4(p,1.); gl_PointSize=(1.+aSeed*2.4)*uDpr*(9./-mv.z);
+        vA=(.12+.38*aSeed)*(.6+.4*sin(uTime*(.6+aSeed)+aSeed*40.)); gl_Position=projectionMatrix*mv; }`,
+    fragmentShader:`varying float vA; void main(){ float d=length(gl_PointCoord-.5); gl_FragColor=vec4(vec3(.82,.88,1.), vA*smoothstep(.5,.0,d)); }` });
+  scene.add(new THREE.Points(pg,pMat));
+
+  // ---------- Hero：胶片带 ----------
+  const RL=26, RH=.62, CELLS=Math.round(RL/(RH*.7*9/16/.88));
+  const atlas=new THREE.TextureLoader().load(window.ATLAS); atlas.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  const U={ uTime:{value:0}, uY:{value:0}, uAmp:{value:.07}, uOffset:{value:0}, uPulse:{value:0}, uAtlas:{value:atlas}, uCells:{value:CELLS} };
+  const shapeY=(x,t)=>U.uY.value+U.uAmp.value*Math.sin(x*.42+t*.18), shapeZ=(x,t)=>-.45+.45*Math.cos(x*.23+t*.1);
+  const ribbon=new THREE.Mesh(new THREE.PlaneGeometry(RL,RH,520,1), new THREE.ShaderMaterial({
+    transparent:true, depthWrite:false, side:THREE.DoubleSide, uniforms:U,
+    vertexShader:`uniform float uTime,uY,uAmp; varying vec2 vUv; varying float vFres;
+      void main(){ vUv=uv; float x=position.x, yl=position.y, tw=.3*sin(x*.28+uTime*.12);
+        vec3 p=vec3(x, uY+uAmp*sin(x*.42+uTime*.18)+yl*cos(tw), -.45+.45*cos(x*.23+uTime*.1)+yl*sin(tw));
+        vec4 mv=modelViewMatrix*vec4(p,1.);
+        vFres=pow(1.-abs(dot(normalize(normalMatrix*vec3(0.,-sin(tw),cos(tw))), normalize(-mv.xyz))),2.);
+        gl_Position=projectionMatrix*mv; }`,
+    fragmentShader:`uniform sampler2D uAtlas; uniform float uTime,uOffset,uPulse,uCells; varying vec2 vUv; varying float vFres;
+      void main(){
+        float s=vUv.x*uCells+uOffset, cell=floor(s); vec2 c=vec2(fract(s),vUv.y);
+        const float B=.15; float inB=step(B,c.y)*step(c.y,1.-B);
+        vec2 f=vec2((c.x-.06)/.88,(c.y-B)/(1.-2.*B)); float fr=inB*step(0.,f.x)*step(f.x,1.);
+        vec2 a=vec2((mod(cell,8.)+clamp(f.x,.001,.999))/8., f.y);
+        float ca=.0025+.006*vFres+.014*uPulse;
+        vec3 img=vec3(texture2D(uAtlas,a+vec2(ca,0)).r, texture2D(uAtlas,a).g, texture2D(uAtlas,a-vec2(ca,0)).b);
+        vec3 col=mix(vec3(dot(img,vec3(.299,.587,.114)))*vec3(.8,.87,1.), img, .55)*.9;
+        float yy=c.y<.5?c.y/B:(1.-c.y)/B;
+        float hole=(1.-inB)*step(abs(fract(c.x*4.)-.5),.2)*step(abs(yy-.5),.26);
+        vec3 o=mix(vec3(.5,.57,.7)*.28, col, fr); float al=mix(.42,.9,fr)*(1.-hole*.85);
+        o+=vec3(.92,.96,1.)*smoothstep(.02,.0,min(c.x,1.-c.x))*.55;         // 帧间切口
+        o+=vec3(.78,.86,1.)*vFres*.8;
+        o+=vec3(1.)*exp(-pow((fract(vUv.x*1.5-uTime*.035)-.5)*14.,2.))*.12;  // 掠光
+        gl_FragColor=vec4(o, al*smoothstep(0.,.1,vUv.x)*smoothstep(1.,.9,vUv.x));
+      }` }));
+  ribbon.frustumCulled=false; scene.add(ribbon);
+
+  // ---------- 49 片冰晶 ----------
+  const CUTS=49, WARM=12, sg=new THREE.OctahedronGeometry(1,0), wa=new Float32Array(CUTS);
+  for(let i=0;i<CUTS;i++) wa[i]=i<WARM?1:0;
+  sg.setAttribute('aWarm', new THREE.InstancedBufferAttribute(wa,1));
+  const shards=new THREE.InstancedMesh(sg, new THREE.ShaderMaterial({ transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    vertexShader:`attribute float aWarm; varying float vW, vF;
+      void main(){ vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.); vec3 n=normalize(mat3(modelMatrix*instanceMatrix)*normal);
+        vF=pow(1.-abs(dot(n,normalize(cameraPosition-wp.xyz))),1.4); vW=aWarm; gl_Position=projectionMatrix*viewMatrix*wp; }`,
+    fragmentShader:`varying float vW, vF; void main(){ vec3 c=mix(vec3(.8,.88,1.),vec3(1.,.74,.44),vW); gl_FragColor=vec4(c*(.25+vF*1.1), .25+vF*.6); }` }), CUTS);
+  shards.frustumCulled=false; scene.add(shards);
+  const sd=Array.from({length:CUTS},(_,i)=>({a:Math.random(), b:Math.random()*2-1, c:Math.random(), warm:i<WARM, kick:-9}));
+  const m4=new THREE.Matrix4(), q=new THREE.Quaternion(), e3=new THREE.Euler(), v3=new THREE.Vector3(), s3=new THREE.Vector3();
+
+  // ---------- 与 DOM 对齐：带的中线 = 播放器垂直中心；碎片在舞台范围内剥落 ----------
+  let cx=0, half=2;
+  const toWorld=(px,py)=>[(px/innerWidth*2-1)*halfH*camera.aspect, -(py/innerHeight*2-1)*halfH];
+  function layout(){
+    renderer.setSize(innerWidth,innerHeight,false); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+    bgMat.uniforms.uRes.value.set(innerWidth,innerHeight);
+    const st=document.getElementById('theater').getBoundingClientRect();
+    const [wx,wy]=toWorld(st.left+st.width/2, st.top+st.height*.56);
+    cx=wx*10.45/10; U.uY.value=wy*10.45/10;        // 按平均深度做透视补偿
+    half=(st.width/2)/innerWidth*2*halfH*camera.aspect;
+    bgMat.uniforms.uWarm.value.set((st.left+st.width/2)/innerWidth, 1-(st.top+st.height*.45)/innerHeight);
+  }
+  layout(); addEventListener('resize', layout);
+
+  // ---------- 联动 ----------
+  const clock=new THREE.Clock();
+  let flow=0, speed=.16, burst=0, pulse=0, nextShard=0;
+  addEventListener('fx:replay', ()=>{ burst=1; pulse=1; });
+  addEventListener('fx:pulse', ()=>{ pulse=1; });
+  addEventListener('fx:cut', e=>{                     // 每划掉一处，就有一片冰晶当场剥落
+    const pool=sd.filter(d=>d.warm===e.detail.warm); const d=pool[nextShard++%pool.length]; d.kick=clock.elapsedTime; });
+
+  const mouse={x:0,y:0};
+  addEventListener('pointermove', e=>{ mouse.x=e.clientX/innerWidth*2-1; mouse.y=e.clientY/innerHeight*2-1; }, {passive:true});
+
+  function frame(){
+    const dt=Math.min(.05,clock.getDelta()), t=reduce?8:clock.elapsedTime;
+    if(!document.hidden){
+      bgMat.uniforms.uTime.value=t; pMat.uniforms.uTime.value=t; U.uTime.value=t;
+      burst*=Math.pow(.25,dt); pulse*=Math.pow(.02,dt);
+      speed += ((.16+2.4*burst)-speed)*Math.min(1,dt*3);      // 重播时胶片带像被快进
+      if(!reduce) flow+=speed*dt;
+      U.uOffset.value=flow; U.uPulse.value=Math.max(pulse, burst*.5);
+      for(let i=0;i<CUTS;i++){
+        const d=sd[i];
+        // 平时：缓慢循环剥落；被「划掉」触发时：从头开始一次更快更亮的剥落
+        const k=(t-d.kick)/1.6;
+        const life = k>=0 && k<1 ? k : (t*.05*(.7+d.c*.6)+d.a)%1;
+        const boost = k>=0 && k<1 ? 1.6 : 1;
+        const x=cx+d.b*half*1.05, y=shapeY(x,t), z=shapeZ(x,t);
+        v3.set(x+life*.2*d.b, y-.26-life*.5*boost, z+.1+life*.7);
+        e3.set(t*.35+d.a*6, t*.5+d.c*6, d.b*2); q.setFromEuler(e3);
+        const sc=Math.sin(life*Math.PI)*(d.warm?1.25:.85)*boost*(1+.5*burst);
+        s3.set(.055*sc,.1*sc,.02*sc); m4.compose(v3,q,s3); shards.setMatrixAt(i,m4);
+      }
+      shards.instanceMatrix.needsUpdate=true;
+      camera.position.x+=(mouse.x*.12-camera.position.x)*Math.min(1,dt*2);
+      camera.position.y+=(-mouse.y*.03-camera.position.y)*Math.min(1,dt*2);
+      renderer.render(scene,camera);
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+}
+init();
+</script>
+<script>
+/* 胶片带帧图集（8 张真实帧缩略，108×192/张）：file:// 下 Chrome 禁止本地图片进 WebGL 纹理，故以 data URI 内嵌 */
+window.ATLAS = "__ATLAS__";
+</script>
+</body>
+</html>

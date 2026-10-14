@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明知AI剪辑 · 画布</title>
+<!--
+================================================================================
+G3 · ego 沉浸画布
+================================================================================
+【form 来自内容的哪里】
+  ego 把工作区叫 Space；一个口播项目也是一个 Space —— 一期视频就是一间「拍摄现场」。
+  所以每个 Space 有自己的一幅油画：第 2 期是书房里的三脚架（这一期就是在书房录的），
+  第 1 期是花园露台的补光灯，「新建」是一间等待放映的小影院。
+  整个工作台是铺在油画上的几扇 macOS 浮窗：切 Space = 换一幅画 + 换一组窗。
+  剪辑过程不再是贴纸，而是 ego 招牌的「深色终端窗」叠在白窗上：
+  被删的气口/口误先亮成浅蓝胶囊（ego 的关键短语高亮），然后轻轻上浮、虚化、消失，
+  剩下的字合拢 —— 克制版的「剪掉」。
+
+【ego 设计 DNA 对照表】（线上实测：Playwright 打开 lite.ego.app 读 computedStyle）
+  字体      正文 system-ui / -apple-system / PingFang SC；
+            点缀词 IBM Plex Serif Italic 200（ego 线上真实字体 ibmPlexSerif italic 200）
+            → 用在：聊天窗大标题「剪成 1:57」的 1:57、版本号 v1/v2、Space 标题里的 (lite) 式括注、CTA 旁小注
+            终端 IBM Plex Mono（ego 线上也加载了 IBM Plex Mono）
+  标题      700 / 行高 1.05 / --text-1；括注斜体衬线 200 / --text-3
+  色彩      --bg-1..5、--text-1..4、--brand-1..6、--accent 全部照抄 spec；
+            唯一彩色 = 品牌蓝阶（高亮胶囊 brand-1 底 + brand-5 字；进度 brand-4；选中描边 glow-border #adc0eb）
+            红黄绿三点只出现在窗口标题栏
+  阴影      浮在画上的窗 = --shadow-3（0 0 0 1px #0000000f, 0 16px 48px #00000059）
+            窗内卡片 = --shadow-1；大卡 = --shadow-2-1（0 8px 32px 4px #0000000f）
+            深色浮层（终端 / 导出提示）= 0 25px 50px -12px rgba(0,0,0,.6)，底 rgba(0,0,0,.6)+模糊
+  圆角      6（缩略图内角）/ 10（背景缩略图）/ 13（9:16 画面）/ 18（卡片）/ 26（窗口）/ 36（Space 坞）/ 胶囊
+  按钮      主 CTA 黑底白字胶囊（导出、发送、开始出片）；次 CTA #eee 底胶囊；旁注斜体衬线
+  公告条    顶部 --brand-1 整条 + 居中一句 + 黑色小胶囊按钮（用来播报 v3 合成进度）
+  构图      印象派油画全幅铺底 + 白色 macOS 浮窗 + 深色终端窗叠放（ego hero 放大成 App）
+  Spaces    ego 的 Space 隐喻 → 左侧 Space 坞，缩略图就是每个 Space 的油画
+
+  对比度偏离说明：ego 正文用 --text-3（#0000007a，白底约 3.7:1），本稿 ≤16px 的正文改用
+  #0000009e（约 6.2:1）以守住 4.5:1 底线；--text-3 只用于 ≥20px 的斜体衬线括注。
+
+【动效】（framer-motion）全部临界阻尼或极小过冲，安静：
+  窗口入场 y 24 → 0 依次浮起；Space 切换油画交叉淡化 + 1.06→1 缓推，窗组整体退场再入场；
+  油画常驻 40s 往复的极慢推镜（Ken Burns 2%）；版本分段控件白色滑块 layoutId；
+  @时间胶囊从点击处飞进输入框；终端里被删词胶囊 y -16 / blur 4px / 透明 退场，其余词 layout 合拢。
+
+================================================================================
+参考清单
+================================================================================
+1. lite.ego.app（Playwright 实测 + team-lead 给的 hero.png / sheet.jpg）——全部 DNA 来源，见上表。
+2. SPEC-v3 资源沿用（上一轮 E 方向已逐一打开过，这里只列在本稿真正落地的）：
+   - motion.dev/docs/react-scroll-animations：whileInView + viewport.root 让消息在聊天窗内滚入时浮起；
+     聊天窗大标题随滚动位置收缩（离开底部=翻历史，标题让位，用 spring 过渡）。
+   - prompt-motion.com「Shape morphing through UI states」："Springs everywhere, a tiny overshoot at most"、
+     "Text that swaps inside a morphing container needs its own enter and exit timing"
+     → 终端里被删词的退场与剩余词合拢分开计时；所有弹簧不过冲。
+   - 60fps.design「Uber Search Border Highlight」→ 合成进度条上流动的蓝色 ripple；
+     「CRED Autopay Bills Stack」→ 终端里分镜缩略图一张张叠出。
+   - bentogrids.com → 设置卡展开后的四格、终端结尾的自检四格。
+   - cta.gallery（Augustus：大标题 + 小黑按钮）→「新建」Space 的大标题 + 黑色「开始出片」。
+   - navbar.gallery（Bud 的 AI 侧栏）→ 左侧极窄 Space 坞只放缩略图与新建。
+   - footer.design（Playfolly：胶囊按钮收尾）→ 输入框下方快捷建议胶囊 + 一行花费小字。
+   - styles.refero.design → 本轮锚点直接是 ego 本身（用户指定），未再另找。
+   - unsection.com 仍被 Cloudflare 拦截；jiro.build 无可用风格提示词 —— 均未落地。
+================================================================================
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@1,200;1,300&family=Noto+Serif+SC:wght@900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-1:#fff; --bg-2:#f7f7f7; --bg-3:#f5f5f5; --bg-4:#eee; --bg-5:#e0e0e0;
+    --text-1:#000000e6; --text-2:#000000b3; --text-3:#0000007a; --text-4:#0000003d;
+    --text-3a:#0000009e;
+    --brand-1:#d6dff5; --brand-2:#adc0eb; --brand-3:#85a0e0; --brand-4:#5c81d6; --brand-5:#3361cc; --brand-6:#294ea3;
+    --accent:#5c81d6; --accent-light:#d6dff5; --accent-dark:#2e57b8; --negative:#d65c5c;
+    --glow-border:#adc0eb;
+    --shadow-1:0 0 0 1px #0000000f;
+    --shadow-2:0 8px 32px 4px #0000000f;
+    --shadow-3:0 0 0 1px #0000000f, 0 16px 48px 0 #00000059;
+    --float:0 25px 50px -12px rgba(0,0,0,.6);
+    --sans:system-ui,-apple-system,"PingFang SC","Hiragino Sans GB","Noto Sans SC",sans-serif;
+    --serif:"IBM Plex Serif",ui-serif,Georgia,serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;overflow:hidden;background:#2a2118}
+  body{font-family:var(--sans);color:var(--text-1);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  textarea{font:inherit;color:inherit}
+  img{display:block}
+  .serif{font-family:var(--serif);font-style:italic;font-weight:200;letter-spacing:-0.01em}
+  .tnum{font-variant-numeric:tabular-nums}
+  .hl{background:var(--brand-1);color:var(--brand-5);font-weight:600;border-radius:999px;padding:1px 8px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+  .glass{background:rgba(255,255,255,.95);-webkit-backdrop-filter:blur(24px) saturate(1.4);backdrop-filter:blur(24px) saturate(1.4)}
+  .scroll::-webkit-scrollbar{width:8px}
+  .scroll::-webkit-scrollbar-thumb{background:#0000001f;border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+  textarea::placeholder{color:var(--text-3a)}
+  textarea:focus{outline:none}
+  button:focus-visible{outline:2px solid var(--glow-border);outline-offset:2px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/framer-motion@11.11.13/dist/framer-motion.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useEffect } = React;
+const { motion, AnimatePresence, useMotionValue, animate, useMotionValueEvent } = Motion;
+
+/* ---------- 令牌 ---------- */
+const T1 = '#000000e6', T2 = '#000000b3', T3 = '#0000007a', T3A = '#0000009e';
+const B1 = '#d6dff5', B2 = '#adc0eb', B4 = '#5c81d6', B5 = '#3361cc';
+const BG2 = '#f7f7f7', BG4 = '#eee';
+const SH1 = '0 0 0 1px #0000000f', SH2 = '0 8px 32px 4px #0000000f', SH3 = '0 0 0 1px #0000000f, 0 16px 48px 0 #00000059', FLOAT = '0 25px 50px -12px rgba(0,0,0,.6)';
+const EASE = [0.22, 1, 0.36, 1];
+const CALM = { type: 'spring', stiffness: 260, damping: 32 };      // 窗口：无过冲
+const CRISP = { type: 'spring', stiffness: 520, damping: 40 };     // 控件
+const fmt = (s) => { s = Math.max(0, Math.floor(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+const fmtShort = (s) => { s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+/* ---------- 真实内容 ---------- */
+const DUR = 117;
+const SEGS = [
+  { t: 0,   text: '吃抗氧化补剂的人，死亡率反而更高一些', tpl: '钩子卡 1/3 · 大数字', img: 'frame_003', s1: 9.2 },
+  { t: 4,   text: '买双色球，每投 1 块钱，长期平均只能拿回五毛一', tpl: '钩子卡 2/3 · ¥0.51', img: 'frame_003', s1: 8.4, s2: 9.1, v2: '¥0.51 放大' },
+  { t: 8,   text: '帮人收钱取现的兼职，挣几百块，换一份案底', tpl: '钩子卡 3/3', img: 'frame_003', s1: 9.0 },
+  { t: 13,  text: '我平时经常在 GitHub 上面去逛 AI 项目', tpl: '网页截图 B-roll', img: 'frame_022', s1: 8.9 },
+  { t: 17,  text: '叫《高性价比人生指南》', tpl: '网页截图', img: 'frame_022', s1: 9.1 },
+  { t: 21,  text: '这个项目里面一共讲了 650 条', tpl: '数字网格卡', img: 'frame_038', s1: 8.8 },
+  { t: 26,  text: '怎么少花冤枉钱', tpl: '关键词大字幕', img: 'frame_038', s1: 8.6 },
+  { t: 30,  text: '每一条信息都告诉你你会失去什么', tpl: '知识卡', img: 'frame_038', s1: 9.0 },
+  { t: 35,  text: '并且它每一条知识都是有证据来源的', tpl: '知识卡 · 证据等级 A', img: 'frame_047', s1: 9.3 },
+  { t: 40,  text: '然后我就很好奇地让 AI 帮我把它读了一遍', tpl: '终端卡', img: 'frame_047', s1: 8.7 },
+  { t: 47,  text: '第一点呢，它就建议我少喝饮料', tpl: '终端卡', img: 'frame_062', s1: 8.8 },
+  { t: 52,  text: '每天喝两瓶饮料以上的人', tpl: 'AI 生图 B-roll', img: 'frame_062', s1: 8.9 },
+  { t: 58,  text: '每天喝两杯代糖饮料以上的', tpl: '对比条卡', img: 'frame_062', s1: 8.2, s2: 9.0, v2: '对比条加比例' },
+  { t: 65,  text: '从收入的角度来看，它还提醒我 / 但是要尽可能地减少无用的消费', tpl: '划线清单卡', img: 'frame_080', s1: 8.9 },
+  { t: 80,  text: '我们这些做 AI 的人呢，那轮到自己的身体和存款', tpl: '纯人像', img: 'speaker', s1: 8.6 },
+  { t: 98,  text: '由于 GitHub 在国内可能不太方便打开', tpl: '加载动画卡', img: 'frame_101', s1: 9.0 },
+  { t: 105, text: '想要的朋友呢，就在评论区留言', tpl: '评论卡', img: 'frame_114', s1: 8.8 },
+  { t: 112, text: '自己该如何更高性价比地生活', tpl: '三连 CTA', img: 'frame_114', s1: 9.1 },
+];
+const segEnd = (i) => (i < SEGS.length - 1 ? SEGS[i + 1].t : DUR);
+const segAt = (time) => { let k = 0; SEGS.forEach((s, i) => { if (time >= s.t) k = i; }); return k; };
+const imgSrc = (k) => (k === 'speaker' ? 'assets/speaker_bottom.jpg' : `assets/${k}.jpg`);
+const scoreOf = (i, v) => (v >= 2 && SEGS[i].s2 ? SEGS[i].s2 : SEGS[i].s1).toFixed(1);
+
+const BGS = [
+  { name: '书房', f: '01-study' }, { name: '极简工作室', f: '02-studio' }, { name: '咖啡馆', f: '03-cafe' },
+  { name: '夜景落地窗', f: '04-night-window' }, { name: '科技暗色', f: '05-tech-dark' }, { name: '日式和室', f: '06-japanese' },
+  { name: '绿植阳台', f: '07-balcony' }, { name: '图书馆', f: '08-library' }, { name: '黄昏天台', f: '09-rooftop' }, { name: '水泥灰墙', f: '10-concrete' },
+];
+const bgSrc = (i) => `assets/bg/${BGS[i].f}.jpg`;
+
+// 每个 Space 一幅油画
+const SPACES = [
+  { id: 'ep2', n: '第 2 期', name: '高性价比人生指南', art: 'assets/art/01-studio.png' },
+  { id: 'ep1', n: '第 1 期', name: '已发布', art: 'assets/art/02-garden.png' },
+  { id: 'new', n: '新建', name: '新的一期', art: 'assets/art/03-cinema.png' },
+];
+
+// 剪辑现场：真实字幕 + 被删的气口/口误
+const LINES = [
+  [['嗯，', '气口'], '吃抗氧化补剂的人，', ['就是，', '气口'], '死亡率反而更高一些'],
+  ['买双色球，每投 1 块钱，', ['呃……', '气口'], '长期平均只能拿回五毛一'],
+  [['然后呢，嗯，', '气口'], '我平时经常在 GitHub 上面去逛 AI 项目'],
+  ['这个项目里面一共讲了', ['六百五，', '口误'], '650 条'],
+  ['每一条信息都告诉你', ['你，你，', '口误'], '你会失去什么'],
+  [['那个，', '气口'], '第一点呢，它就建议我少喝饮料'],
+];
+const QC = [['版式', 9.1], ['层级', 8.8], ['动效节奏', 8.6], ['品牌一致性', 9.3]];
+const THUMBS = ['frame_003', 'frame_022', 'frame_038', 'frame_047', 'frame_062', 'frame_080'];
+
+/* ---------- 基础零件 ---------- */
+function Pill({ dark, children, style, ...rest }) {
+  return (
+    <motion.button {...rest} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} transition={CRISP}
+      style={{ background: dark ? '#000' : BG4, color: dark ? '#fff' : T2, borderRadius: 999, fontWeight: dark ? 600 : 500, display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', ...style }}>
+      {children}
+    </motion.button>
+  );
+}
+function Lights({ onRed }) {
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {['#ff5f57', '#febc2e', '#28c840'].map((c, i) => (
+        <button key={c} onClick={i === 0 ? onRed : undefined} aria-label={i === 0 ? '关闭' : undefined}
+          style={{ width: 12, height: 12, borderRadius: 999, background: c, boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,.12)', cursor: i === 0 && onRed ? 'pointer' : 'default' }} />
+      ))}
+    </div>
+  );
+}
+// 浮在油画上的窗
+function Win({ style, children, delay = 0, layout, className = 'glass', ...rest }) {
+  return (
+    <motion.div {...rest} layout={layout} className={className}
+      initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16, scale: 0.98, transition: { duration: 0.22 } }}
+      transition={{ ...CALM, delay }}
+      style={{ position: 'absolute', borderRadius: 26, boxShadow: SH3, overflow: 'hidden', ...style }}>
+      {children}
+    </motion.div>
+  );
+}
+function Tag({ children, small }) {
+  return <span className="hl" style={{ fontSize: small ? 12 : 13, padding: small ? '0 7px' : '1px 9px', whiteSpace: 'nowrap', display: 'inline-block' }}>{children}</span>;
+}
+function Score({ v }) {
+  return <span style={{ fontSize: 12, fontWeight: 600, color: B5, background: B1, borderRadius: 999, padding: '1px 8px', whiteSpace: 'nowrap' }}>自检 {v}</span>;
+}
+function RollNum({ value, format = (v) => Math.round(v), style, className }) {
+  const mv = useMotionValue(value);
+  const [txt, setTxt] = useState(format(value));
+  useEffect(() => { const c = animate(mv, value, { duration: 0.5, ease: EASE }); return c.stop; }, [value]);
+  useMotionValueEvent(mv, 'change', (v) => setTxt(format(v)));
+  return <span className={className} style={style}>{txt}</span>;
+}
+
+/* ---------- 9:16 画面 ---------- */
+const BASE_W = 332, BASE_H = 590;
+function HookV2() {
+  return (
+    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: '49.5%', background: '#0c0c0c', padding: '16px 16px 0', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ background: '#d4ff3a', color: '#000', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>这 3 句都出自 GitHub 3.5 万星《高性价比人生指南》</div>
+        <div style={{ flex: 'none', border: '1.5px solid #d4ff3a', color: '#d4ff3a', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 999 }}>2 / 3</div>
+      </div>
+      <div style={{ color: '#fff', fontWeight: 900, fontSize: 21, marginTop: 18, lineHeight: 1.25 }}>买双色球，每投 1 块钱<br />长期平均只能拿回</div>
+      <div style={{ color: '#d4ff3a', fontSize: 100, lineHeight: 0.95, marginTop: 8, fontWeight: 900, fontStyle: 'italic', letterSpacing: '-0.03em' }}>¥0.51</div>
+    </div>
+  );
+}
+function BarsV2() {
+  return (
+    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: '49.5%', background: '#efece4', padding: 14 }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: '14px 14px 16px', boxShadow: '0 2px 8px rgba(0,0,0,.08)' }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <span style={{ background: '#f6d9d4', color: '#9b2a1a', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999 }}>对比</span>
+          <span style={{ background: '#dde8f6', color: '#1f4a86', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999 }}>第 7 条 · 证据 A</span>
+        </div>
+        <div style={{ fontFamily: '"Noto Serif SC",serif', fontWeight: 900, fontSize: 19, marginTop: 10, lineHeight: 1.3 }}>每天喝两杯代糖饮料以上的</div>
+        {[['每天 ≥ 2 杯', 0.84, '#1a1a1a'], ['几乎不喝', 0.42, '#c9c4b8']].map(([l, w, c], i) => (
+          <div key={i} style={{ marginTop: i ? 8 : 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#555' }}>{l}</div>
+            <div style={{ height: 22, background: '#f1eee7', borderRadius: 6, marginTop: 3 }}>
+              <motion.div initial={{ width: 0 }} animate={{ width: `${w * 100}%` }} transition={{ duration: 0.9, delay: 0.2 + i * 0.15, ease: EASE }} style={{ height: '100%', background: c, borderRadius: 6 }} />
+            </div>
+          </div>
+        ))}
+        <div style={{ fontSize: 10, color: '#777', marginTop: 8 }}>比例按原文第 7 条证据标注</div>
+      </div>
+    </div>
+  );
+}
+function Processing916() {
+  return (
+    <div style={{ position: 'absolute', inset: 0 }}>
+      <img src={bgSrc(3)} alt="夜景落地窗" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+      <motion.div animate={{ top: ['6%', '90%', '6%'] }} transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ position: 'absolute', left: 0, right: 0, height: 60, marginTop: -30, background: 'linear-gradient(180deg, transparent, rgba(173,192,235,.55), transparent)' }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 26, display: 'flex', justifyContent: 'center' }}>
+        <div style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', color: '#fff', borderRadius: 999, padding: '7px 16px', fontSize: 14, fontWeight: 600, boxShadow: FLOAT }}>抠像合成中 · 62%</div>
+      </div>
+    </div>
+  );
+}
+function Frame916({ seg, version, w = BASE_W, processing }) {
+  const s = SEGS[seg];
+  const k = w / BASE_W;
+  const showV2 = version >= 2 && s.v2;
+  return (
+    <div style={{ width: w, height: BASE_H * k, position: 'relative', overflow: 'hidden', background: '#ddd' }}>
+      <div style={{ width: BASE_W, height: BASE_H, transform: `scale(${k})`, transformOrigin: '0 0', position: 'absolute', left: 0, top: 0 }}>
+        <AnimatePresence initial={false}>
+          <motion.img key={s.img} src={imgSrc(s.img)} alt={s.text}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: s.img === 'speaker' ? '50% 30%' : 'center' }} />
+        </AnimatePresence>
+        {showV2 && (seg === 1 ? <HookV2 /> : <BarsV2 />)}
+        {processing && <Processing916 />}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Space 坞 ---------- */
+function Dock({ space, setSpace }) {
+  const [hover, setHover] = useState(null);
+  return (
+    <motion.div className="glass" initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ ...CALM, delay: 0.05 }}
+      style={{ position: 'absolute', left: 16, top: 56, bottom: 16, width: 68, borderRadius: 36, boxShadow: SH3, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '16px 0', gap: 12, zIndex: 20, background: 'rgba(255,255,255,.78)' }}>
+      {/* 字标：「明」黑色圆章（不借用 ego 的品牌图形） */}
+      <div style={{ width: 32, height: 32, borderRadius: 999, background: '#000', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 15, fontWeight: 700 }} aria-label="明知">明</div>
+      <div style={{ width: 28, height: 1, background: '#0000001a', margin: '2px 0 4px' }} />
+      {SPACES.map((sp, i) => {
+        const on = sp.id === space;
+        return (
+          <div key={sp.id} style={{ position: 'relative' }} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+            <motion.button data-space={sp.id} onClick={() => setSpace(sp.id)} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} transition={CRISP}
+              aria-label={sp.n + ' ' + sp.name}
+              style={{ width: 44, height: 44, borderRadius: 13, overflow: 'hidden', position: 'relative', boxShadow: on ? `0 0 0 2px #fff, 0 0 0 4px ${B4}` : SH1 }}>
+              <img src={sp.art} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', filter: sp.id === 'new' ? 'saturate(.5) brightness(.85)' : 'none' }} />
+              {sp.id === 'new' && <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fff', fontSize: 24, fontWeight: 300 }}>+</span>}
+            </motion.button>
+            <div style={{ fontSize: 12, textAlign: 'center', marginTop: 4, color: on ? T1 : T3A, fontWeight: on ? 600 : 400 }}>{sp.n}</div>
+            <AnimatePresence>{hover === i && (
+              <motion.div initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={CRISP}
+                style={{ position: 'absolute', left: 58, top: 8, background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', color: '#fff', fontSize: 13, padding: '5px 12px', borderRadius: 999, whiteSpace: 'nowrap', boxShadow: FLOAT }}>
+                Space · {sp.n} {sp.id === 'ep2' ? '· ' + sp.name : ''}</motion.div>
+            )}</AnimatePresence>
+          </div>
+        );
+      })}
+      <div style={{ flex: 1 }} />
+      <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }} aria-label="设置" style={{ width: 36, height: 36, borderRadius: 999, background: BG4, display: 'grid', placeItems: 'center' }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T2} strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8" /></svg>
+      </motion.button>
+    </motion.div>
+  );
+}
+
+/* ---------- 对话消息 ---------- */
+function Reveal({ root, children }) {
+  return <motion.div initial={{ opacity: 0, y: 14 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ root, once: true, amount: 'some' }} transition={CALM}>{children}</motion.div>;
+}
+function AIMsg({ children, label }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <div style={{ width: 24, height: 24, flex: 'none', borderRadius: 999, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5, marginTop: 2 }}>
+        <span style={{ width: 7, height: 7, borderRadius: 999, background: '#fff' }} /><span style={{ width: 3, height: 7, borderRadius: 999, background: '#fff' }} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {label && <div style={{ fontSize: 13, color: T3A, margin: '2px 0 6px' }}>{label}</div>}
+        {children}
+      </div>
+    </div>
+  );
+}
+function UserMsg({ children, tag }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ maxWidth: '84%', background: BG4, borderRadius: '18px 18px 6px 18px', padding: '10px 14px', fontSize: 15, color: T1 }}>
+        {tag && <div style={{ marginBottom: 6 }}><Tag>{tag}</Tag></div>}
+        {children}
+      </div>
+    </div>
+  );
+}
+const card = { background: '#fff', borderRadius: 18, boxShadow: SH1 };
+
+function SetupCard() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <motion.div layout transition={CALM} style={{ ...card, background: BG2, width: '90%', overflow: 'hidden' }}>
+        <motion.button layout="position" onClick={() => setOpen(!open)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', textAlign: 'left' }}>
+          <img src={bgSrc(0)} alt="" style={{ width: 30, height: 30, borderRadius: 6, objectFit: 'cover' }} />
+          <span style={{ fontWeight: 600, fontSize: 14 }}>出片设置</span>
+          <span style={{ color: T3A, fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>第2期_口播.mov · 书房 · 刀锋 · ¥3.84 / ¥10</span>
+          <motion.svg animate={{ rotate: open ? 180 : 0 }} transition={CRISP} width="12" height="12" viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" stroke={T2} strokeWidth="1.6" fill="none" strokeLinecap="round" /></motion.svg>
+        </motion.button>
+        <AnimatePresence initial={false}>{open && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={CALM}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '0 12px 12px' }}>
+              {[['口播', '第2期_口播.mov', '3:42 · 1080×1920'], ['背景', '书房', '本机抠像'], ['字幕', '刀锋', '思源黑体'], ['预估花费', '¥3.84', '上限 ¥10']].map(([a, b, c]) => (
+                <div key={a} style={{ ...card, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 12, color: T3A }}>{a}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{b}</div>
+                  <div style={{ fontSize: 12, color: T3A }}>{c}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px 14px' }}>
+              <div style={{ background: '#000', color: '#fff', borderRadius: 999, padding: '8px 18px', fontWeight: 600, fontSize: 14, opacity: 0.55 }}>开始出片 · 已开始</div>
+              <span className="serif" style={{ fontSize: 20, color: T3 }}>(只花 ¥3.84)</span>
+            </div>
+          </motion.div>
+        )}</AnimatePresence>
+      </motion.div>
+    </div>
+  );
+}
+
+function LiveSummary({ onReplay, playing }) {
+  return (
+    <AIMsg label="剪辑现场 · 已完成 · 用时 4 分 12 秒">
+      <div style={{ ...card, padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <span className="tnum" style={{ fontSize: 18, color: T3, textDecoration: 'line-through', textDecorationColor: '#0000003d' }}>3:42</span>
+          <span style={{ color: T3 }}>→</span>
+          <span className="serif tnum" style={{ fontSize: 40, lineHeight: 1, color: T1, fontWeight: 300 }}>1:57</span>
+          <span style={{ fontSize: 14, color: T2, marginLeft: 6 }}>删了 <span className="hl">37 处气口 · 12 处口误</span>，分成 18 段</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 12 }}>
+          {QC.map(([n, v]) => (
+            <div key={n} style={{ background: BG2, borderRadius: 10, padding: '6px 10px' }}>
+              <div style={{ fontSize: 12, color: T3A }}>{n}</div>
+              <div className="tnum" style={{ fontSize: 17, fontWeight: 600 }}>{v}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+          <Pill dark data-act="replay" onClick={onReplay} style={{ padding: '7px 16px', fontSize: 14 }}>
+            <svg width="10" height="11" viewBox="0 0 10 11"><path d="M1 1l8 4.5L1 10z" fill="#fff" /></svg>
+            {playing ? '正在重播…' : '重播剪辑过程'}
+          </Pill>
+          <span className="serif" style={{ fontSize: 20, color: T3 }}>(约 7 秒)</span>
+        </div>
+      </div>
+    </AIMsg>
+  );
+}
+
+function VersionCard({ v, seg, title, meta, score, onOpen, onExport, changed, root }) {
+  return (
+    <AIMsg>
+      <div style={{ ...card, padding: 12, display: 'flex', gap: 14, alignItems: 'center' }}>
+        <button onClick={onOpen} style={{ borderRadius: 10, overflow: 'hidden', flex: 'none', boxShadow: SH1 }} aria-label={'预览 v' + v}>
+          <Frame916 seg={seg} version={v} w={52} />
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span className="serif" style={{ fontSize: 30, lineHeight: 1, fontWeight: 300 }}>v{v}</span>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>{title}</span>
+          </div>
+          <div style={{ fontSize: 13, color: T3A, marginTop: 3 }}>{meta}</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center' }}>
+            <Score v={score} />
+            <Pill onClick={onOpen} style={{ padding: '2px 10px', fontSize: 12 }}>在右边看</Pill>
+            <Pill onClick={onExport} style={{ padding: '2px 10px', fontSize: 12 }}>导出</Pill>
+          </div>
+        </div>
+        {changed && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {changed.map((s) => (
+                <button key={s} onClick={() => changed.onJump(s)} style={{ borderRadius: 6, overflow: 'hidden', boxShadow: `0 0 0 2px ${B2}` }} aria-label={'第 ' + (s + 1) + ' 段'}>
+                  <Frame916 seg={s} version={2} w={30} />
+                </button>
+              ))}
+            </div>
+            <span className="serif" style={{ fontSize: 15, color: T3A, whiteSpace: 'nowrap' }}>(只动了这 2 段)</span>
+          </div>
+        )}
+      </div>
+    </AIMsg>
+  );
+}
+
+function MiniBars({ kind }) {
+  const c = '#000000cc', g = '#0000001f';
+  if (kind === 0) return (<div style={{ padding: 9, display: 'grid', gap: 5 }}>{[0.9, 0.45].map((w, i) => <div key={i} style={{ height: 8, width: `${w * 100}%`, background: i ? g : c, borderRadius: 999 }} />)}</div>);
+  if (kind === 1) return (<div style={{ padding: 9 }}><div style={{ height: 5, width: '64%', background: c, borderRadius: 999 }} /><div style={{ display: 'flex', height: 12, marginTop: 7, borderRadius: 999, overflow: 'hidden' }}><div style={{ width: '66%', background: B4 }} /><div style={{ flex: 1, background: g }} /></div></div>);
+  return (<div style={{ padding: '8px 16px 0', display: 'flex', gap: 10, alignItems: 'flex-end', height: 44 }}>{[0.95, 0.45].map((h, i) => <div key={i} style={{ flex: 1, height: `${h * 100}%`, background: i ? g : c, borderRadius: '6px 6px 0 0' }} />)}</div>);
+}
+function OptionsReply({ sel, setSel, onJump }) {
+  const opts = ['横条', '比例条', '双柱'];
+  return (
+    <AIMsg>
+      <div style={{ fontSize: 15 }}>收到，改两处，其余 16 段不动：</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+        {[[12, '@00:58 对比条卡', '加上具体比例'], [1, '@00:04 钩子卡 2/3', '¥0.51 放大']].map(([s, t, d]) => (
+          <motion.button key={s} onClick={() => onJump(s)} whileHover={{ y: -2, boxShadow: SH2 }} transition={CRISP}
+            style={{ ...card, display: 'flex', gap: 10, padding: 8, textAlign: 'left', alignItems: 'center' }}>
+            <div style={{ borderRadius: 6, overflow: 'hidden', flex: 'none' }}><Frame916 seg={s} version={1} w={32} /></div>
+            <div style={{ minWidth: 0 }}><Tag small>{t}</Tag><div style={{ fontSize: 13, marginTop: 4, color: T2 }}>→ {d}</div></div>
+          </motion.button>
+        ))}
+      </div>
+      <div style={{ fontSize: 15, marginTop: 12 }}>对比卡用哪种版式？</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        {opts.map((o, i) => (
+          <motion.button key={o} data-opt={i} onClick={() => setSel(i)} whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }} transition={CRISP} style={{ flex: 1, textAlign: 'left' }}>
+            <motion.div animate={{ boxShadow: sel === i ? `0 0 0 2px ${B2}, 0 8px 24px 0 #3361cc26` : SH1, backgroundColor: sel === i ? '#f3f6fd' : '#ffffff' }} transition={CRISP}
+              style={{ borderRadius: 13, height: 52, overflow: 'hidden' }}><MiniBars kind={i} /></motion.div>
+            <div style={{ fontSize: 13, marginTop: 6, color: sel === i ? B5 : T2, fontWeight: sel === i ? 600 : 400 }}>{['A', 'B', 'C'][i]} · {o}{sel === i ? ' · 你选的' : ''}</div>
+          </motion.button>
+        ))}
+      </div>
+      <div style={{ fontSize: 15, marginTop: 10 }}>好，按 <b style={{ fontWeight: 600 }}>{['A', 'B', 'C'][sel]} 版式</b>重渲这 2 段。</div>
+    </AIMsg>
+  );
+}
+
+function BgProcessing({ bgSel, setBgSel }) {
+  const pct = useMotionValue(0);
+  const [p, setP] = useState(0);
+  useEffect(() => { pct.set(0); const c = animate(pct, 62, { duration: 1.4, ease: EASE }); return c.stop; }, [bgSel]);
+  useMotionValueEvent(pct, 'change', (v) => setP(Math.round(v)));
+  return (
+    <AIMsg label={<span>换背景 · <b style={{ color: T1, fontWeight: 600 }}>{BGS[bgSel].name}</b></span>}>
+      <div style={{ ...card, padding: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+          {BGS.map((b, i) => {
+            const on = i === bgSel;
+            return (
+              <motion.button key={b.f} data-bg={i} onClick={() => setBgSel(i)} whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }} transition={CRISP} style={{ textAlign: 'left' }}>
+                <motion.div animate={{ boxShadow: on ? `0 0 0 2px #fff, 0 0 0 4px ${B4}` : SH1 }} transition={CRISP}
+                  style={{ borderRadius: 10, overflow: 'hidden', aspectRatio: '4 / 3', position: 'relative', background: BG4 }}>
+                  <img src={bgSrc(i)} alt={b.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  {on && <div style={{ position: 'absolute', right: 4, bottom: 4, background: 'rgba(0,0,0,.6)', color: '#fff', fontSize: 11, fontWeight: 600, borderRadius: 999, padding: '0 6px' }} className="tnum">{p}%</div>}
+                </motion.div>
+                <div style={{ fontSize: 12, marginTop: 5, color: on ? B5 : T2, fontWeight: on ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
+              </motion.button>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1, height: 6, borderRadius: 999, background: BG4, overflow: 'hidden' }}>
+            <motion.div style={{ height: '100%', width: `${p}%`, borderRadius: 999, backgroundImage: `linear-gradient(90deg, ${B2}, ${B4}, ${B2})`, backgroundSize: '200% 100%' }}
+              animate={{ backgroundPositionX: ['0%', '-200%'] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'linear' }} />
+          </div>
+          <span className="tnum" style={{ fontSize: 13, fontWeight: 600, color: B5 }}>{p}%</span>
+        </div>
+        <div style={{ fontSize: 13, color: T3A, marginTop: 6 }}>正在应用到人像 · 合成完自动出 v3 · 预估 +¥0.31</div>
+      </div>
+    </AIMsg>
+  );
+}
+
+/* ---------- 剪辑现场终端（重播时浮出） ---------- */
+const T_PIPE = 0, T_LINE = (i) => 900 + i * 620;
+const T_THUMBS = 4800, T_QC = 5600, T_END = 6500, T_DONE = 7000;
+function Terminal({ el, onClose }) {
+  const linesDone = LINES.filter((_, i) => el >= T_LINE(i) + 520).length;
+  const prog = linesDone / LINES.length;
+  const dur = 222 - Math.round(105 * prog);
+  const pipe = [['识别', 'Paraformer · 本机', '0:41'], ['剪口误', 'gemini-3.5-flash', '0:52'], ['换背景', '书房 · 本机抠像', '1:08']];
+  return (
+    <motion.div data-terminal initial={{ opacity: 0, y: 30, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.98, transition: { duration: 0.25 } }} transition={CALM}
+      style={{ position: 'absolute', left: 452, top: 316, width: 560, height: 520, borderRadius: 18, background: 'rgba(28,28,30,.94)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', boxShadow: `0 0 0 1px rgba(255,255,255,.08), ${FLOAT}`, zIndex: 40, overflow: 'hidden', fontFamily: 'var(--mono)', color: '#e6e6e6' }}>
+      <div style={{ height: 38, display: 'flex', alignItems: 'center', padding: '0 14px', position: 'relative' }}>
+        <Lights onRed={onClose} />
+        <div style={{ position: 'absolute', left: 0, right: 0, textAlign: 'center', fontSize: 12, color: '#ffffff7a', pointerEvents: 'none', fontFamily: 'var(--sans)' }}>Terminal — 剪辑现场 · 重播</div>
+      </div>
+      <div style={{ padding: '6px 18px 0', fontSize: 13, lineHeight: '24px' }}>
+        <div style={{ color: '#ffffffb3' }}><span style={{ color: B2 }}>~/第2期</span> $ mingzhi cut 第2期_口播.mov</div>
+        {pipe.map(([a, b, c], k) => el >= T_PIPE + 200 + k * 200 && (
+          <motion.div key={a} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25 }} style={{ display: 'flex', color: '#ffffff9e' }}>
+            <span style={{ color: '#28c840', width: 18 }}>✓</span><span style={{ width: 70, color: '#ffffffd9', fontFamily: 'var(--sans)' }}>{a}</span><span style={{ flex: 1, fontFamily: 'var(--sans)' }}>{b}</span><span className="tnum">{c}</span>
+          </motion.div>
+        ))}
+        <div style={{ height: 1, background: '#ffffff14', margin: '8px 0' }} />
+        <div style={{ fontFamily: 'var(--sans)', fontSize: 14, minHeight: 196 }}>
+          {LINES.map((ln, i) => el >= T_LINE(i) && (
+            <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: EASE }}
+              style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', minHeight: 28, color: '#ffffffd9' }}>
+              <span style={{ color: '#ffffff3d', fontFamily: 'var(--mono)', fontSize: 12, width: 26 }}>{String(i + 1).padStart(2, '0')}</span>
+              <AnimatePresence mode="popLayout">
+                {ln.map((tk, j) => {
+                  const isCut = Array.isArray(tk);
+                  if (isCut && el >= T_LINE(i) + 520) return null;
+                  const marked = isCut && el >= T_LINE(i) + 220;
+                  return (
+                    <motion.span key={j} layout transition={CALM}
+                      exit={{ y: -16, opacity: 0, filter: 'blur(4px)', transition: { duration: 0.45, ease: EASE } }}
+                      style={{ display: 'inline-block', borderRadius: 999, padding: isCut ? '0 7px' : 0, margin: isCut ? '0 3px' : 0,
+                        background: marked ? B1 : 'transparent', color: marked ? B5 : (isCut ? '#ffffff7a' : '#ffffffd9'), fontWeight: marked ? 600 : 400, transition: 'background .2s,color .2s' }}>
+                      {isCut ? tk[0] : tk}
+                    </motion.span>
+                  );
+                })}
+              </AnimatePresence>
+            </motion.div>
+          ))}
+          {el < T_THUMBS && (
+            <div style={{ display: 'flex', alignItems: 'center', minHeight: 28 }}>
+              <span style={{ width: 26 }} />
+              <motion.span animate={{ opacity: [1, 1, 0, 0] }} transition={{ duration: 1, repeat: Infinity, times: [0, 0.5, 0.5, 1] }}
+                style={{ width: 8, height: 16, background: B2, borderRadius: 1 }} />
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', margin: '6px 0 10px', fontFamily: 'var(--sans)' }}>
+          <span className="tnum" style={{ fontSize: 13, color: '#ffffff9e' }}>3:42 →</span>
+          <RollNum value={dur} format={fmtShort} className="serif tnum" style={{ fontSize: 30, lineHeight: 1, color: '#fff', fontWeight: 300 }} />
+          <span style={{ fontSize: 13, color: B2 }}>− <RollNum value={Math.round(37 * prog)} /> 气口 · − <RollNum value={Math.round(12 * prog)} /> 口误</span>
+        </div>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', fontFamily: 'var(--sans)' }}>
+          <div style={{ display: 'flex', height: 74, alignItems: 'flex-end' }}>
+            {THUMBS.map((f, k) => el >= T_THUMBS + k * 100 && (
+              <motion.img key={f} src={imgSrc(f)} alt="" initial={{ opacity: 0, y: 14, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={CALM}
+                style={{ width: 40, height: 71, objectFit: 'cover', borderRadius: 6, marginRight: -10, boxShadow: '0 0 0 1px rgba(255,255,255,.15), 0 6px 16px rgba(0,0,0,.5)' }} />
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, flex: 1, marginLeft: 14 }}>
+            {QC.map(([n, v], k) => el >= T_QC + k * 180 && (
+              <motion.div key={n} initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} transition={CALM}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderRadius: 10, padding: '3px 10px', background: 'rgba(173,192,235,.14)', boxShadow: 'inset 0 0 0 1px rgba(173,192,235,.25)' }}>
+                <span style={{ fontSize: 12, color: '#ffffffb3' }}>{n}</span><span className="tnum" style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>{v}</span>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+        {el >= T_END && (
+          <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} style={{ marginTop: 12, color: B2, fontSize: 13 }}>
+            ✓ 删除 37 处气口 · 12 处口误 · 3:42 → 1:57 · 18 段 <span style={{ color: '#ffffff7a' }}>· 自检 8.8</span>
+          </motion.div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ---------- 版本分段控件 ---------- */
+function Versions({ version, setVersion }) {
+  return (
+    <div style={{ display: 'flex', background: BG4, borderRadius: 999, padding: 3 }}>
+      {[1, 2, 3].map((v) => (
+        <button key={v} data-ver={v} onClick={() => setVersion(v)} style={{ position: 'relative', padding: '3px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 }}>
+          {version === v && <motion.span layoutId="verpill" transition={CRISP} style={{ position: 'absolute', inset: 0, background: '#fff', borderRadius: 999, boxShadow: '0 1px 3px rgba(0,0,0,.12)' }} />}
+          <span className="serif" style={{ position: 'relative', fontSize: 17, fontWeight: 300, color: version === v ? T1 : T2 }}>v{v}</span>
+          {v === 3 && <span className="tnum" style={{ position: 'relative', fontSize: 11, fontWeight: 600, color: B5, background: B1, borderRadius: 999, padding: '0 5px' }}>62%</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- 细进度条（两个本版改动小点） ---------- */
+function Progress({ time, setTime, version, playing, setPlaying, onPause }) {
+  const ref = useRef();
+  const drag = useRef(false);
+  const [hover, setHover] = useState(null);
+  const seek = (e) => { const r = ref.current.getBoundingClientRect(); setTime(Math.min(DUR - 0.01, Math.max(0, ((e.clientX - r.left) / r.width) * DUR))); };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <motion.button data-act="play" whileTap={{ scale: 0.92 }} onClick={() => { if (playing) { setPlaying(false); onPause(); } else setPlaying(true); }}
+        aria-label={playing ? '暂停' : '播放'} style={{ width: 34, height: 34, borderRadius: 999, background: '#000', display: 'grid', placeItems: 'center', flex: 'none' }}>
+        {playing ? <svg width="10" height="12"><rect x="0.5" y="0.5" width="3" height="11" fill="#fff" /><rect x="6.5" y="0.5" width="3" height="11" fill="#fff" /></svg>
+          : <svg width="11" height="12" viewBox="0 0 11 12"><path d="M1.5 1l8.5 5-8.5 5z" fill="#fff" /></svg>}
+      </motion.button>
+      <span className="tnum" style={{ fontSize: 13, color: T2, width: 92, flex: 'none' }}>{fmt(time)} <span style={{ color: T3A }}>/ 01:57</span></span>
+      <div ref={ref} data-bar style={{ flex: 1, height: 22, position: 'relative', cursor: 'pointer' }}
+        onPointerDown={(e) => { drag.current = true; e.currentTarget.setPointerCapture(e.pointerId); seek(e); }}
+        onPointerMove={(e) => { const r = ref.current.getBoundingClientRect(); setHover(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); if (drag.current) seek(e); }}
+        onPointerUp={() => (drag.current = false)} onPointerLeave={() => setHover(null)}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 9, height: 4, borderRadius: 999, background: '#0000001a' }} />
+        <div style={{ position: 'absolute', left: 0, top: 9, height: 4, borderRadius: 999, background: B4, width: `${(time / DUR) * 100}%` }} />
+        {version >= 2 && SEGS.map((s, i) => s.v2 && (
+          <span key={i} title={'v2 改动 · ' + s.v2} style={{ position: 'absolute', top: 7, left: `calc(${((s.t + segEnd(i)) / 2 / DUR) * 100}% - 4px)`, width: 8, height: 8, borderRadius: 999, background: B5, boxShadow: '0 0 0 2px #fff' }} />
+        ))}
+        <motion.span animate={{ scale: hover !== null || drag.current ? 1 : 0.6 }} transition={CRISP}
+          style={{ position: 'absolute', top: 4, left: `calc(${(time / DUR) * 100}% - 7px)`, width: 14, height: 14, borderRadius: 999, background: '#fff', boxShadow: '0 0 0 1px #0000001f, 0 2px 6px rgba(0,0,0,.2)' }} />
+        <AnimatePresence>{hover !== null && (
+          <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={CRISP}
+            style={{ position: 'absolute', bottom: 26, left: `clamp(0px, calc(${hover * 100}% - 70px), calc(100% - 150px))`, background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', color: '#fff', fontSize: 12, padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+            <span className="tnum">{fmt(hover * DUR)}</span> · {SEGS[segAt(hover * DUR)].tpl.split(' · ')[0]}
+          </motion.div>
+        )}</AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 输入区 ---------- */
+function Composer({ tags, setTags, draft, setDraft, onSend, tagSlotRef, onChip }) {
+  const chips = ['节奏再快一点', '换一张 B-roll', '字幕换成得意黑', '导出'];
+  const send = () => { if (!draft.trim() && !tags.length) return; onSend(); };
+  return (
+    <div style={{ padding: '10px 16px 14px' }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        {chips.map((c) => <Pill key={c} data-chip={c} onClick={() => onChip(c)} style={{ padding: '4px 12px', fontSize: 13 }}>{c}</Pill>)}
+      </div>
+      <div style={{ background: '#fff', borderRadius: 18, boxShadow: `${SH1}, ${SH2}`, padding: '10px 10px 10px 14px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: tags.length ? 6 : 0 }}>
+          <AnimatePresence>
+            {tags.map((t) => (
+              <motion.span key={t.id} layout initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }} transition={CRISP}>
+                <span className="hl" style={{ fontSize: 13, display: 'inline-flex', gap: 6, alignItems: 'center' }}>@{t.label}
+                  <button onClick={() => setTags(tags.filter((x) => x.id !== t.id))} aria-label="移除" style={{ color: B5, fontSize: 14, lineHeight: 1 }}>×</button></span>
+              </motion.span>
+            ))}
+          </AnimatePresence>
+          <span ref={tagSlotRef} style={{ width: 1, height: tags.length ? 20 : 0 }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+          <textarea data-input value={draft} onChange={(e) => setDraft(e.target.value)} rows={2}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="说一句话改片子，比如「这张换成对比图」" style={{ flex: 1, border: 0, resize: 'none', background: 'transparent', fontSize: 15, lineHeight: 1.55 }} />
+          <span className="tnum" style={{ fontSize: 12, color: T3A, marginBottom: 8, whiteSpace: 'nowrap' }}>本轮 ≈ ¥0.08</span>
+          <motion.button data-act="send" onClick={send} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }} transition={CRISP} aria-label="发送"
+            style={{ width: 38, height: 38, borderRadius: 999, background: '#000', display: 'grid', placeItems: 'center', flex: 'none' }}>
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 12V2M2.5 6.5L7 2l4.5 4.5" stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </motion.button>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: T3A, marginTop: 8, padding: '0 4px' }}>
+        <span>点预览画面，插入 @时间</span>
+        <span className="tnum">本期已用 ¥4.00 / 上限 ¥10</span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 其它 Space ---------- */
+function OtherSpace({ id, setSpace }) {
+  if (id === 'ep1') return (
+    <Win key="ep1" style={{ left: '50%', top: 250, width: 520, marginLeft: -220 }} delay={0.15}>
+      <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px' }}><Lights /></div>
+      <div style={{ padding: '6px 36px 34px' }}>
+        <div style={{ fontSize: 13, color: T3A }}>Space · 第 1 期</div>
+        <h2 style={{ fontSize: 44, fontWeight: 700, lineHeight: 1.05, marginTop: 6 }}>这一期 <span className="serif" style={{ fontWeight: 200 }}>(已发布)</span></h2>
+        <p style={{ fontSize: 16, color: T2, marginTop: 14, lineHeight: 1.6 }}>成片和封面都已经导出过。回到这个 Space 可以继续用一句话改某一段，只重渲那一段。</p>
+        <div style={{ display: 'flex', gap: 10, marginTop: 22, alignItems: 'center' }}>
+          <Pill dark style={{ padding: '10px 22px', fontSize: 15 }}>打开第 1 期</Pill>
+          <Pill onClick={() => setSpace('ep2')} style={{ padding: '10px 22px', fontSize: 15 }}>回到第 2 期</Pill>
+        </div>
+      </div>
+    </Win>
+  );
+  return (
+    <Win key="new" style={{ left: '50%', top: 190, width: 600, marginLeft: -260 }} delay={0.15}>
+      <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px' }}><Lights /></div>
+      <div style={{ padding: '6px 40px 36px' }}>
+        <div style={{ fontSize: 13, color: T3A }}>Space · 新建</div>
+        <h2 style={{ fontSize: 46, fontWeight: 700, lineHeight: 1.04, marginTop: 6 }}>录一条口播，<br />剩下的交给 <span className="serif" style={{ fontWeight: 200 }}>the cut</span></h2>
+        <p style={{ fontSize: 16, color: T2, marginTop: 14, lineHeight: 1.75 }}>剪气口、换背景、写分镜、配 B-roll、加字幕，<br />开跑之前，<span className="hl" style={{ whiteSpace: 'nowrap' }}>先告诉你这一期花多少钱</span>。</p>
+        <div style={{ marginTop: 20, borderRadius: 18, background: '#f7f7f7', boxShadow: 'inset 0 0 0 1.5px #0000001a', padding: '26px 0', textAlign: 'center', color: T2, fontSize: 15 }}>
+          把竖屏口播拖到这里 <span style={{ color: T3A }}>· MP4 / MOV · 1080×1920</span>
+        </div>
+        <div style={{ display: 'flex', gap: 12, marginTop: 20, alignItems: 'center' }}>
+          <Pill dark style={{ padding: '12px 24px', fontSize: 16 }}>
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 1.5l10 5.5-10 5.5z" fill="#fff" /></svg>开始出片</Pill>
+          <span className="serif" style={{ fontSize: 22, color: T3 }}>(先看预估，再确认)</span>
+        </div>
+      </div>
+    </Win>
+  );
+}
+
+/* ---------- 主 ---------- */
+function App() {
+  const [space, setSpace] = useState('ep2');
+  const [version, setVersion] = useState(2);
+  const [compare, setCompare] = useState(false);
+  const [time, setTime] = useState(0.8);
+  const [playing, setPlaying] = useState(false);
+  const [tags, setTags] = useState([]);
+  const [draft, setDraft] = useState('');
+  const [extra, setExtra] = useState([]);
+  const [opt, setOpt] = useState(1);
+  const [bgSel, setBgSel] = useState(3);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [fly, setFly] = useState(null);
+  const [replay, setReplay] = useState(null); // null | ms
+  const chatRef = useRef(), tagSlotRef = useRef(), raf = useRef(), landed = useRef(null);
+  const art = SPACES.find((s) => s.id === space).art;
+
+  useEffect(() => { if (!playing) return; let last = performance.now(), id; const tick = (now) => { const dt = (now - last) / 1000; last = now; setTime((t) => (t + dt >= DUR ? 0 : t + dt)); id = requestAnimationFrame(tick); }; id = requestAnimationFrame(tick); return () => cancelAnimationFrame(id); }, [playing]);
+  useEffect(() => { if (space !== 'ep2') return; let n = 0; const id = setInterval(() => { const el = chatRef.current; if (el) { el.scrollTop = el.scrollHeight; } if (++n > 8) clearInterval(id); }, 60); return () => clearInterval(id); }, [space]);
+
+  // 聊天窗大标题随滚动收缩（离开底部 = 在翻历史，标题让位）
+  const [atBottom, setAtBottom] = useState(true);
+  const onChatScroll = (e) => { const el = e.currentTarget; setAtBottom(el.scrollHeight - el.clientHeight - el.scrollTop < 40); };
+
+  const startReplay = () => {
+    cancelAnimationFrame(raf.current);
+    const t0 = performance.now(); setReplay(0);
+    const loop = (now) => { const e = now - t0; setReplay(e); if (e < T_DONE) raf.current = requestAnimationFrame(loop); };
+    raf.current = requestAnimationFrame(loop);
+  };
+  useEffect(() => { window.__replay = startReplay; });
+
+  const pick = (cx, cy, t) => {
+    const k = segAt(t);
+    const label = `${fmt(t)} ${SEGS[k].tpl.split(' · ')[0]}`;
+    if (tags.some((x) => x.label === label)) return;
+    const slot = tagSlotRef.current.getBoundingClientRect();
+    const from = cx == null ? { x: 1000, y: 780 } : { x: cx, y: cy };
+    setFly({ id: Date.now(), label, x0: from.x - 60, y0: from.y - 12, x1: slot.left, y1: slot.top - 10 });
+  };
+  const landFly = () => { if (!fly || landed.current === fly.id) return; landed.current = fly.id; const f = fly; setTags((ts) => (ts.some((x) => x.id === f.id) ? ts : [...ts, { id: f.id, label: f.label }])); setFly(null); };
+  const toBottom = () => requestAnimationFrame(() => chatRef.current && chatRef.current.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' }));
+  const send = () => {
+    const text = draft.trim() || '看看这段', tg = tags.map((t) => t.label);
+    setExtra((x) => [...x, { role: 'user', text, tag: tg[0] }]); setDraft(''); setTags([]); toBottom();
+    setTimeout(() => { setExtra((x) => [...x, { role: 'ai', typing: true }]); toBottom(); }, 450);
+    setTimeout(() => { setExtra((x) => [...x.filter((m) => !m.typing), { role: 'ai', text: `收到${tg[0] ? `，只动 @${tg[0]} 这一段` : ''}：「${text}」。等 v3 背景合成完接着改，预估 +¥0.08，不重跑整片。` }]); toBottom(); }, 1500);
+  };
+  const chip = (c) => { if (c === '导出') { setExportOpen(true); return; } setDraft(c); };
+  const doExport = (w) => { setExportOpen(false); setToast(w); setTimeout(() => setToast(null), 2200); };
+  const jump = (s) => { setPlaying(false); setTime(SEGS[s].t + 0.5); };
+  const seg = segAt(time), s = SEGS[seg];
+  const processing = version === 3;
+
+  // 预览窗尺寸
+  const PH = 640, PW = PH * 9 / 16;           // 单屏 360×640
+  const CPH = 560, CPW = CPH * 9 / 16;        // 对比 315×560
+  const prevW = compare ? CPW * 2 + 24 + 40 : PW + 40;
+  const prevLeft = compare ? 690 : 806;
+
+  return (
+    <div style={{ position: 'relative', width: 1440, height: 900, overflow: 'clip' }}>
+      {/* 油画：Space 切换时交叉淡化 */}
+      <AnimatePresence initial={false}>
+        <motion.div key={art} initial={{ opacity: 0, scale: 1.06 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1.1, ease: EASE }}
+          style={{ position: 'absolute', inset: 0 }}>
+          <motion.img src={art} alt="" animate={{ scale: [1, 1.02, 1] }} transition={{ duration: 40, repeat: Infinity, ease: 'easeInOut' }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        </motion.div>
+      </AnimatePresence>
+      {SPACES.map((sp) => <link key={sp.id} rel="preload" as="image" href={sp.art} />)}
+
+      {/* 顶部公告条（ego 招牌） */}
+      <motion.div initial={{ y: -40 }} animate={{ y: 0 }} transition={CALM}
+        style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 40, background: B1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 15, color: T1, zIndex: 30 }}>
+        <span>v3 正在把背景换成 <span className="serif" style={{ fontSize: 18, fontWeight: 300 }}>夜景落地窗</span> · <span className="tnum">62%</span></span>
+        <Pill dark data-ver-banner onClick={() => { setSpace('ep2'); setVersion(3); setCompare(false); }} style={{ padding: '3px 12px', fontSize: 13 }}>查看 ↗</Pill>
+        <div style={{ position: 'absolute', right: 20, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: T2 }}>
+          可想 AI 余额 <b className="tnum" style={{ color: T1, fontWeight: 600 }}>¥36.27</b>
+        </div>
+      </motion.div>
+
+      <Dock space={space} setSpace={(id) => { setSpace(id); setReplay(null); setExportOpen(false); }} />
+
+      <AnimatePresence mode="wait">
+        {space !== 'ep2' ? <OtherSpace key={space} id={space} setSpace={setSpace} /> : (
+          <motion.div key="ep2" initial={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} style={{ position: 'absolute', inset: 0 }}>
+            {/* 对话窗 */}
+            <Win style={{ left: 100, top: 56, width: 560, height: 828, display: 'flex', flexDirection: 'column' }} delay={0.1}>
+              <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px', position: 'relative', flex: 'none' }}>
+                <Lights />
+                <div style={{ position: 'absolute', left: 0, right: 0, textAlign: 'center', fontSize: 13, color: T3A, pointerEvents: 'none' }}>Space · 第 2 期 · 高性价比人生指南</div>
+              </div>
+              <motion.div initial={false} animate={{ height: atBottom ? 100 : 50 }} transition={CALM} style={{ padding: '0 24px', overflow: 'hidden', flex: 'none', boxShadow: atBottom ? 'none' : 'inset 0 -1px 0 #0000000f' }}>
+                <motion.h1 initial={false} animate={{ scale: atBottom ? 1 : 0.55, y: atBottom ? 0 : -4 }} transition={CALM} style={{ fontSize: 40, transformOrigin: '0 50%', fontWeight: 700, lineHeight: 1.08, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+                  把 3:42 的口播，剪成 <span className="serif tnum" style={{ fontWeight: 200 }}>1:57</span>
+                </motion.h1>
+                <motion.p animate={{ opacity: atBottom ? 1 : 0 }} style={{ fontSize: 15, color: T2, marginTop: 8 }}>
+                  删了 <span className="hl">37 处气口 · 12 处口误</span>，18 段，当前 v2 · 自检 9.0
+                </motion.p>
+              </motion.div>
+              <div ref={chatRef} onScroll={onChatScroll} className="scroll" style={{ flex: 1, overflowY: 'auto', padding: '14px 24px 20px', display: 'flex', flexDirection: 'column', gap: 20, WebkitMaskImage: 'linear-gradient(180deg, transparent 0, #000 22px)', maskImage: 'linear-gradient(180deg, transparent 0, #000 22px)' }}>
+                <Reveal root={chatRef}><SetupCard /></Reveal>
+                <Reveal root={chatRef}><LiveSummary onReplay={startReplay} playing={replay !== null && replay < T_DONE} /></Reveal>
+                <Reveal root={chatRef}><VersionCard v={1} seg={0} title="第一版出好了" meta="18 段 · 花费 ¥3.84 · 封面 4:3 + 3:4 已生成" score="8.8" onOpen={() => { setVersion(1); setCompare(false); }} onExport={() => setExportOpen(true)} /></Reveal>
+                <Reveal root={chatRef}><UserMsg tag="@00:58 对比条卡">这张数据太弱了，加上具体比例，再把开头第二张钩子卡的 ¥0.51 放大</UserMsg></Reveal>
+                <Reveal root={chatRef}><OptionsReply sel={opt} setSel={setOpt} onJump={jump} /></Reveal>
+                <Reveal root={chatRef}><VersionCard v={2} seg={1} title="只重渲了 2 段" meta="用时 38 秒 · +¥0.16 · 其余 16 段原样保留" score="9.0"
+                  onOpen={() => { setVersion(2); setCompare(false); }} onExport={() => setExportOpen(true)} changed={Object.assign([1, 12], { onJump: (k) => { setVersion(2); jump(k); } })} /></Reveal>
+                <Reveal root={chatRef}><UserMsg>背景换成夜景落地窗试试</UserMsg></Reveal>
+                <Reveal root={chatRef}><BgProcessing bgSel={bgSel} setBgSel={setBgSel} /></Reveal>
+                {extra.map((m, i) => (
+                  <motion.div key={i} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={CALM}>
+                    {m.role === 'user' ? <UserMsg tag={m.tag && '@' + m.tag}>{m.text}</UserMsg>
+                      : <AIMsg>{m.typing ? (
+                        <div style={{ display: 'flex', gap: 5, padding: '8px 0' }}>{[0, 1, 2].map((d) => <motion.span key={d} animate={{ opacity: [0.25, 1, 0.25] }} transition={{ duration: 1, repeat: Infinity, delay: d * 0.15 }} style={{ width: 7, height: 7, borderRadius: 999, background: B4 }} />)}</div>
+                      ) : <div style={{ fontSize: 15 }}>{m.text}</div>}</AIMsg>}
+                  </motion.div>
+                ))}
+              </div>
+              <div style={{ flex: 'none', background: 'linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,.6) 30%)' }}>
+                <Composer tags={tags} setTags={setTags} draft={draft} setDraft={setDraft} onSend={send} tagSlotRef={tagSlotRef} onChip={chip} />
+              </div>
+            </Win>
+
+            {/* 预览窗 */}
+            <Win layout style={{ left: prevLeft, top: 64, width: prevW }} delay={0.2} transition={CALM}>
+              <div style={{ height: 48, display: 'flex', alignItems: 'center', padding: '0 14px', gap: 10 }}>
+                <Lights />
+                <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}><Versions version={version} setVersion={(v) => { setVersion(v); }} /></div>
+                <button data-act="compare" onClick={() => setCompare(!compare)} aria-pressed={compare}
+                  style={{ fontSize: 13, padding: '4px 12px', borderRadius: 999, background: compare ? B1 : BG4, color: compare ? B5 : T2, fontWeight: compare ? 600 : 400 }}>对比</button>
+              </div>
+              <div style={{ padding: '0 20px', display: 'flex', gap: 24, justifyContent: 'center' }}>
+                {(compare ? [1, 2] : [version]).map((v) => (
+                  <div key={compare ? 'c' + v : 'single'}>
+                    {compare && <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span className="serif" style={{ fontSize: 24, fontWeight: 300 }}>v{v}</span>
+                      <span style={{ fontSize: 12, color: T3A }}>{v === 2 && s.v2 ? <span className="hl" style={{ fontSize: 12 }}>{s.v2}</span> : `自检 ${scoreOf(seg, v)}`}</span>
+                    </div>}
+                    <motion.button data-player onClick={(e) => { setPlaying(false); pick(e.clientX, e.clientY, time); }} whileTap={{ scale: 0.99 }}
+                      style={{ display: 'block', borderRadius: 13, overflow: 'hidden', boxShadow: SH1, cursor: 'copy' }}>
+                      <Frame916 seg={seg} version={v} w={compare ? CPW : PW} processing={!compare && processing} />
+                    </motion.button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: '14px 20px 16px' }}>
+                <Progress time={time} setTime={setTime} version={version} playing={playing} setPlaying={setPlaying} onPause={() => pick(null, null, time)} />
+              </div>
+            </Win>
+
+            {/* 这一段：小浮窗 */}
+            <AnimatePresence>{!compare && (
+              <Win key="seg" style={{ left: 1196, top: 470, width: 228 }} delay={0.3}>
+                <div style={{ padding: '14px 16px 16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: T3A }}>
+                    <span>第 {seg + 1} / 18 段</span><span className="tnum">{fmt(s.t)}–{fmt(segEnd(seg))}</span>
+                  </div>
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div key={seg + '-' + version} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.16 }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.45, margin: '6px 0 10px', minHeight: 46 }}>{s.text}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        <span style={{ fontSize: 12, color: T2, background: BG4, borderRadius: 999, padding: '1px 8px' }}>{s.tpl}</span>
+                        <Score v={scoreOf(seg, version)} />
+                      </div>
+                    </motion.div>
+                  </AnimatePresence>
+                  <Pill data-act="quote" onClick={(e) => pick(e.clientX, e.clientY, time)} style={{ marginTop: 12, padding: '6px 0', fontSize: 13, width: '100%', justifyContent: 'center' }}>@ 引用这段到对话</Pill>
+                  <div className="serif" style={{ fontSize: 17, color: T3, marginTop: 8, textAlign: 'center' }}>(或者直接点画面)</div>
+                </div>
+              </Win>
+            )}</AnimatePresence>
+
+            {/* 导出：黑色主 CTA + 菜单 */}
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...CALM, delay: 0.35 }} style={{ position: 'absolute', right: 16, bottom: 16, zIndex: 25 }}>
+              <Pill dark data-act="export" onClick={() => setExportOpen(!exportOpen)} style={{ padding: '10px 20px', fontSize: 15, boxShadow: FLOAT }}>
+                <svg width="13" height="13" viewBox="0 0 13 13"><path d="M6.5 1.5v7M3 5.5l3.5 3.5L10 5.5M1.5 11.5h10" stroke="#fff" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>导出 v{version === 3 ? 2 : version}
+              </Pill>
+              <AnimatePresence>{exportOpen && (
+                <motion.div className="glass" initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.97 }} transition={CRISP}
+                  style={{ position: 'absolute', right: 0, bottom: 52, width: 240, borderRadius: 18, boxShadow: SH3, padding: 6, transformOrigin: 'bottom right' }}>
+                  {[['MP4', '1080×1920 · 1:57'], ['封面', '4:3 横版'], ['封面', '3:4 竖版']].map(([a, b], i) => (
+                    <motion.button key={i} onClick={() => doExport(`${a} ${b}`)} whileHover={{ backgroundColor: '#d6dff5' }} transition={{ duration: 0.12 }}
+                      style={{ width: '100%', display: 'flex', justifyContent: 'space-between', padding: '9px 12px', borderRadius: 13, fontSize: 14, backgroundColor: 'rgba(214,223,245,0)' }}>
+                      <span style={{ fontWeight: 600 }}>{a}</span><span className="tnum" style={{ color: T3A }}>{b}</span>
+                    </motion.button>
+                  ))}
+                </motion.div>
+              )}</AnimatePresence>
+            </motion.div>
+
+            <AnimatePresence>{replay !== null && <Terminal key="term" el={replay} onClose={() => { cancelAnimationFrame(raf.current); setReplay(null); }} />}</AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 飞行中的 @时间胶囊 */}
+      <AnimatePresence>{fly && (
+        <motion.div key={fly.id} initial={{ x: fly.x0, y: fly.y0, scale: 1.15, opacity: 0.6 }} animate={{ x: fly.x1, y: fly.y1, scale: 1, opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0 } }}
+          transition={{ type: 'spring', stiffness: 200, damping: 26, restDelta: 0.5 }} onAnimationComplete={landFly}
+          style={{ position: 'fixed', left: 0, top: 0, zIndex: 100, pointerEvents: 'none', borderRadius: 999, boxShadow: '0 8px 24px rgba(51,97,204,.3)' }}>
+          <span className="hl" style={{ fontSize: 13, display: 'inline-block' }}>@{fly.label}</span>
+        </motion.div>
+      )}</AnimatePresence>
+      <AnimatePresence>{toast && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }} transition={CALM}
+          style={{ position: 'absolute', left: '50%', bottom: 28, marginLeft: -160, width: 320, textAlign: 'center', background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', color: '#fff', borderRadius: 26, padding: '12px 20px', fontSize: 14, boxShadow: `0 0 0 1px #0000000f, 0 16px 48px 0 #00000059`, zIndex: 90 }}>
+          已加入导出队列 · {toast}
+        </motion.div>
+      )}</AnimatePresence>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
