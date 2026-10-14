@@ -1,17 +1,30 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { escapeFilterPath } from '../src/captions/burn.js';
+import { burnSubtitles } from '../src/captions/burn.js';
+import { toAss } from '../src/captions/ass.js';
 import { loadConfig } from '../src/config.js';
 import type { LlmClient } from '../src/llm/kexiang.js';
+import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import { runPipeline } from '../src/pipeline/run.js';
 import { hasModels } from './helpers/models.js';
 
-describe('escapeFilterPath', () => {
-  it('转义 ffmpeg 滤镜里的冒号、反斜杠和单引号', () => {
-    expect(escapeFilterPath("C:\\a b\\it's.ass")).toBe("C\\:\\\\a b\\\\it\\'s.ass");
+describe('burnSubtitles', () => {
+  it('工作目录名含 \' , [ ] = ; 等特殊字符时也能烧录', async () => {
+    const cfg = loadConfig({});
+    const dir = join(mkdtempSync(join(tmpdir(), 'mz-')), "it's 视频,[1] a=b;c");
+    mkdirSync(dir);
+    const input = join(dir, 'in.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=540x960:r=30:d=1', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono',
+      '-t', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', input]);
+    const assPath = join(dir, 'captions.ass');
+    writeFileSync(assPath, toAss([{ start: 0, end: 1, text: '测试' }], { width: 540, height: 960 }));
+    const output = join(dir, 'out.mp4');
+    await burnSubtitles(input, assPath, output, cfg);
+    const info = await probe(output, cfg);
+    expect([info.width, info.height, info.hasAudio]).toEqual([540, 960, true]);
   });
 });
 

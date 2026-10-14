@@ -1,16 +1,13 @@
+import { basename, dirname, resolve } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { run } from '../media/exec.js';
 
-/** ffmpeg 滤镜参数里 \ : ' 都有特殊含义，需要转义 */
-export function escapeFilterPath(p: string): string {
-  return p.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
-}
-
 export async function burnSubtitles(input: string, assPath: string, output: string, cfg: AppConfig): Promise<void> {
+  // 在 ASS 所在目录里运行并只传文件名，避免把用户路径写进滤镜串（其中 ' , ; [ ] = : \ 都会解析出错）
   await run(cfg.ffmpeg, [
-    '-v', 'error', '-y', '-i', input,
-    '-vf', `ass=${escapeFilterPath(assPath)}`,
+    '-v', 'error', '-y', '-i', resolve(input),
+    '-vf', `ass=${basename(assPath)}`,
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
-    '-c:a', 'copy', output,
-  ]);
+    '-c:a', 'copy', resolve(output),
+  ], { cwd: dirname(resolve(assPath)) });
 }

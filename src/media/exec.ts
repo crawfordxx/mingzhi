@@ -4,9 +4,9 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 /** 执行外部命令；失败时把 stderr 末尾 800 字附在报错里，方便定位 ffmpeg 问题 */
-export async function run(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+export async function run(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string }> {
   try {
-    const { stdout, stderr } = await execFileAsync(cmd, args, { maxBuffer: 64 * 1024 * 1024 });
+    const { stdout, stderr } = await execFileAsync(cmd, args, { maxBuffer: 64 * 1024 * 1024, cwd: opts.cwd });
     return { stdout, stderr };
   } catch (err) {
     const e = err as { stderr?: string; message: string };

@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { transcribeWav } from '../asr/local-asr.js';
 import { burnSubtitles } from '../captions/burn.js';
@@ -17,13 +17,17 @@ export interface ProgressEvent { step: PipelineStep; message: string }
 export interface PipelineArgs { input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; onProgress?: (e: ProgressEvent) => void }
 export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[] }
 
-const fmtSec = (s: number): string => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+const fmtSec = (s: number): string => {
+  const total = Math.round(s);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+};
 
 /** 全流程：探测 → 抽音频 → 识别 → 剪口误 → 剪辑方案 → 剪切 → 字幕 → 烧录；每步回调一次，供 P5 剪辑直播使用 */
 export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   const { input, workDir, output, cfg, llm } = args;
   const report = (step: PipelineStep, message: string): void => args.onProgress?.({ step, message });
   mkdirSync(workDir, { recursive: true });
+  mkdirSync(dirname(output), { recursive: true });
 
   const media = await probe(input, cfg);
   if (!media.hasAudio) throw new Error('输入视频没有音轨，无法识别口播');
