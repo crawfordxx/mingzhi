@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 生成带气口、重复、口误和 1.5 秒停顿的测试口播（540x960 竖屏，约 14 秒）
+# 生成带气口、重复、口误和 1.5 秒停顿的测试口播（540x960 竖屏，约 19 秒）
 set -euo pipefail
 OUT_DIR="$(cd "$(dirname "$0")/.." && pwd)/tests/fixtures"
 TMP="$(mktemp -d)"

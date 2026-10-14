@@ -21,6 +21,14 @@ describe('parseProbe', () => {
     expect(info).toEqual({ durationSec: 12.5, width: 1080, height: 1920, fps: 29.97, hasAudio: true });
   });
 
+  it('format.duration 为 N/A 或缺失时回退视频流时长，仍无效则报错', () => {
+    const video = { codec_type: 'video', width: 540, height: 960, r_frame_rate: '30/1', duration: '9.5' };
+    expect(parseProbe({ format: { duration: 'N/A' }, streams: [video] }).durationSec).toBe(9.5);
+    expect(parseProbe({ format: {}, streams: [video] }).durationSec).toBe(9.5);
+    expect(() => parseProbe({ format: { duration: 'N/A' }, streams: [{ ...video, duration: 'N/A' }] })).toThrow('无法读取视频时长');
+    expect(() => parseProbe({ streams: [{ ...video, duration: undefined }] })).toThrow('无法读取视频时长');
+  });
+
   it('没有视频流时报错', () => {
     expect(() => parseProbe({ format: { duration: '1' }, streams: [{ codec_type: 'audio' }] })).toThrow('没有视频流');
   });

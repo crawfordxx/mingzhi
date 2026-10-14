@@ -20,7 +20,7 @@ function bundled(dataDir: string, name: string): string {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const dataDir = env.MINGZHI_DATA_DIR ?? join(homedir(), '.mingzhi');
+  const dataDir = env.MINGZHI_DATA_DIR || join(homedir(), '.mingzhi');
   return {
     dataDir,
     modelsDir: join(dataDir, 'models'),

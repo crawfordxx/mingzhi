@@ -14,6 +14,10 @@ describe('loadConfig', () => {
     expect(cfg.kexiangKey).toBeUndefined();
   });
 
+  it('MINGZHI_DATA_DIR 为空串时回退默认数据目录', () => {
+    expect(loadConfig({ MINGZHI_DATA_DIR: '' }).dataDir).toBe(join(homedir(), '.mingzhi'));
+  });
+
   it('数据目录 bin 下没有自带 ffmpeg 时用系统 ffmpeg', () => {
     const cfg = loadConfig({ MINGZHI_DATA_DIR: mkdtempSync(join(tmpdir(), 'mz-')) });
     expect(cfg.ffmpeg).toBe('ffmpeg');

@@ -1,5 +1,5 @@
-import { basename, extname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { resolveCliPaths } from './cli-paths.js';
 import { loadConfig } from './config.js';
 import { KexiangClient } from './llm/kexiang.js';
 import { runPipeline } from './pipeline/run.js';
@@ -10,10 +10,7 @@ async function main(): Promise<void> {
   const { positionals, values } = parseArgs({ allowPositionals: true, options: { output: { type: 'string', short: 'o' }, work: { type: 'string' } } });
   const [command, inputArg] = positionals;
   if (command !== 'edit' || !inputArg) throw new Error(USAGE);
-  const input = resolve(inputArg);
-  const name = basename(input, extname(input));
-  const workDir = resolve(values.work ?? join('work', name));
-  const output = resolve(values.output ?? join(workDir, `${name}_精剪.mp4`));
+  const { input, workDir, output } = resolveCliPaths(inputArg, values, process.env.INIT_CWD ?? process.cwd());
   const cfg = loadConfig();
   const llm = new KexiangClient(cfg.kexiangKey ?? '');
   const started = Date.now();
