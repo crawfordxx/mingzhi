@@ -18,8 +18,10 @@
 
 ```bash
 pnpm install
-pnpm fetch-models   # 下载本地语音识别模型到 ~/.mingzhi/models（可用 MINGZHI_DATA_DIR 改目录）
+pnpm fetch-models   # 从 GitHub Releases 下载本地语音识别模型到 ~/.mingzhi/models（可用 MINGZHI_DATA_DIR 改目录）
 ```
+
+模型从 GitHub Releases 下载，在中国大陆部分网络下可能失败，需要自行配置代理后重试。
 
 ### 配置大模型 key
 
@@ -67,8 +69,10 @@ Status: P1 (the editing core, command line only). Styled captions, background re
 
 ```bash
 pnpm install
-pnpm fetch-models   # downloads the local ASR models to ~/.mingzhi/models (override the root with MINGZHI_DATA_DIR)
+pnpm fetch-models   # downloads the local ASR models from GitHub releases to ~/.mingzhi/models (override the root with MINGZHI_DATA_DIR)
 ```
+
+The models come from GitHub releases, which may fail on some networks in mainland China; set up a proxy and retry if so.
 
 ### API key
 
