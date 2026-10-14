@@ -23,6 +23,11 @@ describe('buildEditPlan', () => {
     expect(plan.keep).toEqual([{ start: 0, end: 1 }, { start: 2, end: 3.9 }]);
   });
 
+  it('丢弃宽度为正但短于 minKeep 的残留碎片', () => {
+    const plan = buildEditPlan([{ start: 0, end: 4 }], [{ start: 1, end: 3.9 }], 4, opts);
+    expect(plan.keep).toEqual([{ start: 0, end: 1 }]);
+  });
+
   it('边距不超出片头片尾', () => {
     const plan = buildEditPlan([{ start: 0.05, end: 3.98 }], [], 4, opts);
     expect(plan.keep).toEqual([{ start: 0, end: 4 }]);
