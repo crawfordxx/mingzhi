@@ -85,13 +85,13 @@ describe('validateCuts', () => {
 });
 
 describe('detectCuts', () => {
-  it('调用 gemini-3.5-flash（low）并返回校验后的剪切', async () => {
+  it('调用 gpt-5.6-sol（low）并返回校验后的剪切', async () => {
     const calls: unknown[] = [];
     const client: LlmClient = { chatJson: async (o) => { calls.push(o); return { cuts: [{ from: 0, to: 0, type: 'filler', reason: '嗯' }, { from: 2, to: 3, type: 'repeat', reason: '去逛' }] }; } };
     const { cuts, dropped } = await detectCuts(client, tokens);
     expect(cuts.map((c) => [c.from, c.to])).toEqual([[0, 0], [2, 3]]);
     expect(dropped).toBe(0);
-    expect(calls[0]).toMatchObject({ model: 'google/gemini-3.5-flash', reasoningEffort: 'low' });
+    expect(calls[0]).toMatchObject({ model: 'openai/gpt-5.6-sol', reasoningEffort: 'low' });
   });
 
   it('提示词说明无需剪时返回空列表，并把整句重录归入 repeat', async () => {

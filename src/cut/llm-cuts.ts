@@ -2,7 +2,8 @@ import { z } from 'zod';
 import type { Token } from '../asr/types.js';
 import type { LlmClient } from '../llm/kexiang.js';
 
-export const CUT_MODEL = 'google/gemini-3.5-flash';
+/** 2026-10-14 在三条素材上对比 8 个模型，只有它既不误删也不漏剪（见 docs/acceptance/p1.md 第 9 节） */
+export const CUT_MODEL = 'openai/gpt-5.6-sol';
 export const MAX_CUT_RATIO = 0.35;
 const LINE_BREAK_GAP = 0.3;
 /** 模型下标与 text 对不上时，在模型下标前后这么多个 token 内按文字重新定位 */

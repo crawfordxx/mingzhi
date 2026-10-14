@@ -17,7 +17,7 @@
 
 ## AI 能力（产品只接「可想 AI」；kkhub 仅用于制作设计素材，不进产品；全部走「可想 AI」kexiangai.com，用户自己注册填 key，仓库不含任何 key，注册链接不带邀请码）
 - **key 存储**：系统钥匙串优先，退回 600 权限配置文件；首次填入即校验
-- **语言模型**：剪口误/写分镜/卡片文案 `gemini-3.5-flash`（**必须 `reasoning_effort: low`**，实测默认推理量翻倍、耗时 30s）；轻量任务 `gemini-3.1-flash-lite`；视觉自检 `gemini-3.5-flash`；设置里可切「高质量模式」= Claude Opus 5.5（默认关）
+- **语言模型**：剪口误 `openai/gpt-5.6-sol`（`reasoning_effort: low`；2026-10-14 在生口播上对比 8 个模型后由 gemini-3.5-flash 改来，见 `docs/acceptance/p1.md` 第 9 节）；写分镜/卡片文案 `gemini-3.5-flash`（**必须 `reasoning_effort: low`**，实测默认推理量翻倍、耗时 30s）；轻量任务 `gemini-3.1-flash-lite`；视觉自检 `gemini-3.5-flash`；设置里可切「高质量模式」= Claude Opus 5.5（默认关）
 - **生图**：KImage2 / 2.5 = GPT Image 2 / 2.5
 - **生视频**：Seedance 2.0 / 2.5（含真人素材先过审核接口）
 - **不用**：Midjourney（可想没有）
