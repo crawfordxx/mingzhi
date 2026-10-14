@@ -3,14 +3,16 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
+import { buildEditPlan } from '../src/cut/plan.js';
 import { buildCutFilter, renderCut } from '../src/cut/render-cut.js';
+import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 
 describe('buildCutFilter', () => {
-  it('每段 trim/atrim + 20ms 淡入淡出，最后 concat', () => {
+  it('每段 fps=30 归一化后 trim、atrim + 20ms 淡入淡出，最后 concat', () => {
     const f = buildCutFilter([{ start: 0, end: 1 }, { start: 2.5, end: 3 }]);
-    expect(f).toContain('[0:v]trim=start=0:end=1,setpts=PTS-STARTPTS[v0]');
-    expect(f).toContain('[0:a]atrim=start=2.5:end=3,asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.02,afade=t=out:st=0.48:d=0.02[a1]');
+    expect(f).toContain('[0:v]fps=30,trim=start=0:end=1,setpts=PTS-STARTPTS[v0]');
+    expect(f).toContain('[0:a]apad,atrim=start=2.5:end=3,asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.02,afade=t=out:st=0.48:d=0.02[a1]');
     expect(f.endsWith('[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]')).toBe(true);
   });
 
@@ -28,5 +30,24 @@ describe('renderCut（ffmpeg）', () => {
     expect(info.durationSec).toBeGreaterThan(1.9);
     expect(info.durationSec).toBeLessThan(2.15);
     expect(info.fps).toBe(30);
+  });
+
+  it('切 60 段以上时成片时长与剪辑方案一致到 1 帧以内', async () => {
+    const cfg = loadConfig({});
+    const fixture = join(import.meta.dirname, 'fixtures', 'talk.mp4');
+    const src = await probe(fixture, cfg);
+    // 每 0.29 秒一段、每段约 0.19 秒，边界故意不落在帧上
+    const segments = Array.from({ length: 64 }, (_, i) => ({ start: 0.013 + i * 0.29, end: 0.2071 + i * 0.29 })).filter((s) => s.end < src.durationSec);
+    const plan = buildEditPlan(segments, [], src.durationSec, { pad: 0, mergeGap: 0.05, minKeep: 0.1 });
+    expect(plan.keep.length).toBeGreaterThanOrEqual(60);
+    const out = join(mkdtempSync(join(tmpdir(), 'mz-')), 'cut.mp4');
+    await renderCut(fixture, plan.keep, out, cfg);
+    const info = await probe(out, cfg);
+    expect(Math.abs(info.durationSec - plan.outputDurationSec)).toBeLessThan(1 / 30);
+    // 样片音轨比画面短约 1.4 秒，末尾几段也要补静音，保证每段音视频等长
+    const { stdout } = await run(cfg.ffprobe, ['-v', 'error', '-show_entries', 'stream=duration', '-of', 'csv=p=0', out]);
+    const streams = stdout.trim().split('\n').map(Number);
+    expect(streams).toHaveLength(2);
+    streams.forEach((d) => expect(Math.abs(d - plan.outputDurationSec)).toBeLessThan(1 / 30));
   });
 });
