@@ -21,6 +21,7 @@
 - 输出视频：H.264 `-crf 18 -preset veryfast`、30fps、AAC 192k，分辨率与输入一致
 - 文件 ≤ 400 行、函数 ≤ 50 行；纯函数不修改入参（返回新数组/对象）
 - 每个任务提交前运行 `pnpm typecheck && pnpm test`，全绿才提交
+- 本机已就绪：`~/.mingzhi/bin/ffmpeg`、`~/.mingzhi/bin/ffprobe`（带 libass 的 9.0.2 静态版，`loadConfig` 自动优先使用）；`~/.mingzhi/models` 已放好 SenseVoice int8 与 silero_vad.onnx
 
 ## File Structure
 
@@ -134,18 +135,35 @@ Expected: 安装成功，生成 `pnpm-lock.yaml`
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { homedir } from 'node:os';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 
+const EXE = process.platform === 'win32' ? '.exe' : '';
+
 describe('loadConfig', () => {
-  it('默认使用 ~/.mingzhi 与系统 ffmpeg', () => {
+  it('默认数据目录为 ~/.mingzhi', () => {
     const cfg = loadConfig({});
     expect(cfg.dataDir).toBe(join(homedir(), '.mingzhi'));
     expect(cfg.modelsDir).toBe(join(homedir(), '.mingzhi', 'models'));
+    expect(cfg.kexiangKey).toBeUndefined();
+  });
+
+  it('数据目录 bin 下没有自带 ffmpeg 时用系统 ffmpeg', () => {
+    const cfg = loadConfig({ MINGZHI_DATA_DIR: mkdtempSync(join(tmpdir(), 'mz-')) });
     expect(cfg.ffmpeg).toBe('ffmpeg');
     expect(cfg.ffprobe).toBe('ffprobe');
-    expect(cfg.kexiangKey).toBeUndefined();
+  });
+
+  it('优先使用数据目录 bin 下自带的 ffmpeg/ffprobe（启动器下载的带 libass 版本）', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-'));
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'bin', `ffmpeg${EXE}`), '');
+    writeFileSync(join(dir, 'bin', `ffprobe${EXE}`), '');
+    const cfg = loadConfig({ MINGZHI_DATA_DIR: dir });
+    expect(cfg.ffmpeg).toBe(join(dir, 'bin', `ffmpeg${EXE}`));
+    expect(cfg.ffprobe).toBe(join(dir, 'bin', `ffprobe${EXE}`));
   });
 
   it('环境变量可覆盖', () => {
@@ -163,6 +181,7 @@ Run: `pnpm test tests/config.test.ts` → Expected: FAIL（找不到 `../src/con
 - [ ] **Step 3: 实现 `src/config.ts`**
 
 ```ts
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -175,19 +194,27 @@ export interface AppConfig {
   kexiangKey?: string;
 }
 
+const EXE = process.platform === 'win32' ? '.exe' : '';
+
+/** 优先用数据目录 bin 下自带的二进制（需要 libass 烧录字幕；Homebrew 的 ffmpeg 不带），没有再用系统 PATH */
+function bundled(dataDir: string, name: string): string {
+  const path = join(dataDir, 'bin', `${name}${EXE}`);
+  return existsSync(path) ? path : name;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const dataDir = env.MINGZHI_DATA_DIR ?? join(homedir(), '.mingzhi');
   return {
     dataDir,
     modelsDir: join(dataDir, 'models'),
-    ffmpeg: env.MINGZHI_FFMPEG ?? 'ffmpeg',
-    ffprobe: env.MINGZHI_FFPROBE ?? 'ffprobe',
+    ffmpeg: env.MINGZHI_FFMPEG ?? bundled(dataDir, 'ffmpeg'),
+    ffprobe: env.MINGZHI_FFPROBE ?? bundled(dataDir, 'ffprobe'),
     kexiangKey: env.MINGZHI_KX_KEY || undefined,
   };
 }
 ```
 
-- [ ] **Step 4: 验证** — `pnpm typecheck && pnpm test` → Expected: 2 passed
+- [ ] **Step 4: 验证** — `pnpm typecheck && pnpm test` → Expected: 4 passed
 
 - [ ] **Step 5: 提交**
 ```bash
