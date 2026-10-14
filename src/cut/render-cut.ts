@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { run } from '../media/exec.js';
 import { FPS, type TimeRange } from './plan.js';
@@ -18,10 +20,13 @@ export function buildCutFilter(keep: TimeRange[], fadeSec = 0.02): string {
   return `${parts.join(';')};${inputs}concat=n=${keep.length}:v=1:a=1[outv][outa]`;
 }
 
+/** 滤镜串写到输出同目录的 <输出名>.filter.txt，用 -/filter_complex 从文件读取：几十段剪切的滤镜串会超过 Windows 命令行长度上限 */
 export async function renderCut(input: string, keep: TimeRange[], output: string, cfg: AppConfig): Promise<void> {
+  const filterPath = join(dirname(output), `${basename(output, extname(output))}.filter.txt`);
+  writeFileSync(filterPath, buildCutFilter(keep));
   await run(cfg.ffmpeg, [
     '-v', 'error', '-y', '-i', input,
-    '-filter_complex', buildCutFilter(keep),
+    '-/filter_complex', filterPath,
     '-map', '[outv]', '-map', '[outa]',
     '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '192k', output,

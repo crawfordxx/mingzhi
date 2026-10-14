@@ -15,8 +15,8 @@ describe('formatTokensForLlm', () => {
 });
 
 describe('validateCuts', () => {
-  it('丢弃越界与倒序，按起点排序并合并重叠', () => {
-    const cuts = validateCuts({ cuts: [
+  it('丢弃越界与倒序，按起点排序并合并重叠，返回丢弃条数', () => {
+    const { cuts, dropped } = validateCuts({ cuts: [
       { from: 4, to: 5, type: 'repeat', reason: '重复' },
       { from: 0, to: 0, type: 'filler', reason: '语气词' },
       { from: 5, to: 3, type: 'slip', reason: '倒序' },
@@ -27,10 +27,23 @@ describe('validateCuts', () => {
       { from: 0, to: 0, type: 'filler', reason: '语气词' },
       { from: 4, to: 6, type: 'repeat', reason: '重复' },
     ]);
+    expect(dropped).toBe(2);
   });
 
-  it('结构不对时报错', () => {
-    expect(() => validateCuts({ nope: 1 }, 3)).toThrow('剪辑结果格式不对');
+  it('逐项校验：坏项丢弃并计数，好项保留', () => {
+    const res = validateCuts({ cuts: [
+      { from: 1, to: 1, type: 'filler' },
+      { from: 2, to: 2, type: 'unknown', reason: '类型不对' },
+      { from: '3', to: 3, type: 'repeat', reason: '下标不是数字' },
+      null,
+    ] }, tokens.length);
+    expect(res).toEqual({ cuts: [{ from: 1, to: 1, type: 'filler', reason: '' }], dropped: 3 });
+  });
+
+  it('cuts 缺失视为没有要剪的；cuts 不是数组时报错', () => {
+    expect(validateCuts({}, 3)).toEqual({ cuts: [], dropped: 0 });
+    expect(validateCuts(null, 3)).toEqual({ cuts: [], dropped: 0 });
+    expect(() => validateCuts({ cuts: 'x' }, 3)).toThrow('剪辑结果格式不对');
   });
 });
 
@@ -38,9 +51,18 @@ describe('detectCuts', () => {
   it('调用 gemini-3.5-flash（low）并返回校验后的剪切', async () => {
     const calls: unknown[] = [];
     const client: LlmClient = { chatJson: async (o) => { calls.push(o); return { cuts: [{ from: 0, to: 0, type: 'filler', reason: '嗯' }, { from: 2, to: 3, type: 'repeat', reason: '去逛' }] }; } };
-    const cuts = await detectCuts(client, tokens);
+    const { cuts, dropped } = await detectCuts(client, tokens);
     expect(cuts.map((c) => [c.from, c.to])).toEqual([[0, 0], [2, 3]]);
+    expect(dropped).toBe(0);
     expect(calls[0]).toMatchObject({ model: 'google/gemini-3.5-flash', reasoningEffort: 'low' });
+  });
+
+  it('提示词说明无需剪时返回空列表，并把整句重录归入 repeat', async () => {
+    let system = '';
+    const client: LlmClient = { chatJson: async (o) => { system = o.system; return { cuts: [] }; } };
+    expect(await detectCuts(client, tokens)).toEqual({ cuts: [], dropped: 0 });
+    expect(system).toContain('{"cuts":[]}');
+    expect(system).toContain('整句重录：同一句话说了多遍，只保留最后一遍完整的');
   });
 
   it('剪掉比例超过 35% 时拒绝（防止误删正文）', async () => {

@@ -52,4 +52,43 @@ describe('KexiangClient', () => {
     await expect(new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }))
       .rejects.toThrow('可想 AI 请求失败 400：余额不足');
   });
+
+  it('重试耗尽时抛「可想 AI 暂时不可用」，最后一次失败后不再等待', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('busy', { status: 503 }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(new KexiangClient('abc', fetchMock, sleep).chatJson({ model: 'm', system: 's', user: 'u' }))
+      .rejects.toThrow('可想 AI 暂时不可用');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(sleep.mock.calls).toEqual([[1000], [2000]]);
+  });
+
+  it('网络错误按同样退避重试，之后成功', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(ok('{"x":2}'));
+    const out = await new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' });
+    expect(out).toEqual({ x: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('超时与响应体不是 JSON 也重试，耗尽后报中文原因', async () => {
+    const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(timeout)
+      .mockResolvedValueOnce(new Response('<html>', { status: 200 }))
+      .mockResolvedValueOnce(new Response('<html>', { status: 200 }));
+    await expect(new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }))
+      .rejects.toThrow('可想 AI 暂时不可用：响应不是合法 JSON');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const onlyTimeout = vi.fn().mockRejectedValue(timeout);
+    await expect(new KexiangClient('abc', onlyTimeout, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }))
+      .rejects.toThrow('可想 AI 暂时不可用：请求超时');
+  });
+
+  it('返回结构异常时直接报错', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [] }), { status: 200 }));
+    await expect(new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }))
+      .rejects.toThrow('可想 AI 返回格式异常');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

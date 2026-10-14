@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
@@ -22,10 +22,13 @@ describe('buildCutFilter', () => {
 });
 
 describe('renderCut（ffmpeg）', () => {
-  it('输出时长等于保留区间之和', async () => {
+  it('输出时长等于保留区间之和；滤镜写入输出同目录的文件（避开命令行长度上限）', async () => {
     const cfg = loadConfig({});
-    const out = join(mkdtempSync(join(tmpdir(), 'mz-')), 'cut.mp4');
-    await renderCut(join(import.meta.dirname, 'fixtures', 'talk.mp4'), [{ start: 0, end: 1 }, { start: 2, end: 3 }], out, cfg);
+    const dir = mkdtempSync(join(tmpdir(), 'mz-'));
+    const out = join(dir, 'cut.mp4');
+    const keep = [{ start: 0, end: 1 }, { start: 2, end: 3 }];
+    await renderCut(join(import.meta.dirname, 'fixtures', 'talk.mp4'), keep, out, cfg);
+    expect(readFileSync(join(dir, 'cut.filter.txt'), 'utf8')).toBe(buildCutFilter(keep));
     const info = await probe(out, cfg);
     expect(info.durationSec).toBeGreaterThan(1.9);
     expect(info.durationSec).toBeLessThan(2.15);

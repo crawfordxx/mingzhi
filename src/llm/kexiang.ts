@@ -24,6 +24,14 @@ export function parseJsonContent(content: string): unknown {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** 可重试的失败（网络错误、超时、429/5xx、响应体不是 JSON）；其他错误直接抛出 */
+class RetryableError extends Error {}
+
+function networkReason(err: unknown): string {
+  if (err instanceof Error && err.name === 'TimeoutError') return '请求超时';
+  return `网络错误 ${err instanceof Error ? err.message : String(err)}`;
+}
+
 export class KexiangClient implements LlmClient {
   private readonly auth: string;
 
@@ -42,23 +50,40 @@ export class KexiangClient implements LlmClient {
     });
     let lastError = new Error('可想 AI 请求失败');
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-      const res = await this.fetchImpl(KEXIANG_CHAT_URL, {
+      if (attempt > 0) await this.sleep(1000 * 2 ** (attempt - 1)); // 只在两次请求之间退避，最后一次失败后不再等待
+      try {
+        return await this.requestOnce(body, opts.timeoutMs ?? 180_000);
+      } catch (err) {
+        if (!(err instanceof RetryableError)) throw err;
+        lastError = err;
+      }
+    }
+    throw lastError;
+  }
+
+  /** 发一次请求；可重试的失败抛 RetryableError */
+  private async requestOnce(body: string, timeoutMs: number): Promise<unknown> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(KEXIANG_CHAT_URL, {
         method: 'POST',
         headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
         body,
-        signal: AbortSignal.timeout(opts.timeoutMs ?? 180_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
-      if (res.status === 429 || res.status >= 500) {
-        lastError = new Error(`可想 AI 暂时不可用 ${res.status}：${(await res.text()).slice(0, 200)}`);
-        await this.sleep(1000 * 2 ** attempt);
-        continue;
-      }
-      if (!res.ok) throw new Error(`可想 AI 请求失败 ${res.status}：${(await res.text()).slice(0, 200)}`);
-      const data = (await res.json()) as { choices?: { message?: { content?: unknown } }[] };
-      const content = data.choices?.[0]?.message?.content;
-      if (typeof content !== 'string') throw new Error('可想 AI 返回格式异常：缺少 choices[0].message.content');
-      return parseJsonContent(content);
+    } catch (err) {
+      throw new RetryableError(`可想 AI 暂时不可用：${networkReason(err)}`);
     }
-    throw lastError;
+    if (res.status === 429 || res.status >= 500) throw new RetryableError(`可想 AI 暂时不可用 ${res.status}：${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) throw new Error(`可想 AI 请求失败 ${res.status}：${(await res.text()).slice(0, 200)}`);
+    let data: { choices?: { message?: { content?: unknown } }[] };
+    try {
+      data = (await res.json()) as typeof data;
+    } catch {
+      throw new RetryableError('可想 AI 暂时不可用：响应不是合法 JSON');
+    }
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string') throw new Error('可想 AI 返回格式异常：缺少 choices[0].message.content');
+    return parseJsonContent(content);
   }
 }

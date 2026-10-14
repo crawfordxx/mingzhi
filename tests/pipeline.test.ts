@@ -8,6 +8,7 @@ import { loadConfig } from '../src/config.js';
 import type { LlmClient } from '../src/llm/kexiang.js';
 import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
+import type { ProjectFile } from '../src/pipeline/project.js';
 import { runPipeline, type ProgressEvent } from '../src/pipeline/run.js';
 import { hasModels } from './helpers/models.js';
 
@@ -41,14 +42,21 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
       chatJson: async (o) => {
         if (o.system.includes('剪辑师')) {
           const idx = [...o.user.matchAll(/\[(\d+)\]嗯/g)].map((m) => Number(m[1]));
-          return { cuts: idx.map((i) => ({ from: i, to: i, type: 'filler', reason: '语气词' })) };
+          // 末尾混入一条越界的坏项，应被丢弃并在 cuts 步骤消息里说明
+          return { cuts: [...idx.map((i) => ({ from: i, to: i, type: 'filler', reason: '语气词' })), { from: -1, to: 0, type: 'filler' }] };
         }
         return { lines: [] };
       },
     };
     const events: ProgressEvent[] = [];
+    // 每一步完成后 project.json 立即落盘：在 plan 步骤回调时读出来，应已有剪切与方案、还没有字幕
+    const snapshots: Partial<Record<string, ProjectFile>> = {};
+    const onProgress = (e: ProgressEvent): void => {
+      events.push(e);
+      if (e.step === 'plan') snapshots.plan = JSON.parse(readFileSync(join(work, 'project.json'), 'utf8')) as ProjectFile;
+    };
     const input = join(import.meta.dirname, 'fixtures', 'talk.mp4');
-    const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, onProgress: (e) => events.push(e) });
+    const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, onProgress });
     const src = await probe(input, cfg);
     const out = await probe(res.output, cfg);
     expect(out.durationSec).toBeLessThan(src.durationSec - 1.0);
@@ -58,11 +66,19 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
       .filter((l) => l.startsWith('Dialogue:')).map((l) => l.split(',').slice(9).join(',')).join('');
     expect(assText).toContain('高性价比');
     expect(res.captions.length).toBeGreaterThan(0);
-    const project = JSON.parse(readFileSync(res.projectPath, 'utf8'));
+    expect(snapshots.plan?.plan?.keep.length).toBeGreaterThan(0);
+    expect(snapshots.plan?.cuts?.length).toBeGreaterThan(0);
+    expect(snapshots.plan?.captions).toBeUndefined();
+    const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
     expect(project.version).toBe(1);
-    expect(project.transcript.tokens.length).toBeGreaterThan(20);
+    expect(project.transcript?.tokens.length).toBeGreaterThan(20);
+    expect(project.captionsSource).toBe('fallback');
+    expect(project.captionLines?.length).toBeGreaterThan(0);
+    expect(project.captionLines?.[0]).toMatchObject({ from: expect.any(Number), to: expect.any(Number), text: expect.any(String) });
+    expect(project.artifacts).toEqual({ wav: join(work, 'audio16k.wav'), cut: join(work, 'cut.mp4'), ass: join(work, 'captions.ass'), output: join(work, 'out.mp4') });
     expect(existsSync(join(work, 'cut.mp4'))).toBe(true);
     expect(events.find((e) => e.step === 'captions')?.message).toContain('改用自动分行');
+    expect(events.find((e) => e.step === 'cuts')?.message).toContain('丢弃 1 条');
     expect(warn).not.toHaveBeenCalled();
   }, 120_000);
 });
