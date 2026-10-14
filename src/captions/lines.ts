@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import type { Token } from '../asr/types.js';
 import type { Cut } from '../cut/llm-cuts.js';
 import { mapToOutput, type TimeRange } from '../cut/plan.js';
@@ -13,10 +12,6 @@ const MIN_CAPTION_SEC = 0.4;
 
 export interface CaptionLine { from: number; to: number; text: string }
 export interface TimedCaption { start: number; end: number; text: string }
-/** 结构合法时 tooWide 是超宽行在 lines 里的位置；结构不合法时给出原因，供重试提示 */
-export type LinesVerdict = { ok: true; lines: CaptionLine[]; tooWide: number[] } | { ok: false; reason: string };
-
-const LinesSchema = z.object({ lines: z.array(z.object({ from: z.number().int(), to: z.number().int(), text: z.string() })) });
 
 /** 显示宽度：ASCII 可见字符与空格记 0.55，其余（汉字、全角符号）记 1；按百分位整数累加避免浮点误差 */
 export function displayWidth(text: string): number {
@@ -59,33 +54,6 @@ export function fallbackLines(tokens: Token[], kept: number[], maxWidth = MAX_LI
   groups.push(current);
   return groups.filter((g) => g.length > 0)
     .map((g) => ({ from: g[0], to: g[g.length - 1], text: g.map((i) => tokens[i].text).join('') }));
-}
-
-/** 第 i 行的结构问题；没有问题返回 null。行必须按顺序紧接、覆盖全部保留下标（行内可跨过被剪下标） */
-function lineProblem(lines: CaptionLine[], i: number, kept: number[], keptSet: Set<number>): string | null {
-  const l = lines[i];
-  if (!keptSet.has(l.from) || !keptSet.has(l.to)) return `第 ${i + 1} 行的下标 ${l.from}–${l.to} 不是保留下标`;
-  if (l.from > l.to) return `第 ${i + 1} 行起始下标大于结束下标`;
-  if (l.text.trim().length === 0) return `第 ${i + 1} 行文字为空`;
-  const expected = i === 0 ? kept[0] : kept[kept.indexOf(lines[i - 1].to) + 1];
-  if (expected === undefined) return `第 ${i + 1} 行多余：上一行已到最后一个保留下标`;
-  if (l.from !== expected) return `第 ${i + 1} 行应从下标 ${expected} 开始，实际是 ${l.from}`;
-  return null;
-}
-
-/** 校验模型分行：结构上要求顺序递增、覆盖全部保留下标；结构合法时再标出显示宽度超过上限的行 */
-export function validateLines(raw: unknown, kept: number[]): LinesVerdict {
-  const parsed = LinesSchema.safeParse(raw);
-  if (!parsed.success || parsed.data.lines.length === 0) return { ok: false, reason: '没有按 {"lines":[...]} 格式输出非空的行列表' };
-  const lines = parsed.data.lines;
-  const keptSet = new Set(kept);
-  const problem = lines.map((_, i) => lineProblem(lines, i, kept, keptSet)).find((p) => p !== null);
-  if (problem) return { ok: false, reason: problem };
-  const last = kept[kept.length - 1];
-  if (lines[lines.length - 1].to !== last) return { ok: false, reason: `最后一行应到下标 ${last} 结束` };
-  const trimmed = lines.map((l) => ({ ...l, text: l.text.trim() }));
-  const tooWide = trimmed.flatMap((l, i) => (displayWidth(l.text) > MAX_DISPLAY_WIDTH ? [i] : []));
-  return { ok: true, lines: trimmed, tooWide };
 }
 
 /** 起点落在被剪区域时，吸附到其后第一段保留区间的开头；无可吸附处返回 null */

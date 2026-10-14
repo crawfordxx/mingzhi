@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Token } from '../src/asr/types.js';
 import type { ChatOptions, LlmClient } from '../src/llm/kexiang.js';
-import { displayWidth, fallbackLines, keptIndices, MAX_DISPLAY_WIDTH, MAX_LINE_WIDTH, timeCaptions, validateLines } from '../src/captions/lines.js';
+import { displayWidth, fallbackLines, keptIndices, MAX_DISPLAY_WIDTH, MAX_LINE_WIDTH, timeCaptions } from '../src/captions/lines.js';
+import { alignLines, splitWide } from '../src/captions/align.js';
 import { polishCaptions } from '../src/captions/polish.js';
 import { toAss } from '../src/captions/ass.js';
 
@@ -51,40 +52,46 @@ describe('fallbackLines', () => {
   });
 });
 
-describe('validateLines', () => {
-  const kept = [0, 1, 2, 3, 4, 5];
-  it('结构合法时返回各行，超宽行列表为空', () => {
-    const raw = { lines: [{ from: 0, to: 2, text: 'GitHub' }, { from: 3, to: 5, text: '650 条' }] };
-    expect(validateLines(raw, kept)).toEqual({ ok: true, lines: raw.lines, tooWide: [] });
+describe('alignLines', () => {
+  const all = (t: Token[]): number[] => t.map((_, i) => i);
+  it('原文一致时逐行对上下标', () => {
+    const t = toks('你好世界');
+    expect(alignLines(t, all(t), ['你好', '世界'])).toEqual({ lines: [{ from: 0, to: 1, text: '你好' }, { from: 2, to: 3, text: '世界' }], matchedRatio: 1 });
   });
-  it('结构合法但个别行超宽时，标出超宽行的位置', () => {
-    const raw = { lines: [{ from: 0, to: 2, text: '一二三四五六七八九十一二三四五六' }, { from: 3, to: 5, text: '好' }] };
-    expect(validateLines(raw, kept)).toMatchObject({ ok: true, tooWide: [0] });
-    const ascii = { lines: [{ from: 0, to: 5, text: 'a'.repeat(27) }] }; // 27 × 0.55 = 14.85，未超 15
-    expect(validateLines(ascii, kept)).toMatchObject({ ok: true, tooWide: [] });
+  it('模型改了字（同音错字、英文大小写）仍按原文对齐', () => {
+    const t: Token[] = ['我', '在', 'giup', '上', '边'].map((text, i) => ({ text, start: i * 0.2, end: i * 0.2 + 0.2 }));
+    expect(alignLines(t, all(t), ['我在 GitHub', '上边']).lines.map((l) => [l.from, l.to])).toEqual([[0, 2], [3, 4]]);
   });
-  it('乱序、越界、引用被剪下标时返回不合法及原因', () => {
-    expect(validateLines({ lines: [{ from: 3, to: 5, text: 'a' }, { from: 0, to: 2, text: 'b' }] }, kept)).toMatchObject({ ok: false });
-    expect(validateLines({ lines: [{ from: 0, to: 9, text: 'a' }] }, kept)).toMatchObject({ ok: false, reason: expect.stringContaining('9') });
-    expect(validateLines({ lines: [{ from: 0, to: 1, text: 'a' }] }, [0, 2])).toMatchObject({ ok: false }); // 下标 1 已被剪掉
-    expect(validateLines({ nope: 1 }, kept)).toMatchObject({ ok: false });
-    expect(validateLines({ lines: [{ from: 0, to: 5, text: 'a' }, { from: 5, to: 5, text: 'b' }] }, kept)).toMatchObject({ ok: false, reason: expect.stringContaining('多余') });
-  });
-  it('跳过中间的保留下标时返回不合法', () => {
-    expect(validateLines({ lines: [{ from: 0, to: 1, text: 'a' }, { from: 4, to: 5, text: 'b' }] }, kept)).toMatchObject({ ok: false, reason: expect.stringContaining('2') });
-  });
-  it('没有从第一个保留下标开始时返回不合法', () => {
-    expect(validateLines({ lines: [{ from: 1, to: 3, text: 'a' }, { from: 4, to: 5, text: 'b' }] }, kept)).toMatchObject({ ok: false });
-  });
-  it('没有到最后一个保留下标结束时返回不合法', () => {
-    expect(validateLines({ lines: [{ from: 0, to: 2, text: 'a' }, { from: 3, to: 4, text: 'b' }] }, kept)).toMatchObject({ ok: false });
+  it('对不上的字（中文数字改成阿拉伯数字）归到写了改写内容的那一行', () => {
+    const t = toks('一共讲了六百五十条');
+    expect(alignLines(t, all(t), ['一共讲了', '650 条']).lines.map((l) => [l.from, l.to])).toEqual([[0, 3], [4, 8]]);
+    const u = toks('讲了六百五十条');
+    expect(alignLines(u, all(u), ['讲了 650', '条']).lines.map((l) => [l.from, l.to])).toEqual([[0, 5], [6, 6]]);
   });
   it('一行可以跨过被剪的下标', () => {
-    const cutKept = [0, 1, 4, 5];
-    const split = { lines: [{ from: 0, to: 1, text: 'a' }, { from: 4, to: 5, text: 'b' }] };
-    const whole = { lines: [{ from: 0, to: 5, text: 'ab' }] };
-    expect(validateLines(split, cutKept)).toMatchObject({ ok: true, lines: split.lines });
-    expect(validateLines(whole, cutKept)).toMatchObject({ ok: true, lines: whole.lines });
+    const t = toks('你好啊世界');
+    expect(alignLines(t, [0, 1, 3, 4], ['你好', '世界']).lines.map((l) => [l.from, l.to])).toEqual([[0, 1], [3, 4]]);
+  });
+  it('一个字都对不上的行并入前一行；matchedRatio 是原稿里对上的字的比例', () => {
+    const t = toks('你好世界');
+    const res = alignLines(t, all(t), ['你好', '哈哈', '世界']);
+    expect(res.lines).toEqual([{ from: 0, to: 1, text: '你好哈哈' }, { from: 2, to: 3, text: '世界' }]);
+    expect(alignLines(t, all(t), ['你好']).matchedRatio).toBe(0.5);
+  });
+});
+
+describe('splitWide', () => {
+  it('不超宽时原样返回；超宽时在宽度均衡处切开且每段不超宽', () => {
+    expect(splitWide('你好世界', 14)).toEqual(['你好世界']);
+    const parts = splitWide('一二三四五六七八九十甲乙丙丁戊己庚', 14);
+    expect(parts.join('')).toBe('一二三四五六七八九十甲乙丙丁戊己庚');
+    expect(parts.every((p) => displayWidth(p) <= 14)).toBe(true);
+    expect(parts).toHaveLength(2);
+  });
+  it('不拆开英文单词', () => {
+    const parts = splitWide('我平时经常在 GitHub 上面去逛 AI 项目呢', 14);
+    expect(parts.every((p) => displayWidth(p) <= 14)).toBe(true);
+    expect(parts.join(' ')).toContain('GitHub');
   });
 });
 
@@ -100,30 +107,39 @@ describe('polishCaptions', () => {
     } };
     return { client, calls };
   };
+  const long = '一二三四五六七八九十甲乙丙丁戊己庚';
 
-  it('全部合法时采用模型结果，source 为 llm；提示词里的宽度上限来自常量', async () => {
-    const { client, calls } = scripted({ lines: [{ from: 0, to: 1, text: '你好' }, { from: 2, to: 3, text: '世界' }] });
+  it('采用模型的分行与校对，source 为 llm；提示词里的宽度上限来自常量，并要求只输出文字行', async () => {
+    const { client, calls } = scripted({ lines: ['你好', '世界'] });
     const res = await polishCaptions(client, toks('你好世界'), [0, 1, 2, 3]);
     expect(res).toEqual({ lines: [{ from: 0, to: 1, text: '你好' }, { from: 2, to: 3, text: '世界' }], source: 'llm' });
     expect(calls[0].system).toContain(`${MAX_LINE_WIDTH}`);
+    expect(calls[0].system).toContain('{"lines":["第一行","第二行"]}');
   });
-  it('输入只列保留下标，停顿超过 0.3 秒换行', async () => {
-    const { client, calls } = scripted({ lines: [{ from: 0, to: 4, text: '一三四五' }] });
+  it('输入不带下标，只列保留的字，停顿超过 0.3 秒换行', async () => {
+    const { client, calls } = scripted({ lines: ['一三四五'] });
     await polishCaptions(client, toks('一二三四五', 3), [0, 2, 3, 4]);
-    expect(calls[0].user).toBe('[0]一[2]三\n[3]四[4]五');
+    expect(calls[0].user).toBe('一三\n四五');
   });
-  it('个别行超宽时只把这一行退回原字自动分行，其余行保留，source 为 partial', async () => {
-    const tokens = toks('一二三四五六七八九十甲乙丙丁戊己庚好');
-    const wide = { from: 0, to: 16, text: '壹贰叁肆伍陆柒捌玖拾甲乙丙丁戊己庚' };
-    const { client } = scripted({ lines: [wide, { from: 17, to: 17, text: '好' }] });
+  it('超宽行先请模型拆分，拆分结果合格则采用', async () => {
+    const tokens = toks(`${long}好`);
+    const { client, calls } = scripted({ lines: [long, '好'] }, { lines: [['一二三四五六七八', '九十甲乙丙丁戊己庚']] });
+    const res = await polishCaptions(client, tokens, tokens.map((_, i) => i));
+    expect(res.source).toBe('llm');
+    expect(res.lines.map((l) => l.text)).toEqual(['一二三四五六七八', '九十甲乙丙丁戊己庚', '好']);
+    expect(calls[1].user).toContain(long);
+  });
+  it('模型拆分时改了字或仍超宽，就在行中切开，source 为 partial', async () => {
+    const tokens = toks(`${long}好`);
+    const { client } = scripted({ lines: [long, '好'] }, { lines: [['壹贰']] });
     const res = await polishCaptions(client, tokens, tokens.map((_, i) => i));
     expect(res.source).toBe('partial');
-    expect(res.lines.map((l) => l.text)).toEqual(['一二三四五六七八九十甲乙丙丁', '戊己庚', '好']);
-    expect(res.warning).toContain('1/2 行采用模型结果');
+    expect(res.lines.map((l) => l.text).join('')).toBe(`${long}好`);
+    expect(res.lines.every((l) => displayWidth(l.text) <= MAX_LINE_WIDTH)).toBe(true);
+    expect(res.warning).toContain('1 行超宽');
   });
   it('结构不合法时带上原因重试 1 次，重试成功则采用', async () => {
-    const good = { lines: [{ from: 0, to: 3, text: '你好世界' }] };
-    const { client, calls } = scripted({ lines: [{ from: 0, to: 1, text: '你好' }] }, good);
+    const { client, calls } = scripted({ lines: [] }, { lines: ['你好世界'] });
     const res = await polishCaptions(client, toks('你好世界'), [0, 1, 2, 3]);
     expect(res.source).toBe('llm');
     expect(calls).toHaveLength(2);
@@ -131,14 +147,18 @@ describe('polishCaptions', () => {
   });
   it('重试后仍不合法时整体兜底，不打控制台', async () => {
     const warn = vi.spyOn(console, 'warn');
-    const bad = { lines: [{ from: 9, to: 9, text: 'x' }] };
-    const { client, calls } = scripted(bad, bad);
+    const { client, calls } = scripted({ nope: 1 }, { nope: 1 });
     const res = await polishCaptions(client, toks('你好世界'), [0, 1, 2, 3]);
     expect(res.lines.map((l) => l.text)).toEqual(['你好世界']);
     expect(res.source).toBe('fallback');
     expect(res.warning).toContain('字幕校对结果不合法');
     expect(calls).toHaveLength(2);
     expect(warn).not.toHaveBeenCalled();
+  });
+  it('改写过多（对得上原稿的字太少）时整体兜底', async () => {
+    const { client } = scripted({ lines: ['完全不同的内容'] });
+    const res = await polishCaptions(client, toks('你好世界'), [0, 1, 2, 3]);
+    expect(res).toMatchObject({ source: 'fallback', warning: expect.stringContaining('改写过多') });
   });
   it('模型请求失败时兜底并给出原因', async () => {
     const { client } = scripted(new Error('超时'));
