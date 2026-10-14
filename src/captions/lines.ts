@@ -50,8 +50,15 @@ export function validateLines(raw: unknown, kept: number[]): CaptionLine[] | nul
   const keptSet = new Set(kept);
   const lines = parsed.data.lines;
   const ok = lines.every((l, i) => keptSet.has(l.from) && keptSet.has(l.to) && l.from <= l.to
-    && l.text.trim().length > 0 && [...l.text].length <= MAX_DISPLAY_CHARS && (i === 0 || l.from > lines[i - 1].to));
+    && l.text.trim().length > 0 && [...l.text].length <= MAX_DISPLAY_CHARS && (i === 0 || l.from > lines[i - 1].to))
+    && coversKept(lines, kept);
   return ok ? lines.map((l) => ({ ...l, text: l.text.trim() })) : null;
+}
+
+/** 行必须从第一个保留下标开始、到最后一个结束，且相邻行紧接、不跳过任何保留下标（行内可跨过被剪下标） */
+function coversKept(lines: CaptionLine[], kept: number[]): boolean {
+  if (lines[0].from !== kept[0] || lines[lines.length - 1].to !== kept[kept.length - 1]) return false;
+  return lines.every((l, i) => i === 0 || l.from === kept[kept.indexOf(lines[i - 1].to) + 1]);
 }
 
 export async function polishCaptions(client: LlmClient, tokens: Token[], kept: number[]): Promise<CaptionLine[]> {
@@ -59,17 +66,36 @@ export async function polishCaptions(client: LlmClient, tokens: Token[], kept: n
   const user = kept.map((i) => `[${i}]${tokens[i].text}`).join('');
   try {
     const raw = await client.chatJson({ model: 'google/gemini-3.5-flash', reasoningEffort: 'low', system: SYSTEM_PROMPT, user });
-    return validateLines(raw, kept) ?? fallbackLines(tokens, kept);
-  } catch {
-    return fallbackLines(tokens, kept);
+    const lines = validateLines(raw, kept);
+    if (lines) return lines;
+    console.warn('字幕校对结果不合法，改用自动分行');
+  } catch (err) {
+    console.warn(`字幕校对失败，改用自动分行：${err instanceof Error ? err.message : String(err)}`);
   }
+  return fallbackLines(tokens, kept);
+}
+
+/** 起点落在被剪区域时，吸附到其后第一段保留区间的开头；无可吸附处返回 null */
+function snapStart(t: number, keep: TimeRange[]): number | null {
+  const direct = mapToOutput(t, keep);
+  if (direct !== null) return direct;
+  const next = keep.find((r) => r.start > t);
+  return next ? mapToOutput(next.start, keep) : null;
+}
+
+/** 终点落在被剪区域时，吸附到其前最后一段保留区间的末尾；无可吸附处返回 null */
+function snapEnd(t: number, keep: TimeRange[]): number | null {
+  const direct = mapToOutput(t, keep);
+  if (direct !== null) return direct;
+  const prev = [...keep].reverse().find((r) => r.end < t);
+  return prev ? mapToOutput(prev.end, keep) : null;
 }
 
 export function timeCaptions(lines: CaptionLine[], tokens: Token[], keep: TimeRange[]): TimedCaption[] {
   const timed = lines.flatMap((l) => {
-    const start = mapToOutput(tokens[l.from].start, keep);
-    const end = mapToOutput(tokens[l.to].end, keep);
-    if (start === null || end === null) return [];
+    const start = snapStart(tokens[l.from].start, keep);
+    const end = snapEnd(tokens[l.to].end, keep);
+    if (start === null || end === null || start >= end) return [];
     return [{ start, end: Math.max(end, start + MIN_CAPTION_SEC), text: l.text }];
   });
   return timed.map((c, i) => {
