@@ -99,3 +99,23 @@ describe('generateStoryboard：重试保护与择优', () => {
     expect(res.storyboard.shots[res.storyboard.shots.length - 1].card).toEqual({ template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } });
   });
 });
+
+describe('generateStoryboard：背景乐情绪与封面标题', () => {
+  it('提示词要求 bgm 与 coverTitle；回复里的值经归一化保留', async () => {
+    const { client, calls } = scripted({ ...good, bgm: 'tech', coverTitle: { title: 'FDE 岗位定性了', subtitle: '生命周期很长' } });
+    const res = await generateStoryboard(client, caps, 9, []);
+    expect(calls[0].system).toContain('"bgm"');
+    expect(calls[0].system).toContain('coverTitle');
+    expect(res.storyboard).toMatchObject({ bgm: 'tech', coverTitle: { title: 'FDE 岗位定性了', subtitle: '生命周期很长' } });
+  });
+  it('缺省或非法时 bgm 为 chill、coverTitle 缺省；小标题超长只丢小标题；重试择优后仍保留', async () => {
+    expect((await generateStoryboard(scripted(good).client, caps, 9, [])).storyboard).toMatchObject({ bgm: 'chill' });
+    expect((await generateStoryboard(scripted({ ...good, bgm: 'loud', coverTitle: { title: '' } }).client, caps, 9, [])).storyboard.coverTitle).toBeUndefined();
+    const long = await generateStoryboard(scripted({ ...good, coverTitle: { title: '短标题', subtitle: '字'.repeat(17) } }).client, caps, 9, []);
+    expect(long.storyboard.coverTitle).toEqual({ title: '短标题' });
+    const bad = { shots: [{ start: 0, end: 9, layout: 'split', card: { template: 'nope', props: {} } }], bgm: 'upbeat' };
+    const retried = await generateStoryboard(scripted(bad, { ...good, bgm: 'upbeat' }).client, caps, 9, []);
+    expect(retried.attempts).toBe(2);
+    expect(retried.storyboard.bgm).toBe('upbeat');
+  });
+});

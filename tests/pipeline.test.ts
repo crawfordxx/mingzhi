@@ -32,7 +32,7 @@ describe('burnSubtitles', () => {
   });
 });
 
-const FAKE_STORYBOARD = { shots: [{ start: 0, end: 2, layout: 'split', card: { template: 'title', props: { title: '测试' } } }] };
+const FAKE_STORYBOARD = { shots: [{ start: 0, end: 2, layout: 'split', card: { template: 'title', props: { title: '测试' } } }], bgm: 'tech', coverTitle: { title: '高性价比', subtitle: '测试封面' } };
 
 describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -68,7 +68,7 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     const out = await probe(res.output, cfg);
     expect(out.durationSec).toBeLessThan(src.durationSec - 1.0);
     // 渲染进度事件（compose）会连续出现多次，按相邻去重后比较
-    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1])).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'storyboard', 'compose', 'done']);
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1])).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'storyboard', 'compose', 'loudness', 'cover', 'done']);
     // 兜底分行按字数换行，「高性价比」可能被拆到相邻两行，所以拼接所有字幕行再断言
     const assText = readFileSync(join(work, 'captions.ass'), 'utf8').split('\n')
       .filter((l) => l.startsWith('Dialogue:')).map((l) => l.split(',').slice(9).join(',')).join('');
@@ -85,6 +85,12 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(project.captionLines?.[0]).toMatchObject({ from: expect.any(Number), to: expect.any(Number), text: expect.any(String) });
     expect(project.artifacts).toEqual({ wav: join(work, 'audio16k.wav'), cut: join(work, 'cut.mp4'), ass: join(work, 'captions.ass'), output: join(work, 'out.mp4'), final: join(work, 'out.mp4') });
     expect(project.storyboard?.shots[0].card?.template).toBe('title');
+    // 配乐、响度与封面：不依赖本机是否下载了素材，只断言流程字段
+    expect(project.storyboard).toMatchObject({ bgm: 'tech', coverTitle: { title: '高性价比' } });
+    expect(project.audio).toMatchObject({ mood: 'tech' });
+    expect(Math.abs((project.loudness?.after ?? 0) + 14)).toBeLessThan(1.5);
+    expect(existsSync(join(work, 'final.raw.mp4'))).toBe(false);
+    expect(events.find((e) => e.step === 'cover')?.message).toContain('封面生成失败');
     expect(project.storyboardDropped).toBe(0);
     expect(project.storyboardDemoted).toBe(0);
     expect(project.storyboardCapped).toBe(0);
@@ -97,6 +103,39 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(events.find((e) => e.step === 'cuts')?.message).toContain('丢弃 1 条');
     expect(warn).not.toHaveBeenCalled();
   }, 120_000);
+});
+
+describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本地模型）', () => {
+  it('素材未下载时降级出片并提示 fetch-assets；先渲到 final.raw.mp4 再统一响度；封面用分镜标题与人像视频', async () => {
+    // 数据目录指向空目录：配乐与字体都未下载，与本机是否下载素材无关（模型目录沿用本机）
+    const cfg = { ...loadConfig({}), dataDir: mkdtempSync(join(tmpdir(), 'mz-empty-')) };
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-fin-'));
+    const output = join(workDir, 'out.mp4');
+    const llm: LlmClient = { chatJson: async (o) => (o.system.includes('分镜') ? FAKE_STORYBOARD : o.system.includes('剪辑师') ? { cuts: [] } : { lines: [] }) };
+    const covers: { title: string; subtitle?: string; personVideo: string }[] = [];
+    const coverDeps = { makeCovers: async (o: { title: string; subtitle?: string; personVideo: string }) => {
+      covers.push(o);
+      return { cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png'), attempts: 2, costYuan: 1.2, unverified: [], person: true };
+    } };
+    const events: ProgressEvent[] = [];
+    let rawSeen = false;
+    const res = await runPipeline({ input: CLIP, workDir, output, cfg, llm, coverDeps: coverDeps as never, onProgress: (e) => {
+      events.push(e);
+      // 响度统一之前最终成片还不存在，渲染结果在 final.raw.mp4
+      if (e.step === 'compose' && e.message === '成片渲染完成') rawSeen = existsSync(join(workDir, 'final.raw.mp4')) && !existsSync(output);
+    } });
+    expect(rawSeen).toBe(true);
+    expect(existsSync(join(workDir, 'final.raw.mp4'))).toBe(false);
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-4)).toEqual(['compose', 'loudness', 'cover', 'done']);
+    const notes = events.filter((e) => e.message.includes('pnpm fetch-assets'));
+    expect(notes).toHaveLength(2);
+    const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
+    expect(project.audio).toMatchObject({ track: null, mood: 'tech' });
+    expect(project.loudness?.after).toBeDefined();
+    expect(project.artifacts).toMatchObject({ output, final: output, cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png') });
+    expect(covers).toEqual([expect.objectContaining({ title: '高性价比', subtitle: '测试封面', personVideo: join(workDir, 'cut.mp4') })]);
+    expect((await probe(output, cfg)).hasAudio).toBe(true);
+  }, 240_000);
 });
 
 describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR 与 RVM 模型）', () => {
@@ -113,7 +152,7 @@ describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR �
     expect(matteMessages.length).toBeGreaterThan(1);
     expect(matteMessages[0]).toMatch(/抠像 \d+\/\d+ 帧/);
     expect(matteMessages[matteMessages.length - 1]).toContain('抠像换背景完成');
-    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'compose', 'done']);
+    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'compose', 'loudness', 'cover', 'done']);
     const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
     expect(project.background?.spec).toEqual({ kind: 'preset', id: 'study' });
     expect(project.artifacts.person).toBe(join(workDir, 'person.mp4'));
@@ -197,7 +236,7 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     const events: ProgressEvent[] = [];
     const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps,
       broll: { enabled: true, maxVideos: 1, budgetYuan: 10 }, onProgress: (e) => events.push(e) });
-    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-4)).toEqual(['storyboard', 'broll', 'compose', 'done']);
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-5)).toEqual(['broll', 'compose', 'loudness', 'cover', 'done']);
     const brollEvents = events.filter((e) => e.step === 'broll').map((e) => e.message);
     expect(brollEvents[0]).toBe('素材 1/2：生成视频中…');
     expect(brollEvents.at(-1)).toBe('素材 2 个（截图 0 / 生图 1 / 视频 1）· 花费 ¥2.60 · 失败 0 个');

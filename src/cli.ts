@@ -4,12 +4,14 @@ import { parseBackgroundArgs } from './background/resolve.js';
 import { loadConfig } from './config.js';
 import { KexiangClient } from './llm/kexiang.js';
 import { makeTaskClient, parseBrollArgs } from './pipeline/broll-step.js';
+import { parseFinishArgs } from './pipeline/finish-step.js';
+import { KexiangTaskClient } from './llm/kexiang-task.js';
 import { runPipeline } from './pipeline/run.js';
 
-const USAGE = '用法：pnpm mingzhi edit <口播视频> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] [--no-broll] [--max-videos N] [--budget 元]';
+const USAGE = '用法：pnpm mingzhi edit <口播视频> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] [--no-broll] [--max-videos N] [--budget 元] [--bgm auto|none|曲目id] [--caption-style 样式id] [--cover-style 风格id] [--no-cover]';
 
 async function main(): Promise<void> {
-  const { positionals, values } = parseArgs({ allowPositionals: true, options: { output: { type: 'string', short: 'o' }, work: { type: 'string' }, bg: { type: 'string' }, 'bg-prompt': { type: 'string' }, 'no-broll': { type: 'boolean' }, 'max-videos': { type: 'string' }, budget: { type: 'string' } } });
+  const { positionals, values } = parseArgs({ allowPositionals: true, options: { output: { type: 'string', short: 'o' }, work: { type: 'string' }, bg: { type: 'string' }, 'bg-prompt': { type: 'string' }, 'no-broll': { type: 'boolean' }, 'max-videos': { type: 'string' }, budget: { type: 'string' }, bgm: { type: 'string' }, 'caption-style': { type: 'string' }, 'cover-style': { type: 'string' }, 'no-cover': { type: 'boolean' } } });
   const [command, inputArg] = positionals;
   if (command !== 'edit' || !inputArg) throw new Error(USAGE);
   const baseDir = process.env.INIT_CWD ?? process.cwd();
@@ -17,10 +19,12 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const background = parseBackgroundArgs(values.bg, values['bg-prompt'], baseDir);
   const broll = parseBrollArgs(values, cfg.pexelsKey);
-  const task = makeTaskClient(cfg, { background: background?.kind === 'prompt', broll });
+  const finish = parseFinishArgs(values);
+  // 封面需要可想任务客户端；没配 key 时不在这里报错，由封面步骤降级跳过
+  const task = makeTaskClient(cfg, { background: background?.kind === 'prompt', broll }) ?? (finish.cover && cfg.kexiangKey ? new KexiangTaskClient(cfg.kexiangKey) : undefined);
   const llm = new KexiangClient(cfg.kexiangKey ?? '');
   const started = Date.now();
-  const res = await runPipeline({ input, workDir, output, cfg, llm, background, task, broll, onProgress: (e) => console.log(`[${e.step}] ${e.message}`) });
+  const res = await runPipeline({ input, workDir, output, cfg, llm, background, task, broll, ...finish, onProgress: (e) => console.log(`[${e.step}] ${e.message}`) });
   const secs = Math.round((Date.now() - started) / 1000);
   console.log(`\n完成：删除 ${res.cuts.length} 处 · 成片 ${res.plan.outputDurationSec.toFixed(1)} 秒 · ${res.storyboard.shots.length} 个镜头 · 用时 ${secs} 秒\n${res.output}`);
 }

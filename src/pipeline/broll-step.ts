@@ -73,7 +73,7 @@ function stripVisual(shot: Shot): Shot {
 
 /** 不取素材：去掉所有 visual 后重新归一化（可用文件为空），只靠 visual 存在的 photo 会被丢弃并补成全屏 */
 export function withoutBroll(storyboard: Storyboard, durationSec: number): Storyboard {
-  return normalizeStoryboard({ shots: storyboard.shots.map(stripVisual) }, durationSec, []).storyboard;
+  return normalizeStoryboard({ ...storyboard, shots: storyboard.shots.map(stripVisual) }, durationSec, []).storyboard;
 }
 
 /** 单个素材的进度文案（只回调、不写 project.json）：开始、视频状态、完成（缓存命中标「（缓存）」）或失败 */

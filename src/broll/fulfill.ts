@@ -194,7 +194,7 @@ function applyAsset(storyboard: Storyboard, shotIndex: number, asset: BrollAsset
     if (card.template === 'browser') return { ...shot, card: { ...card, props: { ...card.props, image: asset.file } } };
     return shot;
   });
-  return { shots };
+  return { ...storyboard, shots };
 }
 
 /** 取不到素材的 photo 去掉 visual：归一化时 photo 既无图也无 visual 才会被丢弃并补成全屏（browser / hook 无图也能显示，保留 visual） */
@@ -206,7 +206,7 @@ function giveUpPhoto(storyboard: Storyboard, need: VisualNeed): Storyboard {
     const { visual: _visual, ...props } = card.props;
     return { ...shot, card: { ...card, props } };
   });
-  return { shots };
+  return { ...storyboard, shots };
 }
 
 /** 分镜里已有且文件真实存在的 image / video 引用（归一化时不能因为不在本次获取列表里被误删） */

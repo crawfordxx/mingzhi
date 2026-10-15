@@ -14,18 +14,33 @@ import { renderCut } from '../cut/render-cut.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
 import { renderTalk } from '../compose/render.js';
+import type { SubjectBox } from '../matting/composite.js';
 import { matteVideo } from '../matting/rvm.js';
 import { extractWav16k } from '../media/extract-audio.js';
 import { probe, type MediaInfo } from '../media/probe.js';
 import { runBroll, validateBroll, type BrollOptions } from './broll-step.js';
 import type { BrollDeps } from '../broll/fulfill.js';
 import { generateStoryboard } from '../storyboard/generate.js';
-import type { Storyboard } from '../storyboard/schema.js';
+import { DEFAULT_MOOD, type Storyboard } from '../storyboard/schema.js';
+import { prepareAudio, validateAudio, type AudioOptions } from './audio-step.js';
+import { runCover, runLoudness, validateStyles, type CoverDeps, type CoverOptions } from './finish-step.js';
+import type { CaptionStyleId } from '../captions/styles.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
 
-export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose' | 'done';
+export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose' | 'loudness' | 'cover' | 'done';
 export interface ProgressEvent { step: PipelineStep; message: string }
-export interface PipelineArgs { input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; broll?: BrollOptions; brollDeps?: BrollDeps; onProgress?: (e: ProgressEvent) => void }
+export interface PipelineArgs {
+  input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; broll?: BrollOptions; brollDeps?: BrollDeps;
+  /** 配乐选择；缺省 { bgm: 'auto' } */
+  audio?: AudioOptions;
+  /** 字幕样式；缺省 blade */
+  captionStyle?: CaptionStyleId;
+  /** 封面；缺省按默认风格生成，false 关闭 */
+  cover?: CoverOptions;
+  /** 仅供测试注入的封面实现 */
+  coverDeps?: CoverDeps;
+  onProgress?: (e: ProgressEvent) => void;
+}
 export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard }
 
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
@@ -113,7 +128,7 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   try {
     res = await generateStoryboard(llm, captions, durationSec, []);
   } catch (err) {
-    const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }] };
+    const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }], bgm: DEFAULT_MOOD };
     complete('storyboard', `分镜生成失败，改为全程人像：${err instanceof Error ? err.message : String(err)}`, { storyboard });
     return storyboard;
   }
@@ -124,9 +139,11 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   return res.storyboard;
 }
 
-/** 剪切 → 换背景 → 字幕 → 分镜 → Remotion 成片 */
-async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Promise<{ captions: TimedCaption[]; storyboard: Storyboard }> {
-  const { input, workDir, output, cfg, llm } = args;
+interface Produced { captions: TimedCaption[]; storyboard: Storyboard; base: string; subject: SubjectBox | null }
+
+/** 剪切 → 换背景 → 字幕 → 分镜 → 素材 */
+async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Promise<Produced> {
+  const { input, workDir, cfg, llm } = args;
   const cut = join(workDir, 'cut.mp4');
   await renderCut(input, a.plan.keep, cut, cfg);
   complete('render', '剪切完成', { artifacts: { cut } });
@@ -140,27 +157,38 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
   const project = complete('captions', `${captions.length} 行字幕 · ${polishSummary(polished)}`,
     { captionLines: polished.lines, captionsSource: polished.source, captions, artifacts: { ass } });
 
-  const person = relative(workDir, base);
-  if (person.startsWith('..')) throw new Error(`人像视频必须在工作目录内：${base}`);
+  if (relative(workDir, base).startsWith('..')) throw new Error(`人像视频必须在工作目录内：${base}`);
   const planned = await planStoryboard(llm, captions, a.plan.outputDurationSec, complete);
   const storyboard = await runBroll(args, planned, a.plan.outputDurationSec, complete);
-  const baseInfo = await probe(base, cfg);
+  return { captions, storyboard, base, subject: project.subject ?? null };
+}
+
+/** 配乐音效与字幕样式落盘 → Remotion 渲染到 final.raw.mp4 → 响度统一得到最终成片（成功后才写 output） */
+async function compose(args: PipelineArgs, a: Analysis, p: Produced, complete: Complete): Promise<void> {
+  const { workDir, cfg } = args;
+  const baseInfo = await probe(p.base, cfg);
   // 成片时长不超过人像视频的实际时长（剪切编码后可能比方案略短），避免末尾取不到帧
   const durationSec = Math.min(a.plan.outputDurationSec, baseInfo.durationSec);
+  const audio = await prepareAudio({ workDir, cfg, input: args.input, audio: args.audio, captionStyle: args.captionStyle }, p.storyboard, p.captions, durationSec);
+  audio.notes.forEach((note) => complete('compose', note));
+  complete('compose', audio.summary, { audio: audio.info });
+  const raw = join(workDir, 'final.raw.mp4');
   await renderTalk({
-    workDir, output, onProgress: throttledRenderProgress((e) => args.onProgress?.(e)),
-    props: { person, personWidth: baseInfo.width, personHeight: baseInfo.height, subject: project.subject ?? null, captions, shots: storyboard.shots, durationSec },
+    workDir, output: raw, onProgress: throttledRenderProgress((e) => args.onProgress?.(e)),
+    props: { person: relative(workDir, p.base), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: p.subject, captions: p.captions, shots: p.storyboard.shots, durationSec, ...audio.props },
   }).catch((err: unknown) => {
     throw new Error(`成片渲染失败：${err instanceof Error ? err.message : String(err)}`);
   });
-  complete('compose', '成片渲染完成', { artifacts: { output, final: output } });
-  return { captions, storyboard };
+  complete('compose', '成片渲染完成');
+  await runLoudness(cfg, raw, args.output, complete);
 }
 
 /** 全流程；每步完成后增量写 project.json 并回调一次，供 P5 剪辑直播使用 */
 export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   if (args.background) validateBackground(args.background, args.cfg, args.task);
   validateBroll(args.broll, args.brollDeps, args.task);
+  validateAudio(args.audio);
+  validateStyles(args.captionStyle, args.cover);
   mkdirSync(args.workDir, { recursive: true });
   mkdirSync(dirname(args.output), { recursive: true });
   const projectPath = join(args.workDir, 'project.json');
@@ -171,7 +199,9 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
     return project;
   };
   const analysis = await analyze(args, complete);
-  const { captions, storyboard } = await produce(args, analysis, complete);
+  const produced = await produce(args, analysis, complete);
+  await compose(args, analysis, produced, complete);
+  await runCover({ workDir: args.workDir, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
   complete('done', args.output);
-  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions, storyboard };
+  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: produced.captions, storyboard: produced.storyboard };
 }

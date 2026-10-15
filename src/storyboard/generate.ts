@@ -2,7 +2,7 @@ import type { TimedCaption } from '../captions/lines.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { CATALOG } from './catalog.js';
 import { normalizeStoryboard, type NormalizeResult } from './normalize.js';
-import { HOOK_WINDOW_SEC, MAX_SHOT_SEC, ShotSchema, type Shot } from './schema.js';
+import { COVER_SUBTITLE_MAX, COVER_TITLE_MAX, HOOK_WINDOW_SEC, MAX_SHOT_SEC, ShotSchema, type Shot } from './schema.js';
 
 export { CATALOG } from './catalog.js';
 export const STORYBOARD_MODEL = 'google/gemini-3.5-flash';
@@ -17,8 +17,10 @@ const catalogText = CATALOG.map((c) => `- ${c.id}：${c.use}\n  props：${c.prop
 const SYSTEM_PROMPT = `你是短视频口播的分镜导演。输入是成片时间轴上的字幕（每行 [开始-结束] 文字，单位秒，保留 2 位小数）、总时长和可用素材列表。请为整条视频设计分镜：画面分上下两半，split 镜头上半屏显示信息卡片、下半屏是人物；full 镜头人物全屏。
 
 输出严格的 JSON，不要任何多余文字：
-{"shots":[{"start":秒,"end":秒,"layout":"split|full","card":{"template":"模板名","props":{…}}}]}
+{"shots":[{"start":秒,"end":秒,"layout":"split|full","card":{"template":"模板名","props":{…}}}],"bgm":"chill|tech|upbeat","coverTitle":{"title":"封面主标题","subtitle":"封面小标题"}}
 full 镜头不带 card（cta 除外）。镜头按时间顺序首尾相接，覆盖 0 到总时长。
+bgm 是背景乐情绪：chill 舒缓、tech 科技感、upbeat 轻快积极，按内容气质三选一。
+coverTitle 是封面标题：title 必填、不超过 ${COVER_TITLE_MAX} 字，要抓人的短句，不要照抄字幕；subtitle 可选、不超过 ${COVER_SUBTITLE_MAX} 字。
 
 规则：
 1. 开头 2-3 张 hook（index 从 1 起，total 为张数），覆盖前几句字幕（${HOOK_WINDOW_SEC} 秒内），每张对应一句最抓人的话；highlight 里的词必须是 headline 的子串。
@@ -80,7 +82,7 @@ function retryHint(res: NormalizeResult, raw: unknown): string {
 /** cta 的动作固定为三连；不改动入参 */
 function fixCtaActions(res: NormalizeResult): NormalizeResult {
   const shots = res.storyboard.shots.map((s): Shot => (s.card?.template === 'cta' ? { ...s, card: { template: 'cta', props: { actions: [...CTA_ACTIONS] } } } : s));
-  return { ...res, storyboard: { shots } };
+  return { ...res, storyboard: { ...res.storyboard, shots } };
 }
 
 /** 让 Gemini 为字幕设计分镜并归一化；不合格过多或卡片太少时带原因重试 1 次（重试失败则保留首次结果）；首次请求失败直接抛出，由流程决定是否降级 */

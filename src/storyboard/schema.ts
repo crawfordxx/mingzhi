@@ -3,6 +3,7 @@ import type { TimedCaption } from '../captions/lines.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { SfxCue, VolumeKey } from '../audio/plan.js';
 import type { CaptionStyleId } from '../captions/styles.js';
+import type { Mood } from '../assets/catalog.js';
 
 /** 画布与版式常量：分界线 y=960 来自参考片实测 */
 export const CANVAS = { width: 1080, height: 1920, fps: 30, seam: 960 } as const;
@@ -53,7 +54,16 @@ export type CardSpec = z.infer<typeof CardSpecSchema>;
 
 export const ShotSchema = z.object({ start: z.number().finite(), end: z.number().finite(), layout: z.enum(['split', 'full']), card: CardSpecSchema.optional() });
 export type Shot = { start: number; end: number; layout: 'split' | 'full'; card?: CardSpec };
-export interface Storyboard { shots: Shot[] }
+/** 背景乐情绪；模型漏写或写错时按 chill */
+export const MOODS = ['chill', 'tech', 'upbeat'] as const satisfies readonly Mood[];
+export const DEFAULT_MOOD: Mood = 'chill';
+export const COVER_TITLE_MAX = 12;
+export const COVER_SUBTITLE_MAX = 16;
+/** 封面标题：由分镜模型顺带给出，主标题 ≤12 字、小标题 ≤16 字 */
+export const CoverTitleSchema = z.object({ title: z.string().trim().min(1).max(COVER_TITLE_MAX), subtitle: z.string().trim().min(1).max(COVER_SUBTITLE_MAX).optional() });
+export type CoverTitle = z.infer<typeof CoverTitleSchema>;
+/** bgm 经归一化后必有值（缺省 chill），类型上可选是为了让只关心镜头的调用方与测试不必填写；coverTitle 缺省时由出片流程用 hook 卡片或第一句字幕兜底 */
+export interface Storyboard { shots: Shot[]; bgm?: Mood; coverTitle?: CoverTitle }
 
 /** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名 */
 export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number; bgm?: { file: string; keys: VolumeKey[]; durationSec: number }; sfx?: SfxCue[]; captionStyle?: CaptionStyleId; captionFontFile?: string };

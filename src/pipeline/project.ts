@@ -9,8 +9,9 @@ import type { BackgroundSpec } from '../background/resolve.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { MediaInfo } from '../media/probe.js';
 import type { Storyboard } from '../storyboard/schema.js';
+import type { Mood } from '../assets/catalog.js';
 
-export interface ProjectArtifacts { wav?: string; cut?: string; person?: string; ass?: string; output?: string; final?: string }
+export interface ProjectArtifacts { wav?: string; cut?: string; person?: string; ass?: string; output?: string; final?: string; cover43?: string; cover34?: string }
 
 /** 工程文件 project.json：每一步完成后增量落盘，尚未完成的步骤对应字段缺省；全部完成时字段齐全 */
 export interface ProjectFile {
@@ -40,6 +41,10 @@ export interface ProjectFile {
   storyboardCapped?: number;
   /** B-roll 素材获取结果（P3b）：取到的素材、失败的镜头与花费（元）；未开启时缺省 */
   broll?: { assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number };
+  /** 配乐与音效（P3c）：所选曲目 id（无配乐为 null）、情绪、触发的音效数 */
+  audio?: { track: string | null; mood: Mood; sfxCount: number };
+  /** 响度统一（P3c）：处理前后的综合响度（LUFS）；音轨静音无法归一时缺省 */
+  loudness?: { before: number; after: number };
   artifacts: ProjectArtifacts;
 }
 

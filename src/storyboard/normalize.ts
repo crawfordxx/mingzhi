@@ -1,4 +1,5 @@
-import { CANVAS, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, ShotSchema, type CardSpec, type Shot, type Storyboard } from './schema.js';
+import type { Mood } from '../assets/catalog.js';
+import { CANVAS, CoverTitleSchema, DEFAULT_MOOD, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, MOODS, ShotSchema, type CardSpec, type CoverTitle, type Shot, type Storyboard } from './schema.js';
 
 export interface NormalizeResult {
   storyboard: Storyboard;
@@ -195,11 +196,33 @@ function applyPlacementRules(shots: Shot[]): Shot[] {
   });
 }
 
+/** 背景乐情绪：不在枚举内一律按缺省 */
+function readMood(raw: unknown): Mood {
+  const mood = (raw as { bgm?: unknown } | null)?.bgm;
+  return MOODS.find((m) => m === mood) ?? DEFAULT_MOOD;
+}
+
+/** 封面标题：主标题不合格就整体不要（交给兜底）；小标题不合格只丢小标题 */
+function readCoverTitle(raw: unknown): CoverTitle | undefined {
+  const c = (raw as { coverTitle?: unknown } | null)?.coverTitle;
+  const whole = CoverTitleSchema.safeParse(c);
+  if (whole.success) return whole.data;
+  const main = CoverTitleSchema.pick({ title: true }).safeParse(c);
+  return main.success ? main.data : undefined;
+}
+
+/** 分镜里与镜头无关的附加字段（背景乐情绪、封面标题） */
+function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle'> {
+  const coverTitle = readCoverTitle(raw);
+  return { bgm: readMood(raw), ...(coverTitle ? { coverTitle } : {}) };
+}
+
 /** 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜 */
 export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[]): NormalizeResult {
   if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error(`分镜归一化失败：片长无效（${durationSec}）`);
   const items = (raw as { shots?: unknown } | null)?.shots;
-  if (!Array.isArray(items)) return { storyboard: { shots: [{ start: 0, end: round(durationSec), layout: 'full' }] }, dropped: 0, demoted: 0, capped: 0 };
+  const extras = readExtras(raw);
+  if (!Array.isArray(items)) return { storyboard: { shots: [{ start: 0, end: round(durationSec), layout: 'full' }], ...extras }, dropped: 0, demoted: 0, capped: 0 };
 
   const images = new Set(availableImages);
   const valid = items.flatMap((i) => { const p = ShotSchema.safeParse(i); return p.success ? [p.data as Shot] : []; });
@@ -210,7 +233,7 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
   const shots = snapToFrames(ensureCtaRoom(merged), durationSec);
 
   return {
-    storyboard: { shots },
+    storyboard: { shots, ...extras },
     dropped: items.length - usable.length + overlapDropped,
     demoted: countCards(placed) - countCards(shots),
     capped: cappedCount,
