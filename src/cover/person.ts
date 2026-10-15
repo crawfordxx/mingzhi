@@ -49,3 +49,21 @@ export async function cutoutPerson(video: string, sec: number, out: string, cfg:
   const { found } = await cutoutFrame(video, sec, out, cfg, opts);
   return found;
 }
+
+/** 没抠到人时最多再试几个候选帧 */
+const EXTRA_CUTOUT_TRIES = 2;
+type Cutout = (video: string, sec: number, out: string, cfg: AppConfig, opts: CutoutOptions) => Promise<boolean>;
+
+/** 先抠 sec 处；没识别到人物时再试离它最近的 2 个候选帧（与 pickPersonFrame 同一组时间点）；返回最终是否抠到人 */
+export async function cutoutPersonWithRetry(video: string, sec: number, out: string, cfg: AppConfig, opts: CutoutOptions = {}, cutout: Cutout = cutoutPerson): Promise<boolean> {
+  if (await cutout(video, sec, out, cfg, opts)) return true;
+  const { durationSec } = await probe(video, cfg);
+  const others = candidateTimes(durationSec, DEFAULT_CANDIDATES)
+    .filter((t) => Math.abs(t - sec) > 1e-3)
+    .sort((a, b) => Math.abs(a - sec) - Math.abs(b - sec))
+    .slice(0, EXTRA_CUTOUT_TRIES);
+  for (const t of others) {
+    if (await cutout(video, t, out, cfg, opts)) return true;
+  }
+  return false;
+}

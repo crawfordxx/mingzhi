@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
@@ -9,7 +9,7 @@ import type { TaskClient, TaskInput } from '../src/llm/kexiang-task.js';
 import type { Storyboard } from '../src/storyboard/schema.js';
 import { COVER_STYLES, DEFAULT_COVER_STYLE, slotRegion, type CoverStyleId } from '../src/cover/styles.js';
 import { COVER_MODEL, coverPrompt, coverTitle, generateCoverArt, generateVerifiedArt, makeCovers, normalizeTitle, verifyTitle } from '../src/cover/generate.js';
-import { candidateTimes, cutoutPerson, pickPersonFrame } from '../src/cover/person.js';
+import { candidateTimes, cutoutPerson, cutoutPersonWithRetry, pickPersonFrame } from '../src/cover/person.js';
 import { cutoutRgba } from '../src/matting/rvm.js';
 import { hasRvm } from './helpers/models.js';
 
@@ -101,8 +101,17 @@ describe('coverPrompt', () => {
     expect(p).toContain('无水印');
   });
 
+  it('人物在右侧/右下时，要求标题限制在左侧约 45% 宽度内、可折成 2–3 行', () => {
+    for (const id of ['bauhaus', 'swiss', 'neon', 'japanese'] as const) {
+      const p = coverPrompt(id, '标题', undefined, '4:3');
+      expect(p, id).toContain('左侧约 45% 的宽度内');
+      expect(p, id).toContain('2–3 行');
+    }
+  });
+
   it('每套风格的留白方位都写进提示词；横版写 4:3；没有小标题时不提小字', () => {
     for (const id of IDS) expect(coverPrompt(id, '标题', undefined, '4:3'), id).toContain(`${slotRegion(COVER_STYLES[id].personSlot).blank}留出`);
+    expect(coverPrompt('memphis', '标题', undefined, '3:4')).not.toContain('45%');
     const p = coverPrompt('swiss', '标题', undefined, '4:3');
     expect(p).toContain('横版 4:3');
     expect(p).not.toContain('小字');
@@ -125,18 +134,19 @@ describe('verifyTitle', () => {
   it('归一化：去空格与标点、全角转半角、拉丁字母不分大小写', () => {
     expect(normalizeTitle(' ＦＤＥ 是什么岗位？')).toBe('fde是什么岗位');
     expect(normalizeTitle('「AI」落地，真难!')).toBe('ai落地真难');
+    expect(normalizeTitle('AI+教育 ¥99 → 爆款★')).toBe('ai教育99爆款');
   });
 
-  it('把图片以 data URI 发给读图模型，归一化后与原文相等才通过', async () => {
+  it('把图片以 data URI 发给读图模型：相等为 ok，不等或答非所问为 mismatch，模型出错为 error', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mz-cover-v-'));
     const png = join(dir, 'a.png');
     await pngDownload('', png);
     const llm = fakeLlm([{ title: 'fde 是什么岗位?' }]);
-    expect(await verifyTitle(llm, png, 'FDE是什么岗位？')).toBe(true);
+    expect(await verifyTitle(llm, png, 'FDE是什么岗位？')).toBe('ok');
     expect(llm.calls[0].images?.[0]).toMatch(/^data:image\/png;base64,iVBOR/);
-    expect(await verifyTitle(fakeLlm([{ title: 'FDE是什么岗味' }]), png, 'FDE是什么岗位？')).toBe(false);
-    expect(await verifyTitle(fakeLlm([{ text: 'x' }]), png, '标题')).toBe(false);
-    expect(await verifyTitle(fakeLlm([() => { throw new Error('网络错误'); }]), png, '标题')).toBe(false);
+    expect(await verifyTitle(fakeLlm([{ title: 'FDE是什么岗味' }]), png, 'FDE是什么岗位？')).toBe('mismatch');
+    expect(await verifyTitle(fakeLlm([{ text: 'x' }]), png, '标题')).toBe('mismatch');
+    expect(await verifyTitle(fakeLlm([() => { throw new Error('网络错误'); }]), png, '标题')).toBe('error');
   });
 });
 
@@ -146,7 +156,7 @@ describe('generateVerifiedArt', () => {
     const dest = join(dir, 'art.png');
     const task = fakeTask(0.6);
     const res = await generateVerifiedArt({ task, client: fakeLlm([{ title: '错字' }]), style: 'bauhaus', title: '标题', aspect: '3:4', dest, download: pngDownload });
-    expect(res).toEqual({ attempts: 2, costYuan: 1.2, verified: false });
+    expect(res).toEqual({ attempts: 2, costYuan: 1.2, verified: false, check: 'mismatch', reused: false });
     expect(task.inputs).toHaveLength(2);
     expect(existsSync(dest)).toBe(true);
   });
@@ -154,7 +164,44 @@ describe('generateVerifiedArt', () => {
   it('第一次通过就不再重生；任务没有返回花费时按 0 计', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mz-cover-g1-'));
     const res = await generateVerifiedArt({ task: fakeTask(null), client: fakeLlm([{ title: '标题' }]), style: 'y2k', title: '标题', aspect: '4:3', dest: join(dir, 'a.png'), download: pngDownload });
-    expect(res).toEqual({ attempts: 1, costYuan: 0, verified: true });
+    expect(res).toEqual({ attempts: 1, costYuan: 0, verified: true, check: 'ok', reused: false });
+  });
+
+  it('核对模型出错时不重生：只生成一次，保留第一张并标注未核对', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-cover-ge-'));
+    const task = fakeTask(0.6);
+    const res = await generateVerifiedArt({ task, client: fakeLlm([() => { throw new Error('超时'); }]), style: 'neon', title: '标题', aspect: '3:4', dest: join(dir, 'a.png'), download: pngDownload });
+    expect(res).toEqual({ attempts: 1, costYuan: 0.6, verified: false, check: 'error', reused: false });
+    expect(task.inputs).toHaveLength(1);
+  });
+
+  it('下载成功后写旁注；同风格同标题再跑时复用底图不再生成，标题变了则重新生成', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-cover-gr-'));
+    const dest = join(dir, 'cover-art-3x4.png');
+    const base = { style: 'bauhaus' as const, title: '标题', subtitle: '小字', aspect: '3:4' as const, dest, download: pngDownload };
+    await generateVerifiedArt({ ...base, task: fakeTask(0.6), client: fakeLlm([{ title: '标题' }]) });
+    expect(JSON.parse(readFileSync(join(dir, 'cover-art-3x4.json'), 'utf8'))).toEqual({ style: 'bauhaus', title: '标题', subtitle: '小字', aspect: '3:4', verified: true });
+    const again = fakeTask(0.6);
+    const llm = fakeLlm([{ title: '标题' }]);
+    expect(await generateVerifiedArt({ ...base, task: again, client: llm })).toEqual({ attempts: 0, costYuan: 0, verified: true, check: 'ok', reused: true });
+    expect(again.inputs).toHaveLength(0);
+    expect(llm.calls).toHaveLength(0);
+    const changed = fakeTask(0.6);
+    const res = await generateVerifiedArt({ ...base, title: '新标题', task: changed, client: fakeLlm([{ title: '新标题' }]) });
+    expect([res.attempts, res.reused, changed.inputs.length]).toEqual([1, false, 1]);
+  });
+
+  it('旁注损坏或缺失时不复用', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-cover-gc-'));
+    const dest = join(dir, 'cover-art-4x3.png');
+    await pngDownload('', dest);
+    const task = fakeTask(0.6);
+    await generateVerifiedArt({ task, client: fakeLlm([{ title: '标题' }]), style: 'swiss', title: '标题', aspect: '4:3', dest, download: pngDownload });
+    expect(task.inputs).toHaveLength(1);
+    writeFileSync(join(dir, 'cover-art-4x3.json'), '{坏');
+    const task2 = fakeTask(0.6);
+    await generateVerifiedArt({ task: task2, client: fakeLlm([{ title: '标题' }]), style: 'swiss', title: '标题', aspect: '4:3', dest, download: pngDownload });
+    expect(task2.inputs).toHaveLength(1);
   });
 });
 
@@ -186,6 +233,20 @@ describe('pickPersonFrame', () => {
     expect(llm.calls[0].user).toContain('6');
     expect(await pickPersonFrame(video, cfg, fakeLlm([{ index: 9 }]))).toBeCloseTo(1);
     expect(await pickPersonFrame(video, cfg, fakeLlm([() => { throw new Error('超时'); }]))).toBeCloseTo(1);
+  });
+});
+
+describe('cutoutPersonWithRetry', () => {
+  it('第一帧没抠到人时，再试最多 2 个离它最近的候选帧', async () => {
+    const video = await makeVideo(mkdtempSync(join(tmpdir(), 'mz-cover-r-')), 3);
+    const tried: number[] = [];
+    const never = async (_v: string, sec: number): Promise<boolean> => { tried.push(sec); return false; };
+    expect(await cutoutPersonWithRetry(video, 0.75, '/tmp/p.png', cfg, {}, never)).toBe(false);
+    expect(tried.map((t) => Number(t.toFixed(2)))).toEqual([0.75, 0.25, 1.25]);
+    const secondTime: number[] = [];
+    const second = async (_v: string, sec: number): Promise<boolean> => { secondTime.push(sec); return secondTime.length === 2; };
+    expect(await cutoutPersonWithRetry(video, 0.75, '/tmp/p.png', cfg, {}, second)).toBe(true);
+    expect(secondTime).toHaveLength(2);
   });
 });
 
@@ -258,5 +319,12 @@ describe.skipIf(!hasRvm())('本地抠像与封面合成（需要 RVM 模型）',
     expect(res.cover43).toBe(join(workDir, 'cover-4x3.png'));
     expect(await dims(res.cover34)).toEqual([1080, 1440]);
     expect(await dims(res.cover43)).toEqual([1440, 1080]);
+    expect(res.reused).toEqual([]);
+
+    // 再跑一次：两张底图都复用，不再调用生图
+    const task2 = fakeTask(0.6);
+    const again = await makeCovers({ workDir, style: 'neobrutal', title: 'FDE 是什么岗位', subtitle: 'AI 落地的关键角色', personVideo, cfg, task: task2, client, download: pngDownload });
+    expect([again.attempts, again.costYuan, task2.inputs.length]).toEqual([0, 0, 0]);
+    expect(again.reused).toEqual(['3:4', '4:3']);
   }, 300_000);
 });
