@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "vitest run --exclude \"tests/{compose,templates,caption-band,cover}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts tests/cover.test.ts --no-file-parallelism",
+    "test": "vitest run --exclude \"tests/{compose,templates,caption-band,cover,segments}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts tests/cover.test.ts tests/segments.test.ts --no-file-parallelism",
     "typecheck": "tsc --noEmit",
     "fetch-models": "node scripts/fetch-models.mjs",
     "fetch-assets": "node scripts/fetch-assets.mjs",

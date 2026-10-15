@@ -114,3 +114,22 @@ export async function renderCoverStills(workDir: string, stills: { id: 'Cover34'
     }
   });
 }
+
+export interface SegmentRenderOptions { serveUrl: string; props: TalkProps; output: string; concurrency?: number }
+
+/** 渲染一段无声画面（含首尾帧，frameRange 为闭区间）；复用外部打包，供分段缓存使用 */
+export async function renderVideoSegment(opts: SegmentRenderOptions & { startFrame: number; endFrame: number }): Promise<void> {
+  const { serveUrl, props: inputProps } = opts;
+  const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+  await renderMedia({
+    composition, serveUrl, inputProps, codec: 'h264', crf: 18, muted: true, outputLocation: opts.output,
+    frameRange: [opts.startFrame, opts.endFrame - 1], concurrency: opts.concurrency ?? defaultConcurrency(),
+  });
+}
+
+/** 整条音轨单独渲染成 aac（m4a），与画面分开，拼接处不会爆音 */
+export async function renderAudioTrack(opts: SegmentRenderOptions): Promise<void> {
+  const { serveUrl, props: inputProps } = opts;
+  const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+  await renderMedia({ composition, serveUrl, inputProps, codec: 'aac', outputLocation: opts.output, concurrency: opts.concurrency ?? defaultConcurrency() });
+}
