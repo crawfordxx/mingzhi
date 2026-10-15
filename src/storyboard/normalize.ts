@@ -66,13 +66,14 @@ function clampAndResolve(shots: Shot[], durationSec: number): { placed: Shot[]; 
   return { placed, dropped };
 }
 
-/** 最后一个 cta 若是结束最晚的卡片镜头，先延伸到片长，保证 cta 不被补齐逻辑或短镜头合并吞掉 */
-function extendCta(shots: Shot[], durationSec: number): Shot[] {
+/** 最后一个 cta 若是结束最晚的卡片镜头，则延伸到片尾并吸收其后的无卡片镜头，保证 cta 不被补齐或合并吞掉、时间轴不重叠 */
+function extendCta(shots: Shot[], durationSec: number): { shots: Shot[]; absorbed: number } {
   const ctaIdx = shots.map((s) => s.card?.template).lastIndexOf('cta');
-  if (ctaIdx < 0) return shots;
+  if (ctaIdx < 0) return { shots, absorbed: 0 };
   const cardEnd = Math.max(...shots.filter((s) => s.card).map((s) => s.end));
-  if (shots[ctaIdx].end < cardEnd) return shots;
-  return shots.map((s, i) => (i === ctaIdx ? { ...s, end: durationSec } : s));
+  if (shots[ctaIdx].end < cardEnd) return { shots, absorbed: 0 };
+  // cta 之后的镜头必然没有卡片（否则 cta 不是结束最晚的卡片镜头），整段并入 cta
+  return { shots: [...shots.slice(0, ctaIdx), { ...shots[ctaIdx], end: round(durationSec) }], absorbed: shots.length - ctaIdx - 1 };
 }
 
 /** 补齐空隙为全屏镜头，并补到片长 */
@@ -102,7 +103,6 @@ function mergeShort(shots: Shot[]): Shot[] {
 function applyPlacementRules(shots: Shot[]): Shot[] {
   const hookIdx = shots.flatMap((s, i) => (s.card?.template === 'hook' && s.start < HOOK_WINDOW_SEC ? [i] : [])).slice(0, MAX_HOOKS);
   const hookNo = new Map(hookIdx.map((i, n) => [i, n + 1] as const));
-  const ctaIdx = shots.map((s) => s.card?.template).lastIndexOf('cta');
   return shots.map((s, i): Shot => {
     const card = s.card;
     if (!card) return s;
@@ -111,7 +111,7 @@ function applyPlacementRules(shots: Shot[]): Shot[] {
       return no === undefined ? plain(s) : { ...s, card: { template: 'hook', props: { ...card.props, index: no, total: hookIdx.length } } };
     }
     if (card.template === 'cta') {
-      return i === ctaIdx && i === shots.length - 1 ? { ...s, layout: 'full' } : plain(s);
+      return i === shots.length - 1 ? { ...s, layout: 'full' } : plain(s);
     }
     return s;
   });
@@ -127,11 +127,12 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
   const valid = items.flatMap((i) => { const p = ShotSchema.safeParse(i); return p.success ? [p.data as Shot] : []; });
   const usable = valid.flatMap((s) => { const c = sanitizeShot(s, images); return c ? [c] : []; });
   const { placed, dropped: overlapDropped } = clampAndResolve(usable, durationSec);
-  const shots = applyPlacementRules(mergeShort(fillGaps(extendCta(placed, durationSec), durationSec)));
+  const extended = extendCta(placed, durationSec);
+  const shots = applyPlacementRules(mergeShort(fillGaps(extended.shots, durationSec)));
 
   return {
     storyboard: { shots },
-    dropped: items.length - usable.length + overlapDropped,
+    dropped: items.length - usable.length + overlapDropped + extended.absorbed,
     demoted: countCards(placed) - countCards(shots),
   };
 }

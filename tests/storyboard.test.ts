@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { CardSpecSchema, TEMPLATE_IDS } from '../src/storyboard/schema.js';
-import { normalizeStoryboard } from '../src/storyboard/normalize.js';
+import { normalizeStoryboard as normalizeRaw } from '../src/storyboard/normalize.js';
+
+/** 时间轴不变量：从 0 开始、首尾相接、无零长镜头、结束于片长 */
+function expectTimeline(shots: { start: number; end: number }[], durationSec: number): void {
+  expect(shots[0].start).toBe(0);
+  shots.forEach((s, i) => {
+    expect(s.end).toBeGreaterThan(s.start);
+    if (i > 0) expect(s.start).toBe(shots[i - 1].end);
+  });
+  expect(shots[shots.length - 1].end).toBe(durationSec);
+}
+
+/** 所有归一化用例的输出都经过时间轴不变量检查 */
+const normalizeStoryboard = (raw: unknown, durationSec: number, images: string[]) => {
+  const result = normalizeRaw(raw, durationSec, images);
+  expectTimeline(result.storyboard.shots, durationSec);
+  return result;
+};
 
 const title = (t: string) => ({ template: 'title', props: { title: t } });
 
@@ -110,6 +127,20 @@ describe('normalizeStoryboard：CTA 保留', () => {
     ]);
     expect(demoted).toBe(0);
     expect(dropped).toBe(0);
+  });
+  it('cta 之后只有无卡片镜头时：吸收这些镜头，cta 延伸到片尾，时间轴连续无重叠', () => {
+    const raw = { shots: [
+      { start: 0, end: 4, layout: 'split', card: title('A') },
+      { start: 4, end: 8, layout: 'split', card: cta(['关注']) },
+      { start: 8, end: 10, layout: 'full' },
+    ] };
+    const { storyboard, dropped, demoted } = normalizeStoryboard(raw, 10, []);
+    expect(shotRows(storyboard.shots)).toEqual([
+      [0, 4, 'split', 'title'],
+      [4, 10, 'full', 'cta'],
+    ]);
+    expect(dropped).toBe(1);
+    expect(demoted).toBe(0);
   });
 });
 
