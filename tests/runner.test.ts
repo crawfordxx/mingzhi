@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CancelledError } from '../src/cancel.js';
 import type { EditOp } from '../src/edit/plan.js';
@@ -65,6 +65,17 @@ describe('runFirstVersion', () => {
     expect(f.events.at(-1)?.step).toBe('done');
     expect(f.events.map((e) => e.step)).toEqual(expect.arrayContaining(['probe', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover']));
     expect(f.store.get(f.spaceId).versions[0].status).toBe('done');
+  });
+
+  it('有背景时先提示「对整条原片抠像」，并清掉硬杀留下的临时图层文件', async () => {
+    const f = makeFixture();
+    const stale = join(f.store.baseDir(f.spaceId), 'fgr.mp4.0a1b2c3d.tmp.mp4');
+    writeFileSync(stale, 'x');
+    await runFirstVersion(f.ctx, f.spaceId);
+    expect(existsSync(stale)).toBe(false);
+    const matte = f.events.filter((e) => e.step === 'matte').map((e) => e.message);
+    expect(matte[0]).toMatch(/^对整条原片抠像.*之后换背景、改节奏都不用再抠$/);
+    expect(matte.at(-1)).toMatch(/^换背景合成完成/);
   });
 
   it('没有背景时不抠像，人像就是剪切结果', async () => {

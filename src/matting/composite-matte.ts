@@ -4,6 +4,7 @@ import type { AppConfig } from '../config.js';
 import { loadBackgroundRgb } from '../background/prepare.js';
 import { throwIfCancelled } from '../cancel.js';
 import { FPS, type TimeRange } from '../cut/plan.js';
+import { videoSegment } from '../cut/render-cut.js';
 import { run } from '../media/exec.js';
 import { probe } from '../media/probe.js';
 import { colorMatchGains, meanRgb, type Rgb } from './composite.js';
@@ -15,7 +16,8 @@ export interface CompositeCutOptions {
   cut: string;
   /**
    * 整条原片的 RVM 去溢色前景与灰度遮罩（matteVideo 的 fgrOutput / matteOutput）。抠像解码按恒定 30fps 从文件起点（0 秒）输出，
-   * 视频流比音轨晚开始时开头会补上首帧，所以第 k 帧就是原片 k/30 秒处，与剪切用的时间轴相同，不需要平移（tests/composite-matte.test.ts 覆盖了晚开始的原片）。
+   * 视频流比音轨晚开始时开头会补上首帧，所以第 k 帧就是原片 k/30 秒处；剪切的取帧串用 fps=30:start_time=0，同样从 0 秒起补帧，
+   * 两边时间轴相同，不需要平移（tests/composite-matte.test.ts 覆盖晚开始、24fps、可变帧率的原片）。
    */
   fgr: string;
   matte: string;
@@ -30,14 +32,12 @@ export interface CompositeCutOptions {
   signal?: AbortSignal;
 }
 
-/** 与 renderCut 一致：保留 6 位小数 */
-const fmt = (n: number): string => String(Math.round(n * 1e6) / 1e6);
 const gain = (n: number): string => n.toFixed(4);
 
-/** 按保留区间从整条前景/遮罩里取帧并拼接：取帧链与 buildCutFilter 的画面部分逐项相同（fps=30 → 宽高取偶 → trim → 重置时间戳），帧的选择与剪切完全一致 */
+/** 按保留区间从整条前景/遮罩里取帧并拼接：每段取帧串与剪切共用 videoSegment，帧的选择与剪切完全一致 */
 export function trimChain(input: string, keep: TimeRange[], out: string): string {
   if (keep.length === 0) throw new Error('没有可保留的片段，无法合成');
-  const parts = keep.map((r, i) => `[${input}]fps=${FPS},scale=trunc(iw/2)*2:trunc(ih/2)*2,trim=start=${fmt(r.start)}:end=${fmt(r.end)},setpts=PTS-STARTPTS[${out}${i}]`);
+  const parts = keep.map((r, i) => videoSegment(input, r, `${out}${i}`));
   // 拼接后按帧序号重排时间戳：拼接处的时间戳可能有零头，叠到恒定帧率的背景上时会被并掉一帧
   return `${parts.join(';')};${keep.map((_, i) => `[${out}${i}]`).join('')}concat=n=${keep.length}:v=1:a=0,setpts=N/(${FPS}*TB)[${out}]`;
 }

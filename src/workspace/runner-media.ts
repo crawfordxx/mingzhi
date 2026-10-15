@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { BackgroundSpec } from '../background/resolve.js';
 import type { TimeRange } from '../cut/plan.js';
@@ -36,14 +36,22 @@ export function cutAsPerson(env: VersionEnv, cut: string): Person {
   return { person, subject: null };
 }
 
+/** 进程被硬杀时留下的临时图层文件（取消与失败会自行清理） */
+function removeStaleTemps(base: string): void {
+  for (const name of readdirSync(base)) if (/^(fgr|matte)\.mp4\.[0-9a-f]+\.tmp\.mp4$/.test(name)) rmSync(join(base, name), { force: true });
+}
+
 /**
  * base/ 里整条原片（未剪切）的抠像图层：去溢色前景 fgr.mp4 + 灰度遮罩 matte.mp4 + matte.json（最后写，存在即完整）。
  * 只在第一次需要背景时跑一次 RVM；之后任何版本换背景、改剪辑都只做合成。
+ * 前提：同一个项目同一时间只有一个任务（由本机服务的任务队列保证）；并发调用会重复抠像并互相覆盖图层（改名是原子的，不会损坏，只是浪费）。
  */
 async function ensureLayers(env: VersionEnv, args: PipelineArgs): Promise<MatteMeta> {
   const metaFile = join(env.base, MATTE_META);
   const [fgr, matte] = LAYER_FILES.map((f) => join(env.base, f));
   if ([metaFile, fgr, matte].every((f) => existsSync(f))) return readJson<MatteMeta>(metaFile, '抠像信息');
+  removeStaleTemps(env.base);
+  env.emit({ step: 'matte', message: '对整条原片抠像（比只抠剪后片段多花约三分之一时间），之后换背景、改节奏都不用再抠' });
   const started = Date.now();
   const res = await mediaOf(args.media).matte({
     input: args.input, cfg: args.cfg, signal: args.signal, fgrOutput: fgr, matteOutput: matte, onProgress: throttledMatteProgress(env.emit),

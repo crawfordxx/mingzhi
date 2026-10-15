@@ -118,10 +118,15 @@ function alphaBytes(pha: Float32Array, out: Buffer): Buffer {
   return Buffer.from(out);
 }
 
-/** RVM 前景（平面 CHW 0–1）→ 交错 rgb24 */
-function fgrBytes(fgr: Float32Array, plane: number, out: Buffer): Buffer {
+/**
+ * RVM 前景（平面 CHW 0–1）→ 交错 rgb24。遮罩量化后为 0 的像素前景置零：合成时这些像素权重为 0，
+ * 而 RVM 在背景区域输出的前景是噪声，置零后编码体积明显变小。
+ */
+function fgrBytes(fgr: Float32Array, pha: Float32Array, out: Buffer): Buffer {
+  const plane = pha.length;
   for (let i = 0; i < plane; i += 1) {
-    for (let c = 0; c < 3; c += 1) out[i * 3 + c] = Math.round(Math.min(1, Math.max(0, fgr[c * plane + i])) * 255);
+    const visible = Math.round(pha[i] * 255) > 0;
+    for (let c = 0; c < 3; c += 1) out[i * 3 + c] = visible ? Math.round(Math.min(1, Math.max(0, fgr[c * plane + i])) * 255) : 0;
   }
   return Buffer.from(out);
 }
@@ -134,8 +139,10 @@ const personArgs = (input: string, tmp: string, w: number, h: number): string[] 
   '-i', input, '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', tmp];
 /** 灰度遮罩：alpha 量化到 0–255 的全范围 gray，crf 10 近无损（实测渐变往返误差 0） */
 const matteArgs = (tmp: string, w: number, h: number): string[] => [...rawInput('gray', w, h, OUT_FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '10', '-pix_fmt', 'gray', tmp];
-/** 去溢色前景：RGB 直接编码（libx264rgb，不经 YUV 转换与色度抽样），crf 12 */
-const fgrArgs = (tmp: string, w: number, h: number): string[] => [...rawInput('rgb24', w, h, OUT_FPS), '-c:v', 'libx264rgb', '-preset', 'veryfast', '-crf', '12', '-pix_fmt', 'rgb24', tmp];
+/** 前景编码质量：实测见 task-5-report「修复轮 2」 */
+const FGR_CRF = 18;
+/** 去溢色前景：RGB 直接编码（libx264rgb，不经 YUV 转换与色度抽样） */
+const fgrArgs = (tmp: string, w: number, h: number): string[] => [...rawInput('rgb24', w, h, OUT_FPS), '-c:v', 'libx264rgb', '-preset', 'veryfast', '-crf', String(FGR_CRF), '-pix_fmt', 'rgb24', tmp];
 
 /** 按选项打开各路输出：换背景成片（需要背景）、灰度遮罩、去溢色前景 */
 function openLayers(opts: MatteOptions, w: number, h: number, bg: Buffer | null, gains: Rgb): Layer[] {
@@ -149,7 +156,7 @@ function openLayers(opts: MatteOptions, w: number, h: number, bg: Buffer | null,
   const alpha = Buffer.alloc(w * h);
   if (opts.matteOutput) open(opts.matteOutput, (t) => matteArgs(t, w, h), (_fgr, pha) => alphaBytes(pha, alpha));
   const fg = Buffer.alloc(w * h * 3);
-  if (opts.fgrOutput) open(opts.fgrOutput, (t) => fgrArgs(t, w, h), (fgr) => fgrBytes(fgr, w * h, fg));
+  if (opts.fgrOutput) open(opts.fgrOutput, (t) => fgrArgs(t, w, h), (fgr, pha) => fgrBytes(fgr, pha, fg));
   return layers;
 }
 
