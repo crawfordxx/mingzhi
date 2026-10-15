@@ -31,6 +31,23 @@ describe('KexiangClient', () => {
     expect(body.messages).toEqual([{ role: 'system', content: 's' }, { role: 'user', content: 'u' }]);
   });
 
+  it('带图片时用户消息改为多模态内容数组（文字在前、图片按顺序在后）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok('{"title":"x"}'));
+    const images = ['data:image/png;base64,AAAA', 'data:image/jpeg;base64,BBBB'];
+    await new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u', images });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.messages).toEqual([
+      { role: 'system', content: 's' },
+      { role: 'user', content: [{ type: 'text', text: 'u' }, { type: 'image_url', image_url: { url: images[0] } }, { type: 'image_url', image_url: { url: images[1] } }] },
+    ]);
+  });
+
+  it('images 为空数组时仍发纯文本', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok('{}'));
+    await new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u', images: [] });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages[1]).toEqual({ role: 'user', content: 'u' });
+  });
+
   it('key 已带 sk- 前缀时不重复添加', async () => {
     const fetchMock = vi.fn().mockResolvedValue(ok('{}'));
     await new KexiangClient('sk-abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' });

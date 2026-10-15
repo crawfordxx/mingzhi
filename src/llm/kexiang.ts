@@ -7,6 +7,8 @@ export interface ChatOptions {
   user: string;
   reasoningEffort?: 'low' | 'medium' | 'high';
   timeoutMs?: number;
+  /** 随用户消息一起发送的图片（data URI），模型需支持读图 */
+  images?: string[];
 }
 
 export interface LlmClient {
@@ -23,6 +25,14 @@ export function parseJsonContent(content: string): unknown {
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+type UserContent = string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } })[];
+
+/** 有图片时用多模态内容数组（文字在前、图片在后），否则保持纯文本 */
+function userContent(opts: ChatOptions): UserContent {
+  if (!opts.images?.length) return opts.user;
+  return [{ type: 'text', text: opts.user }, ...opts.images.map((url) => ({ type: 'image_url' as const, image_url: { url } }))];
+}
 
 /** 可重试的失败（网络错误、超时、429/5xx、响应体不是 JSON）；其他错误直接抛出 */
 class RetryableError extends Error {}
@@ -46,7 +56,7 @@ export class KexiangClient implements LlmClient {
       temperature: 0,
       response_format: { type: 'json_object' },
       ...(opts.reasoningEffort ? { reasoning_effort: opts.reasoningEffort } : {}),
-      messages: [{ role: 'system', content: opts.system }, { role: 'user', content: opts.user }],
+      messages: [{ role: 'system', content: opts.system }, { role: 'user', content: userContent(opts) }],
     });
     let lastError = new Error('可想 AI 请求失败');
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {

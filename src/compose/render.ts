@@ -6,6 +6,7 @@ import { bundle } from '@remotion/bundler';
 import { renderMedia, renderStill, selectComposition } from '@remotion/renderer';
 import type { CardSpec, TalkProps } from '../storyboard/schema.js';
 import type { CaptionStyleId } from '../captions/styles.js';
+import type { CoverProps } from '../cover/styles.js';
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'render', 'index.ts');
 const DEFAULT_CONCURRENCY = 8;
@@ -65,5 +66,15 @@ export async function renderCaptionStill(opts: { workDir: string; captionStyle: 
     const inputProps = { text: opts.text, captionStyle: opts.captionStyle, captionFontFile: opts.captionFontFile, ...(opts.bg ? { bg: opts.bg } : {}) };
     const composition = await selectComposition({ serveUrl, id: 'CaptionStill', inputProps });
     await renderStill({ composition, serveUrl, inputProps, output: opts.output, frame: 0 });
+  });
+}
+
+/** 封面静帧（Cover34 1080×1440、Cover43 1440×1080）：一次打包，逐张出 PNG */
+export async function renderCoverStills(workDir: string, stills: { id: 'Cover34' | 'Cover43'; props: CoverProps; output: string }[]): Promise<void> {
+  await withBundle(workDir, async (serveUrl) => {
+    for (const still of stills) {
+      const composition = await selectComposition({ serveUrl, id: still.id, inputProps: still.props });
+      await renderStill({ composition, serveUrl, inputProps: still.props, output: still.output, frame: 0, imageFormat: 'png' });
+    }
   });
 }

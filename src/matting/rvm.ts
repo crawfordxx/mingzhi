@@ -5,6 +5,7 @@ import ort from 'onnxruntime-node';
 import type { AppConfig } from '../config.js';
 import { loadBackgroundRgb } from '../background/prepare.js';
 import { probe, type MediaInfo } from '../media/probe.js';
+import { runBuffer } from '../media/exec.js';
 import { alphaBox, chooseDownsample, colorMatchGains, compositeFrame, foregroundMean, meanRgb, medianBox, type Rgb, type SubjectBox } from './composite.js';
 
 export const RVM_FILE = 'rvm_mobilenetv3_fp32.onnx';
@@ -211,4 +212,87 @@ async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo):
   }
   opts.onProgress?.(frames, total);
   return { frames, subject: medianBox(boxes), gains, fps: OUT_FPS };
+}
+
+/** 单帧抠像裁切时，人物外接框四周留的边距（相对宽高） */
+const CUTOUT_MARGIN = 0.03;
+/** 外接框只看 alpha 明显不透明的像素，避免发丝外的半透明噪点把框撑大 */
+const CUTOUT_THRESHOLD = 0.1;
+/** 某一列有这么多比例的行是人物，就认为人物在这一侧被原画面截断 */
+const EDGE_TOUCH = 0.05;
+/** 被截断的一侧在裁切宽度的这一比例内把 alpha 渐隐，封面上不出现竖直切边 */
+const EDGE_FADE = 0.18;
+
+export interface Cutout { rgba: Buffer; width: number; height: number; found: boolean }
+/** fadeCutSides：被原画面截断的左右侧是否渐隐（默认是；加描边的风格保留硬切边，否则描边会断在渐隐带里） */
+export interface CutoutOptions { fadeCutSides?: boolean }
+
+const touchesColumn = (pha: Float32Array, w: number, h: number, x: number): boolean => {
+  let rows = 0;
+  for (let y = 0; y < h; y += 1) if (pha[y * w + x] > 0.5) rows += 1;
+  return rows >= h * EDGE_TOUCH;
+};
+
+/** 裁切框：alpha 外接框加边距并限制在画面内；没有人物时为整帧 */
+function cropRect(pha: Float32Array, w: number, h: number, margin: number): { left: number; top: number; cw: number; ch: number; found: boolean } {
+  const box = alphaBox(pha, w, h, CUTOUT_THRESHOLD);
+  if (!box) return { left: 0, top: 0, cw: w, ch: h, found: false };
+  const left = Math.max(0, Math.floor((box.left - margin) * w));
+  const top = Math.max(0, Math.floor((box.top - margin) * h));
+  const right = Math.min(w, Math.ceil((box.right + margin) * w));
+  const bottom = Math.min(h, Math.ceil((box.bottom + margin) * h));
+  return { left, top, cw: right - left, ch: bottom - top, found: true };
+}
+
+/** 每列的 alpha 系数：人物在左/右被原画面截断时，该侧按 smoothstep 渐隐 */
+function sideFade(pha: Float32Array, w: number, h: number, rect: { left: number; cw: number }): Float32Array {
+  const fadeLeft = rect.left === 0 && touchesColumn(pha, w, h, 0);
+  const fadeRight = rect.left + rect.cw === w && touchesColumn(pha, w, h, w - 1);
+  const band = Math.max(1, Math.round(EDGE_FADE * rect.cw));
+  const smooth = (t: number): number => (t >= 1 ? 1 : t * t * (3 - 2 * t));
+  return Float32Array.from({ length: rect.cw }, (_, x) => Math.min(fadeLeft ? smooth((x + 0.5) / band) : 1, fadeRight ? smooth((rect.cw - x - 0.5) / band) : 1));
+}
+
+/** fgr（CHW 平面）+ pha → 交错 RGBA，按 alpha 外接框（含边距，不超出画面）裁切，被截断的左右侧默认渐隐；没有人物时返回整帧 */
+export function cutoutRgba(fgr: Float32Array, pha: Float32Array, w: number, h: number, opts: CutoutOptions = {}): Cutout {
+  const rect = cropRect(pha, w, h, CUTOUT_MARGIN);
+  const fade = rect.found && opts.fadeCutSides !== false ? sideFade(pha, w, h, rect) : new Float32Array(rect.cw).fill(1);
+  const plane = w * h;
+  const rgba = Buffer.alloc(rect.cw * rect.ch * 4);
+  for (let y = 0; y < rect.ch; y += 1) {
+    for (let x = 0; x < rect.cw; x += 1) {
+      const src = (rect.top + y) * w + rect.left + x;
+      const dst = (y * rect.cw + x) * 4;
+      rgba[dst] = Math.round(fgr[src] * 255);
+      rgba[dst + 1] = Math.round(fgr[plane + src] * 255);
+      rgba[dst + 2] = Math.round(fgr[2 * plane + src] * 255);
+      rgba[dst + 3] = Math.round(pha[src] * fade[x] * 255);
+    }
+  }
+  return { rgba, width: rect.cw, height: rect.ch, found: rect.found };
+}
+
+/** 把 RGBA 原始像素经 ffmpeg 编码成 PNG（保留透明通道） */
+async function encodePng(cfg: AppConfig, rgba: Buffer, w: number, h: number, output: string): Promise<void> {
+  const p = spawn(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${w}x${h}`, '-i', '-', '-frames:v', '1', '-pix_fmt', 'rgba', output]);
+  const done = exited(p, 'PNG 编码');
+  p.stdin.on('error', () => {}); // 编码进程提前退出时以 exited 的报错为准
+  p.stdin.end(rgba);
+  await done;
+}
+
+/** 单帧抠像：抽取 sec 处一帧 → RVM 推理（循环状态为零）→ 按人物外接框裁切的 RGBA PNG */
+export async function cutoutFrame(input: string, sec: number, output: string, cfg: AppConfig, opts: CutoutOptions = {}): Promise<Omit<Cutout, 'rgba'>> {
+  const { width: w, height: h } = await probe(input, cfg);
+  const rgb = await runBuffer(cfg.ffmpeg, ['-v', 'error', '-nostdin', '-ss', String(Math.max(0, sec)), '-i', input, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+  if (rgb.length !== w * h * 3) throw new Error(`抽帧失败：${sec.toFixed(2)} 秒处没有取到完整画面`);
+  const rvm = await RvmSession.create(cfg.modelsDir, w, h);
+  try {
+    const { fgr, pha } = await rvm.infer(rgb);
+    const cut = cutoutRgba(fgr, pha, w, h, opts);
+    await encodePng(cfg, cut.rgba, cut.width, cut.height, output);
+    return { width: cut.width, height: cut.height, found: cut.found };
+  } finally {
+    await rvm.release();
+  }
 }

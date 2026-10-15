@@ -5,7 +5,10 @@ import { Talk } from './Talk.js';
 import { CardStill } from './layers/CardLayer.js';
 import { CaptionStill } from './layers/CaptionLayer.js';
 import type { CaptionStyleId } from '../src/captions/styles.js';
+import { Cover } from './Cover.js';
+import type { CoverProps } from '../src/cover/styles.js';
 
+const EMPTY_COVER: CoverProps = { bg: '', person: '', style: 'bauhaus' };
 const EMPTY: TalkProps = { person: '', personWidth: 1080, personHeight: 1920, subject: null, captions: [], shots: [], durationSec: 1 };
 
 export const Root: React.FC = () => (
@@ -17,5 +20,7 @@ export const Root: React.FC = () => (
       calculateMetadata={({ props }: { props: { card: CardSpec; dur?: number } }) => ({ durationInFrames: Math.max(1, Math.round((props.dur ?? 2) * CANVAS.fps)) })} />
     <Composition id="CaptionStill" component={CaptionStill} width={CANVAS.width} height={600} fps={CANVAS.fps} durationInFrames={CANVAS.fps}
       defaultProps={{ text: '这是一行示例字幕', captionStyle: 'blade' as CaptionStyleId, captionFontFile: '' } as { text: string; captionStyle: CaptionStyleId; captionFontFile: string; bg?: string }} />
+    <Composition id="Cover34" component={Cover} width={1080} height={1440} fps={CANVAS.fps} durationInFrames={1} defaultProps={EMPTY_COVER} />
+    <Composition id="Cover43" component={Cover} width={1440} height={1080} fps={CANVAS.fps} durationInFrames={1} defaultProps={EMPTY_COVER} />
   </>
 );
