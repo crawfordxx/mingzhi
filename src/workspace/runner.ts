@@ -98,7 +98,9 @@ function fail(env: VersionEnv, err: unknown): unknown {
 }
 
 /** 新建版本 → 产出 → 成功置 done / 失败置 failed；父版本目录只读不写 */
-async function runVersion(ctx: RunnerCtx, spaceId: string, meta: { parent?: number; summary: string }, body: (env: VersionEnv, input: string) => Promise<VersionOutcome>): Promise<VersionMeta> {
+async function runVersion(
+  ctx: RunnerCtx, spaceId: string, meta: { parent?: number; summary: string }, body: (env: VersionEnv, input: string) => Promise<VersionOutcome>,
+): Promise<VersionMeta> {
   const space = ctx.store.get(spaceId);
   const version = ctx.store.addVersion(spaceId, { ...meta, changedShots: [], costYuan: 0, status: 'running' });
   let env: VersionEnv;

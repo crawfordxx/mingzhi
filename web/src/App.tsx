@@ -63,7 +63,8 @@ const Boot = ({ error }: { error?: string }) => (
 const Toast = ({ text }: { text?: string }) => (
   <AnimatePresence>
     {text && (
-      <motion.div className="toast" role="status" initial={{ opacity: 0, y: 12, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }} exit={{ opacity: 0, y: 8, x: '-50%' }} transition={SPRING}>{text}</motion.div>
+      <motion.div className="toast" role="status" initial={{ opacity: 0, y: 12, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }}
+        exit={{ opacity: 0, y: 8, x: '-50%' }} transition={SPRING}>{text}</motion.div>
     )}
   </AnimatePresence>
 );
@@ -88,6 +89,8 @@ export function App() {
     if (runs.view !== n && n === liveN) runs.setView(n);
     clock.seek(sec);
   }, [runs, clock, liveN]);
+  const onExport = () => runs.view && void runs.exportVersion(runs.view);
+  const composer = <Composer ready={ready} convo={convo} clock={clock} shots={shots} locked={replay.shown !== undefined} onExport={onExport} />;
   return (
     <MotionConfig reducedMotion="user">
       <div className="app">
@@ -96,10 +99,10 @@ export function App() {
           <SpacesRail spaces={wb.spaces} currentId={space?.id} onSelect={wb.selectSpace} onNew={wb.newSpace} />
           {space && options ? (
             <ErrorBoundary key={space.id}>
-              <ChatFlow wb={wb} space={space} options={options} runs={runs} convo={convo} replay={replay} onSeek={seekTo} runningCost={runningCost} liveN={liveN}
-                composer={<Composer ready={ready} convo={convo} clock={clock} shots={shots} locked={replay.shown !== undefined} onExport={() => runs.view && void runs.exportVersion(runs.view)} />} />
-              <PreviewStage space={space} options={options} estimate={wb.estimate} totalSec={wb.estimate?.durationSec ?? 0} runs={runs} clock={clock} replay={replay}
-                onRef={convo.addRef} notify={wb.notify} liveN={liveN} />
+              <ChatFlow wb={wb} space={space} options={options} runs={runs} convo={convo} replay={replay} onSeek={seekTo}
+                runningCost={runningCost} liveN={liveN} composer={composer} />
+              <PreviewStage space={space} options={options} estimate={wb.estimate} totalSec={wb.estimate?.durationSec ?? 0} runs={runs}
+                clock={clock} replay={replay} onRef={convo.addRef} notify={wb.notify} liveN={liveN} />
             </ErrorBoundary>
           ) : <Boot error={wb.loadError} />}
         </div>

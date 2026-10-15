@@ -14,7 +14,8 @@ export function BudgetNote({ spent, budget, onSave }: Props) {
   return (
     <AnimatePresence initial={false}>
       {near && (
-        <motion.div className="lim-note" role="status" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} transition={SOFT}>
+        <motion.div className="lim-note" role="status"
+          initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} transition={SOFT}>
           <div className="lim-row">
             <span className="lim-t">
               本项目已花 <b>{yuan(spent)}</b> / 上限 ¥{budget}

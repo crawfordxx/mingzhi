@@ -75,19 +75,27 @@ export function LiveCard({ events, title, backdrop, live, replay, onSeek, onCanc
         <div className="titlebar"><Lights /><span className="tt">剪辑直播 — {title}</span>
           <span className="r">
             {live && onCancel && <Tap className="btn btn-g sm" onClick={onCancel}>取消</Tap>}
-            {!live && <Tap className="btn btn-g sm" onClick={replay.start} disabled={replaying || !events.length}>{Ico.replay}{replaying ? `重播中 ${Math.round(replay.progress * 100)}%` : '重播剪辑过程'}</Tap>}
+            {!live && (
+              <Tap className="btn btn-g sm" onClick={replay.start} disabled={replaying || !events.length}>
+                {Ico.replay}{replaying ? `重播中 ${Math.round(replay.progress * 100)}%` : '重播剪辑过程'}
+              </Tap>
+            )}
           </span>
         </div>
         <div className="live-top">
           <div className="big">
             <span>{src !== undefined ? fmtDuration(src) : '—:—'}</span><span className="arr">→</span>
-            {out !== undefined ? <Num className={`it out${view.outputSec === undefined ? ' pending' : ''}`} value={out} format={fmtDuration} /> : <It className="out pending">—:—</It>}
+            {out !== undefined
+              ? <Num className={`it out${view.outputSec === undefined ? ' pending' : ''}`} value={out} format={fmtDuration} />
+              : <It className="out pending">—:—</It>}
           </div>
           <Summary view={view} />
           <Strip shots={view.shots} backdrop={backdrop} animate={animate} onSeek={finished ? onSeek : undefined} />
           <Scores view={view} />
           <LiveTranscript view={view} animate={animate} />
-          <AnimatePresence>{view.status === 'failed' && <motion.p className="live-err" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>没剪完：{view.error}</motion.p>}</AnimatePresence>
+          <AnimatePresence>
+            {view.status === 'failed' && <motion.p className="live-err" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>没剪完：{view.error}</motion.p>}
+          </AnimatePresence>
         </div>
       </div>
     </div>

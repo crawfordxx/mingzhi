@@ -20,7 +20,8 @@ export async function renderCaptionPreview(cfg: AppConfig, id: CaptionStyleId, d
   if (fallback) throw new HttpError(503, `字幕字体「${CAPTION_STYLES[id].name}」还没有下载，请先运行 pnpm fetch-assets`);
   const bg = join(workDir, PREVIEW_BG);
   if (!existsSync(bg)) {
-    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-i', presetPath(PREVIEW_BG_PRESET), '-vf', 'scale=1080:600:force_original_aspect_ratio=increase,crop=1080:600', '-frames:v', '1', bg]);
+    const vf = 'scale=1080:600:force_original_aspect_ratio=increase,crop=1080:600';
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-i', presetPath(PREVIEW_BG_PRESET), '-vf', vf, '-frames:v', '1', bg]);
   }
   mkdirSync(dirname(dest), { recursive: true });
   const tmp = `${dest}.${process.pid}.tmp.png`;

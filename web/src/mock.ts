@@ -30,7 +30,9 @@ const OPTIONS: Options = {
   defaults: { captionStyle: 'blade', coverStyle: 'bauhaus', budgetYuan: 10, broll: true, maxVideos: 1 },
 };
 
-const DEFAULTS: SpaceSettings = { captionStyle: 'blade', coverStyle: 'bauhaus', budgetYuan: 10, broll: true, maxVideos: 1, background: { kind: 'preset', id: 'study' } };
+const DEFAULTS: SpaceSettings = {
+  captionStyle: 'blade', coverStyle: 'bauhaus', budgetYuan: 10, broll: true, maxVideos: 1, background: { kind: 'preset', id: 'study' },
+};
 
 const day = (offset: number): string => new Date(Date.UTC(2026, 9, 15 - offset, 13, 4)).toISOString();
 
@@ -38,9 +40,19 @@ function seedSpaces(inputs: number): Space[] {
   const done = (n: number, costYuan: number, summary: string, qaScore: number) =>
     ({ n, createdAt: day(1), summary, changedShots: n > 1 ? [2, 5] : [], costYuan, qaScore, status: 'done' as const, ...(n > 1 ? { parent: n - 1 } : {}) });
   return [
-    { id: 'ep3', title: '第 3 期', createdAt: day(0), inputs: Array.from({ length: inputs }, (_, i) => `第3期_口播_${i + 1}.mov`), versions: [], settings: DEFAULTS, job: null, totalCostYuan: 0 },
-    { id: 'ep2', title: '第 2 期 · 高性价比人生指南', createdAt: day(1), inputs: ['第2期_口播.mov'], versions: [done(1, 3.84, '首版', 8.8), done(2, 0.16, '只重渲了 2 段', 9.0)], settings: { ...DEFAULTS, background: { kind: 'preset', id: 'night-window' } }, job: null, totalCostYuan: 4 },
-    { id: 'ep1', title: '第 1 期', createdAt: day(9), inputs: ['第1期_口播.mov'], versions: [done(1, 2.95, '首版', 8.6)], settings: DEFAULTS, job: null, totalCostYuan: 2.95 },
+    {
+      id: 'ep3', title: '第 3 期', createdAt: day(0), inputs: Array.from({ length: inputs }, (_, i) => `第3期_口播_${i + 1}.mov`),
+      versions: [], settings: DEFAULTS, job: null, totalCostYuan: 0,
+    },
+    {
+      id: 'ep2', title: '第 2 期 · 高性价比人生指南', createdAt: day(1), inputs: ['第2期_口播.mov'],
+      versions: [done(1, 3.84, '首版', 8.8), done(2, 0.16, '只重渲了 2 段', 9.0)],
+      settings: { ...DEFAULTS, background: { kind: 'preset', id: 'night-window' } }, job: null, totalCostYuan: 4,
+    },
+    {
+      id: 'ep1', title: '第 1 期', createdAt: day(9), inputs: ['第1期_口播.mov'], versions: [done(1, 2.95, '首版', 8.6)],
+      settings: DEFAULTS, job: null, totalCostYuan: 2.95,
+    },
   ];
 }
 
@@ -60,7 +72,9 @@ function mockEstimate(sec: number, s: SpaceSettings): Estimate {
     ...(s.broll ? [item('B-roll 生图', Math.ceil(sec / 15) * 0.2, Math.ceil(sec / 10) * 0.2), item('B-roll 视频（Seedance）', 0, s.maxVideos * 2.4)] : []),
     item('封面', 1.25, 2.5),
   ];
-  return { low: r2(items.reduce((a, i) => a + i.low, 0)), high: r2(items.reduce((a, i) => a + i.yuan, 0)), items, durationSec: Math.round(sec), budgetYuan: s.budgetYuan };
+  const low = r2(items.reduce((a, i) => a + i.low, 0));
+  const high = r2(items.reduce((a, i) => a + i.yuan, 0));
+  return { low, high, items, durationSec: Math.round(sec), budgetYuan: s.budgetYuan };
 }
 
 /** 假服务的内存状态（相当于后端的数据目录） */
@@ -88,7 +102,10 @@ function applyPatch(settings: SpaceSettings, patch: SettingsPatch = {}): SpaceSe
 function keyMethods(st: MockState): Pick<Api, 'status' | 'options' | 'getKey' | 'saveKey' | 'deleteKey'> {
   const keyInfo = (): KeyInfo => (st.keyConfigured ? { configured: true, source: 'keychain', masked: 'sk-…7f3a' } : { configured: false });
   return {
-    async status(): Promise<Status> { await wait(80); return { version: '0.1.0', keyConfigured: st.keyConfigured, modelsReady: true, assetsReady: true, ffmpegReady: true }; },
+    async status(): Promise<Status> {
+      await wait(80);
+      return { version: '0.1.0', keyConfigured: st.keyConfigured, modelsReady: true, assetsReady: true, ffmpegReady: true };
+    },
     async options() { await wait(60); return clone(OPTIONS); },
     async getKey() { await wait(60); return keyInfo(); },
     async saveKey(key) {
@@ -119,7 +136,10 @@ function crudMethods(st: MockState, { find, replace }: Finder): Pick<Api, 'listS
     async listSpaces() { await wait(120); return clone(st.spaces); },
     async createSpace(title) {
       await wait(120);
-      const space: Space = { id: `new${Date.now().toString(36)}`, title: title ?? '未命名项目', createdAt: new Date().toISOString(), inputs: [], versions: [], settings: DEFAULTS, job: null, totalCostYuan: 0 };
+      const space: Space = {
+        id: `new${Date.now().toString(36)}`, title: title ?? '未命名项目', createdAt: new Date().toISOString(),
+        inputs: [], versions: [], settings: DEFAULTS, job: null, totalCostYuan: 0,
+      };
       st.spaces = [space, ...st.spaces];
       return clone(space);
     },
@@ -165,7 +185,8 @@ function mediaMethods(st: MockState, { find, replace }: Finder): Pick<Api, 'uplo
       if (!st.keyConfigured) throw new ApiError('还没有配置可想 AI key', 400);
       if (!s.inputs.length) throw new ApiError('先上传至少一段口播', 400);
       if (s.versions.length) throw new ApiError('已经出过片了', 409);
-      replace({ ...s, job: { state: 'queued', version: 1 }, versions: [{ n: 1, createdAt: new Date().toISOString(), summary: '首版', changedShots: [], costYuan: 0, status: 'running' }] });
+      const v1 = { n: 1, createdAt: new Date().toISOString(), summary: '首版', changedShots: [], costYuan: 0, status: 'running' as const };
+      replace({ ...s, job: { state: 'queued', version: 1 }, versions: [v1] });
       return { version: 1, queued: 0 };
     },
   };
@@ -174,7 +195,8 @@ function mediaMethods(st: MockState, { find, replace }: Finder): Pick<Api, 'uplo
 export function createMockApi(params: URLSearchParams): Api {
   const preset = Number(params.get('inputs') ?? 0);
   const spaces = seedSpaces(Number.isFinite(preset) ? preset : 0);
-  const st: MockState = { keyConfigured: params.get('key') === '1', spaces, durations: new Map(spaces[0].inputs.map((name, i) => [name, [222, 96, 140][i % 3]])) };
+  const durations = new Map(spaces[0].inputs.map((name, i) => [name, [222, 96, 140][i % 3]]));
+  const st: MockState = { keyConfigured: params.get('key') === '1', spaces, durations };
   const f = finder(st);
   const base = { ...keyMethods(st), ...crudMethods(st, f), ...mediaMethods(st, f) } as Api;
   return withRuns(base, f, spaces);

@@ -14,16 +14,32 @@ export const Ico = {
   down: <svg viewBox="0 0 16 16" {...stroke}><path d="M8 2.5v8M4 7l4 4 4-4M3 13.5h10" /></svg>,
   ext: <svg viewBox="0 0 16 16" {...stroke}><path d="M5 11 11 5M6 5h5v5" /></svg>,
   play: <svg viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.5v9l7.5-4.5z" /></svg>,
-  pause: <svg viewBox="0 0 12 12" fill="currentColor"><rect x="2.5" y="1.5" width="2.5" height="9" rx=".6" /><rect x="7" y="1.5" width="2.5" height="9" rx=".6" /></svg>,
+  pause: (
+    <svg viewBox="0 0 12 12" fill="currentColor">
+      <rect x="2.5" y="1.5" width="2.5" height="9" rx=".6" /><rect x="7" y="1.5" width="2.5" height="9" rx=".6" />
+    </svg>
+  ),
   replay: <svg viewBox="0 0 16 16" {...stroke}><path d="M2.5 8a5.5 5.5 0 1 0 1.7-4" /><path d="M2.5 2.5v3.5H6" /></svg>,
   undo: <svg viewBox="0 0 16 16" {...stroke}><path d="M5.5 4 2.5 7l3 3" /><path d="M2.5 7h7a4 4 0 0 1 0 8H8" /></svg>,
   plus: <svg viewBox="0 0 16 16" {...stroke}><path d="M8 3v10M3 8h10" /></svg>,
   close: <svg viewBox="0 0 16 16" {...stroke}><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" /></svg>,
   check: <svg viewBox="0 0 16 16" {...stroke} strokeWidth={2}><path d="m3.5 8.5 3 3 6-7" /></svg>,
-  upload: <svg viewBox="0 0 24 24" {...stroke} strokeWidth={1.5}><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" /><path d="M4 14.5v3A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5v-3" /></svg>,
-  image: <svg viewBox="0 0 16 16" {...stroke}><rect x="2.5" y="3" width="11" height="10" rx="2" /><path d="m3 11.5 3-3 2.5 2.5L10.5 9l2.5 2.5" /><circle cx="10.5" cy="6" r="1" /></svg>,
+  upload: (
+    <svg viewBox="0 0 24 24" {...stroke} strokeWidth={1.5}>
+      <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" /><path d="M4 14.5v3A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5v-3" />
+    </svg>
+  ),
+  image: (
+    <svg viewBox="0 0 16 16" {...stroke}>
+      <rect x="2.5" y="3" width="11" height="10" rx="2" /><path d="m3 11.5 3-3 2.5 2.5L10.5 9l2.5 2.5" /><circle cx="10.5" cy="6" r="1" />
+    </svg>
+  ),
   spark: <svg viewBox="0 0 16 16" {...stroke}><path d="M8 2.5 9.3 6.7 13.5 8 9.3 9.3 8 13.5 6.7 9.3 2.5 8l4.2-1.3z" /></svg>,
-  film: <svg viewBox="0 0 16 16" {...stroke}><rect x="3" y="2" width="10" height="12" rx="2" /><path d="M6 6.5v3l3-1.5z" fill="currentColor" stroke="none" /></svg>,
+  film: (
+    <svg viewBox="0 0 16 16" {...stroke}>
+      <rect x="3" y="2" width="10" height="12" rx="2" /><path d="M6 6.5v3l3-1.5z" fill="currentColor" stroke="none" />
+    </svg>
+  ),
   key: <svg viewBox="0 0 16 16" {...stroke}><circle cx="5.5" cy="10.5" r="3" /><path d="m7.6 8.4 5.4-5.4M11 5l1.6 1.6M9.5 6.5l1.2 1.2" /></svg>,
   chevL: <svg viewBox="0 0 16 16" {...stroke} strokeWidth={1.8}><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>,
   chevR: <svg viewBox="0 0 16 16" {...stroke} strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" /></svg>,

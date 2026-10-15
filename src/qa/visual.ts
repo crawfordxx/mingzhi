@@ -118,7 +118,9 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
       const version = await evaluate(opts, serveUrl, shot, card);
       versions.push(version);
       scores.push(version.score);
-      opts.onProgress?.(`第 ${index + 1} 镜卡片自检：版式 ${version.score.layout} 层级 ${version.score.hierarchy} 动效 ${version.score.motion} 品牌 ${version.score.brand}`, { shotIndex: index, attempt: scores.length, score: version.score, passed: isPass(version.score) });
+      const s = version.score;
+      const line = `第 ${index + 1} 镜卡片自检：版式 ${s.layout} 层级 ${s.hierarchy} 动效 ${s.motion} 品牌 ${s.brand}`;
+      opts.onProgress?.(line, { shotIndex: index, attempt: scores.length, score: s, passed: isPass(s) });
       if (isPass(version.score) || revised >= MAX_REVISIONS) break;
       if (!canAffordStep(opts)) { skipped = `预算不足，停止重写${reserveNote(opts)}`; break; }
       const base = versions.reduce(better);

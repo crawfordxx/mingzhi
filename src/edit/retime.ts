@@ -70,7 +70,10 @@ export function captionsForRestored(tokens: Token[], restored: TimeRange[], newP
 
 /** 对比平移前后的分镜，说明哪些卡片因为所在镜头整个被删而消失；没有则返回空列表，供回复里告诉用户 */
 export function droppedCardNotes(before: Storyboard, after: Storyboard): string[] {
-  const count = (sb: Storyboard) => sb.shots.reduce<Record<string, number>>((acc, s) => (s.card ? { ...acc, [s.card.template]: (acc[s.card.template] ?? 0) + 1 } : acc), {});
+  const count = (sb: Storyboard) => sb.shots.reduce<Record<string, number>>(
+    (acc, s) => (s.card ? { ...acc, [s.card.template]: (acc[s.card.template] ?? 0) + 1 } : acc),
+    {},
+  );
   const b = count(before);
   const a = count(after);
   const lost = Object.entries(b).flatMap(([t, n]) => (n > (a[t] ?? 0) ? [{ t, n: n - (a[t] ?? 0) }] : []));

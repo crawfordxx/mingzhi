@@ -27,5 +27,6 @@ export function requireBudget(space: Space, needYuan: number, what: string): voi
   const left = remainingYuan(space);
   if (left + 1e-9 >= needYuan) return;
   const spent = projectSpentYuan(space).toFixed(2);
-  throw new HttpError(402, `已接近上限 ¥${roundYuan(space.settings.budgetYuan)}，请在设置里调高上限（本项目已花 ¥${spent}，${what}约需 ¥${needYuan.toFixed(2)}）`);
+  const cap = roundYuan(space.settings.budgetYuan);
+  throw new HttpError(402, `已接近上限 ¥${cap}，请在设置里调高上限（本项目已花 ¥${spent}，${what}约需 ¥${needYuan.toFixed(2)}）`);
 }

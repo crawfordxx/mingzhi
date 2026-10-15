@@ -35,7 +35,8 @@ export async function exportVersion(exportDir: string, title: string, n: number,
   // 同名文件已存在（比如两个项目都叫「未命名项目」）就加 (2)、(3)… 后缀，绝不覆盖
   const stem = [base, ...Array.from({ length: MAX_COPIES }, (_, i) => `${base}(${i + 2})`)].find((s) => names(s).every((f) => !existsSync(join(exportDir, f))));
   if (!stem) throw new Error('导出目录里同名文件太多，请先清理');
-  const pairs: [string, string][] = [[final, join(exportDir, `${stem}.mp4`)], ...covers.map((c): [string, string] => [join(versionDir, c), join(exportDir, `${stem}-${COVER_SUFFIX[c]}`)])];
+  const coverPairs = covers.map((c): [string, string] => [join(versionDir, c), join(exportDir, `${stem}-${COVER_SUFFIX[c]}`)]);
+  const pairs: [string, string][] = [[final, join(exportDir, `${stem}.mp4`)], ...coverPairs];
   for (const [from, to] of pairs) await copyAtomic(from, to);
   return pairs.map(([, to]) => to);
 }

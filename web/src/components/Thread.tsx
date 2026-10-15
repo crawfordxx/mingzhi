@@ -53,8 +53,13 @@ function AiReply({ turn, busy, onPick }: { turn: AiTurn; busy: boolean; onPick: 
       {turn.pending ? <p className="say typing" aria-label="明知正在想"><i /><i /><i /></p>
         : turn.reply ? <p className="say">{turn.reply}</p> : null}
       {turn.error && <p className="say err">{turn.error}</p>}
-      {!!turn.options?.length && <InlineOptions options={turn.options} picked={turn.picked} applying={turn.applying} applied={turn.applied} disabled={busy} unsure={turn.unsure} onPick={onPick} />}
-      {!turn.options?.length && (turn.applying || turn.applied !== undefined) && <p className="picked">{turn.applying ? '正在排队出新版本…' : <>已执行 · 出 <span className="it l">v{turn.applied}</span></>}</p>}
+      {!!turn.options?.length && (
+        <InlineOptions options={turn.options} picked={turn.picked} applying={turn.applying} applied={turn.applied} disabled={busy}
+          unsure={turn.unsure} onPick={onPick} />
+      )}
+      {!turn.options?.length && (turn.applying || turn.applied !== undefined) && (
+        <p className="picked">{turn.applying ? '正在排队出新版本…' : <>已执行 · 出 <span className="it l">v{turn.applied}</span></>}</p>
+      )}
       {!!turn.dropped?.length && <p className="picked warn">有 {turn.dropped.length} 处没法执行，已忽略：{turn.dropped.join('；')}</p>}
     </>
   );

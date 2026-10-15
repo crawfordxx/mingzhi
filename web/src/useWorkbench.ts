@@ -137,7 +137,10 @@ export function useWorkbench() {
 
   const keyVerified = useCallback(() => setStatus((s) => (s ? { ...s, keyConfigured: true } : s)), [setStatus]);
 
-  return { status, options, spaces, space, loadError, toast, estimate, estimating, ...up, ...actions, selectSpace: setCurrentId, newSpace, keyVerified, notify, putSpace };
+  return {
+    status, options, spaces, space, loadError, toast, estimate, estimating, ...up, ...actions,
+    selectSpace: setCurrentId, newSpace, keyVerified, notify, putSpace,
+  };
 }
 
 export type Workbench = ReturnType<typeof useWorkbench>;

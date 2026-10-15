@@ -92,7 +92,9 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
   const timed = recutting ? retime(env, a, p.state, c.next, plan) : { captions: c.next.captions, storyboard: c.next.storyboard };
   if (!recutting) env.record({ artifacts: { ass: writeAss(env, a, timed.captions) } });
   // 素材名额先让给没改动的卡片（它们的视频已经付过费），改动过的卡片排在后面
-  const storyboard = c.stages.has('broll') ? await brollStage(args, timed.storyboard, plan.outputDurationSec, env.base, env.complete, changedShots(p.state, timed.storyboard)) : timed.storyboard;
+  const storyboard = c.stages.has('broll')
+    ? await brollStage(args, timed.storyboard, plan.outputDurationSec, env.base, env.complete, changedShots(p.state, timed.storyboard))
+    : timed.storyboard;
   linkBroll(storyboard, env.base, env.dir);
   return { ...person, plan, captions: timed.captions, storyboard };
 }
@@ -100,7 +102,10 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
 /** 键排序后序列化：同一张卡片不因字段顺序不同被当成改过 */
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
-  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${stable((value as Record<string, unknown>)[k])}`).join(',')}}`;
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${stable(obj[k])}`).join(',')}}`;
+  }
   return JSON.stringify(value) ?? 'null';
 }
 

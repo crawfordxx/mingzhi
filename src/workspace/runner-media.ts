@@ -74,7 +74,9 @@ export async function compositePerson(env: VersionEnv, args: PipelineArgs, keep:
   const person = join(env.dir, 'person.mp4');
   const [fgr, matte] = LAYER_FILES.map((f) => join(env.base, f));
   const started = Date.now();
-  await mediaOf(args.media).composite({ cut: join(env.dir, 'cut.mp4'), fgr, matte, keep, backgroundPath: bgPath, output: person, fgMean: meta.fgMean, cfg: args.cfg, signal: args.signal });
+  await mediaOf(args.media).composite({
+    cut: join(env.dir, 'cut.mp4'), fgr, matte, keep, backgroundPath: bgPath, output: person, fgMean: meta.fgMean, cfg: args.cfg, signal: args.signal,
+  });
   const secs = ((Date.now() - started) / 1000).toFixed(1);
   env.complete('matte', `换背景合成完成（复用整条抠像，未重新推理）· 用时 ${secs} 秒`, { subject: meta.subject, artifacts: { person } });
   return { person, subject: meta.subject };

@@ -11,7 +11,14 @@ type Ev = Omit<WorkEvent, 'seq' | 't' | 'spaceId' | 'version'> & { at: number };
 
 const TX = ['吃抗氧化补剂的人，呃，死亡率反而更高一些', '然后呢，嗯，我平时经常在 GitHub 上面去逛 AI 项目', '这个项目里面一共讲了六百六百五十条', '第一点呢，它就，它就建议我少喝饮料'];
 const CUTS: [number, number, string][] = [[9, 10, 'filler'], [20, 25, 'filler'], [56, 57, 'repeat'], [75, 77, 'repeat']];
-const SHOTS = Array.from({ length: 18 }, (_, i) => ({ index: i, start: i * 6.5, end: (i + 1) * 6.5, layout: (i % 3 === 2 ? 'full' : 'split') as 'split' | 'full', ...(i % 3 === 2 ? {} : { template: ['hook', 'title', 'bigNumber', 'compareBars', 'evidenceList', 'strikeList'][i % 6], title: `第 ${i + 1} 镜` }) }));
+const TEMPLATES = ['hook', 'title', 'bigNumber', 'compareBars', 'evidenceList', 'strikeList'];
+const SHOTS = Array.from({ length: 18 }, (_, i) => {
+  const full = i % 3 === 2;
+  return {
+    index: i, start: i * 6.5, end: (i + 1) * 6.5, layout: (full ? 'full' : 'split') as 'split' | 'full',
+    ...(full ? {} : { template: TEMPLATES[i % 6], title: `第 ${i + 1} 镜` }),
+  };
+});
 
 function transcript() {
   let from = 0;
@@ -23,16 +30,23 @@ function transcript() {
   });
 }
 
-const cost = (at: number, total: number): Ev => ({ at, step: 'probe', message: `已花费 ¥${total.toFixed(2)}`, detail: { kind: 'cost', data: { total, budget: 10 } } });
-const pct = (at: number, step: string, p: number): Ev => ({ at, step, message: `${step} ${p}%`, detail: { kind: 'progress', data: { stage: step === 'matte' ? 'matte' : 'compose', pct: p } } });
+const cost = (at: number, total: number): Ev =>
+  ({ at, step: 'probe', message: `已花费 ¥${total.toFixed(2)}`, detail: { kind: 'cost', data: { total, budget: 10 } } });
+const pct = (at: number, step: string, p: number): Ev =>
+  ({ at, step, message: `${step} ${p}%`, detail: { kind: 'progress', data: { stage: step === 'matte' ? 'matte' : 'compose', pct: p } } });
 
 function firstScript(): Ev[] {
-  const qa = SHOTS.filter((s) => s.layout === 'split').map((s, k): Ev => ({ at: 7600 + k * 90, step: 'qa-cards', message: `第 ${s.index + 1} 镜卡片自检`, detail: { kind: 'qa', data: { phase: 'score', shotIndex: s.index, score: { layout: 9.1, hierarchy: 8.8, motion: 8.6, brand: 9.3 }, passed: true } } }));
+  const score = { layout: 9.1, hierarchy: 8.8, motion: 8.6, brand: 9.3 };
+  const qa = SHOTS.filter((s) => s.layout === 'split').map((s, k): Ev => ({
+    at: 7600 + k * 90, step: 'qa-cards', message: `第 ${s.index + 1} 镜卡片自检`,
+    detail: { kind: 'qa', data: { phase: 'score', shotIndex: s.index, score, passed: true } },
+  }));
   return [
     { at: 0, step: 'probe', message: '1080×1920 · 3:42' }, cost(10, 0),
     { at: 300, step: 'audio', message: '已抽取 16kHz 音频' },
     { at: 900, step: 'asr', message: '识别 1024 字 · 62 个语音段', detail: { kind: 'transcript', data: { lines: transcript() } } },
-    { at: 1700, step: 'cuts', message: '标记 49 处气口/重复/口误', detail: { kind: 'cut', data: { cuts: CUTS.map(([from, to, type]) => ({ from, to, type })) } } }, cost(1710, 0.56),
+    { at: 1700, step: 'cuts', message: '标记 49 处气口/重复/口误', detail: { kind: 'cut', data: { cuts: CUTS.map(([from, to, type]) => ({ from, to, type })) } } },
+    cost(1710, 0.56),
     { at: 1800, step: 'plan', message: '原片 3:42 → 成片 1:57' },
     { at: 2100, step: 'render', message: '剪切完成' }, { at: 2300, step: 'background', message: '背景：书房' },
     ...[20, 45, 70, 100].map((p, i) => pct(2600 + i * 600, 'matte', p)),
@@ -80,7 +94,15 @@ function play(hub: Hub, f: Find, id: string, meta: VersionMeta, script: Ev[]): v
   }, at));
 }
 
-const STATE: VersionState = { storyboard: { shots: SHOTS.map((s) => ({ start: s.start, end: s.end, layout: s.layout, ...(s.template ? { card: { template: s.template, props: { title: s.title } } } : {}) })) }, captions: [], plan: { outputDurationSec: 117, sourceDurationSec: 222 } };
+const STATE: VersionState = {
+  storyboard: {
+    shots: SHOTS.map((s) => ({
+      start: s.start, end: s.end, layout: s.layout, ...(s.template ? { card: { template: s.template, props: { title: s.title } } } : {}),
+    })),
+  },
+  captions: [],
+  plan: { outputDurationSec: 117, sourceDurationSec: 222 },
+};
 
 export function withRuns(base: Api, f: Find, spaces: Space[]): Api {
   const hub: Hub = { logs: new Map(), subs: new Map() };
@@ -106,7 +128,9 @@ export function withRuns(base: Api, f: Find, spaces: Space[]): Api {
     async messages(_id, message, version) {
       await new Promise((r) => setTimeout(r, 900));
       const card = (title: string) => [{ type: 'replaceCard', shotIndex: 4, card: { template: 'title', props: { title } } }];
-      return { reply: `明白${message.startsWith('@') ? '，就改你点的这张' : ''}，只重渲这 1 段，其余 17 段原样复用。标题想要哪种？`, ops: [], options: [{ label: '大字标题', ops: card('省下的都是赚到的') }, { label: '加一行副标题', ops: card('少花冤枉钱') }], version: version ?? 1 };
+      const reply = `明白${message.startsWith('@') ? '，就改你点的这张' : ''}，只重渲这 1 段，其余 17 段原样复用。标题想要哪种？`;
+      const options = [{ label: '大字标题', ops: card('省下的都是赚到的') }, { label: '加一行副标题', ops: card('少花冤枉钱') }];
+      return { reply, ops: [], options, version: version ?? 1 };
     },
     async apply(id, ops, _parent, summary) { return { ...enqueue(id, summary ?? '对话修改', ops), dropped: [] }; },
     async revert(id, n) { return enqueue(id, `回退到 v${n}`, []); },

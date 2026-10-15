@@ -43,7 +43,10 @@ function fakeCuts(user: string): unknown {
     if (FILLERS.has(tok.t)) add(a, 1, 'filler', '语气词');
     else if (text(a, 3) === '然后呢') add(a, 3, 'filler', '口头禅');
     else if (text(a, 2) === '不对') add(a, 2, 'slip', '改口');
-    else for (const n of [3, 2]) if (a + 2 * n <= toks.length && text(a, n) === text(a + n, n) && /^\p{Script=Han}+$/u.test(text(a, n))) { add(a, n, 'repeat', '重复'); break; }
+    else {
+      const n = [3, 2].find((k) => a + 2 * k <= toks.length && text(a, k) === text(a + k, k) && /^\p{Script=Han}+$/u.test(text(a, k)));
+      if (n) add(a, n, 'repeat', '重复');
+    }
   });
   return { cuts };
 }
@@ -129,7 +132,8 @@ const fakeQa = (): QaDeps => ({
       await wait(FAKE_DELAY_MS);
       const score: CardScore = { layout: k % 2 ? 8.8 : 9.1, hierarchy: 8.8, motion: [8.6, 8.7, 8.8][k % 3], brand: 9.3, notes: '假模式固定分数' };
       o.meter.addTask('fake-qa', FAKE_CALL_YUAN, '卡片自检（假模式）');
-      o.onProgress?.(`第 ${shotIndex + 1} 镜卡片自检：版式 ${score.layout} 层级 ${score.hierarchy} 动效 ${score.motion} 品牌 ${score.brand}`, { shotIndex, attempt: 1, score, passed: true });
+      const line = `第 ${shotIndex + 1} 镜卡片自检：版式 ${score.layout} 层级 ${score.hierarchy} 动效 ${score.motion} 品牌 ${score.brand}`;
+      o.onProgress?.(line, { shotIndex, attempt: 1, score, passed: true });
       report.push({ shotIndex, scores: [score], revised: 0, passed: true });
     }
     return { storyboard: o.storyboard, report };

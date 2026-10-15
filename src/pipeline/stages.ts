@@ -109,7 +109,9 @@ export function throttledMatteProgress(emit: (e: ProgressEvent) => void): (done:
 }
 
 /** 抠像换背景：cut → person（matte 给出时同时输出灰度遮罩，供以后只合成换背景） */
-export async function matteStage(args: PipelineArgs, cut: string, bgPath: string, out: { person: string; matte?: string }, complete: Complete): Promise<MatteResult> {
+export async function matteStage(
+  args: PipelineArgs, cut: string, bgPath: string, out: { person: string; matte?: string }, complete: Complete,
+): Promise<MatteResult> {
   const started = Date.now();
   const res = await mediaOf(args.media).matte({
     input: cut, output: out.person, backgroundPath: bgPath, cfg: args.cfg, signal: args.signal, ...(out.matte ? { matteOutput: out.matte } : {}),
@@ -125,7 +127,8 @@ export async function captionsStage(args: PipelineArgs, a: Analysis, ass: string
   const polished = await polishCaptions(args.llm, a.transcript.tokens, keptIndices(a.transcript.tokens.length, a.cuts));
   const captions = timeCaptions(polished.lines, a.transcript.tokens, a.plan.keep);
   writeFileSync(ass, toAss(captions, a.media));
-  complete('captions', `${captions.length} 行字幕 · ${polishSummary(polished)}`, { captionLines: polished.lines, captionsSource: polished.source, captions, artifacts: { ass } });
+  const patch = { captionLines: polished.lines, captionsSource: polished.source, captions, artifacts: { ass } };
+  complete('captions', `${captions.length} 行字幕 · ${polishSummary(polished)}`, patch);
   return captions;
 }
 
@@ -144,27 +147,37 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   const cards = res.storyboard.shots.filter((s) => s.card).length;
   const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
   const retry = res.retryError ? ` · 重试失败（已用首次结果）：${res.retryError}` : '';
-  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${retry}`, { storyboard: res.storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped });
+  const patch = { storyboard: res.storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped };
+  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${retry}`, patch);
   return res.storyboard;
 }
 
 /** 分镜 → 素材（素材文件写到 brollDir/broll，缓存按需求内容命中） */
-export async function storyboardStage(args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete): Promise<Storyboard> {
+export async function storyboardStage(
+  args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete,
+): Promise<Storyboard> {
   const planned = await planStoryboard(args.llm, captions, durationSec, complete);
   return brollStage(args, planned, durationSec, brollDir, complete);
 }
 
 /** 只跑素材步骤（修改版本的 regenerateVisual 等也走这里，预算与 maxVideos 由 args.broll / args.meter 约束；deferShots 的需求排到最后） */
-export function brollStage(args: PipelineArgs, storyboard: Storyboard, durationSec: number, brollDir: string, complete: Complete, deferShots?: number[]): Promise<Storyboard> {
+export function brollStage(
+  args: PipelineArgs, storyboard: Storyboard, durationSec: number, brollDir: string, complete: Complete, deferShots?: number[],
+): Promise<Storyboard> {
   return runBroll({ ...args, workDir: brollDir, reserveYuan: coverReserve(args), ...(deferShots ? { deferShots } : {}) }, storyboard, durationSec, complete);
 }
 
 /** 卡片自检（args.qa 为 false 时跳过）；only 给出时只检查这些镜头 */
-export async function qaCardsStage(args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], complete: Complete, only?: number[]): Promise<{ storyboard: Storyboard; cards: CardQaEntry[] }> {
+export async function qaCardsStage(
+  args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], complete: Complete, only?: number[],
+): Promise<{ storyboard: Storyboard; cards: CardQaEntry[] }> {
   if (args.qa === false) return { storyboard, cards: [] };
   const onProgress = (message: string, info?: { shotIndex: number; attempt: number; score: CardScore; passed: boolean }): void =>
     args.onProgress?.({ step: 'qa-cards', message, ...(info ? { detail: cardScoreDetail(info.shotIndex, info.score, info.passed, info.attempt) } : {}) });
-  const ctx = { llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), signal: args.signal, qaCards: args.qaDeps?.qaCards, onProgress, ...(only ? { only } : {}) };
+  const ctx = {
+    llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), signal: args.signal,
+    qaCards: args.qaDeps?.qaCards, onProgress, ...(only ? { only } : {}),
+  };
   const res = await runQaCards(ctx, storyboard, captions, complete);
   return { storyboard: res.storyboard, cards: res.report };
 }
@@ -183,7 +196,16 @@ export function throttledRenderProgress(emit: (e: ProgressEvent) => void): (rati
 }
 
 /** person：人像视频（必须在 args.workDir 内）；raw：渲染结果；output：响度统一后的成片；cacheDir：分段缓存 */
-export interface ComposeInput { person: string; subject: SubjectBox | null; captions: TimedCaption[]; storyboard: Storyboard; outputDurationSec: number; raw: string; output: string; cacheDir: string }
+export interface ComposeInput {
+  person: string;
+  subject: SubjectBox | null;
+  captions: TimedCaption[];
+  storyboard: Storyboard;
+  outputDurationSec: number;
+  raw: string;
+  output: string;
+  cacheDir: string;
+}
 
 /** 配乐音效与字幕样式落盘 → 分段渲染（命中缓存的镜头直接复用）到 raw → 响度统一得到成片；返回重渲与复用的镜头序号 */
 export async function composeStage(args: PipelineArgs, c: ComposeInput, complete: Complete): Promise<SegmentedResult> {
@@ -193,13 +215,18 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
   const baseInfo = await m.probe(c.person, cfg);
   // 成片时长不超过人像视频的实际时长（剪切编码后可能比方案略短），避免末尾取不到帧
   const durationSec = Math.min(c.outputDurationSec, baseInfo.durationSec);
-  const audio = await prepareAudio({ workDir, cfg, input: args.input, audio: args.audio, captionStyle: args.captionStyle }, c.storyboard, c.captions, durationSec);
+  const audioArgs = { workDir, cfg, input: args.input, audio: args.audio, captionStyle: args.captionStyle };
+  const audio = await prepareAudio(audioArgs, c.storyboard, c.captions, durationSec);
   audio.notes.forEach((note) => complete('compose', note));
   complete('compose', audio.summary, { audio: audio.info, captionStyle: audio.props.captionStyle });
   const progress = throttledRenderProgress((e) => args.onProgress?.(e));
   const res = await renderSegmented({
-    workDir, cacheDir: c.cacheDir, output: c.raw, ffmpeg: cfg.ffmpeg, signal: args.signal, backend: m.segments, onProgress: (done, total) => progress(total > 0 ? done / total : 1),
-    props: { person: relative(workDir, c.person), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: c.subject, captions: c.captions, shots: c.storyboard.shots, durationSec, ...audio.props },
+    workDir, cacheDir: c.cacheDir, output: c.raw, ffmpeg: cfg.ffmpeg, signal: args.signal, backend: m.segments,
+    onProgress: (done, total) => progress(total > 0 ? done / total : 1),
+    props: {
+      person: relative(workDir, c.person), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: c.subject,
+      captions: c.captions, shots: c.storyboard.shots, durationSec, ...audio.props,
+    },
   }).catch((err: unknown) => {
     rethrowIfCancelled(err);
     throw new Error(`成片渲染失败：${err instanceof Error ? err.message : String(err)}`);
@@ -217,7 +244,9 @@ export function finalQaStage(args: PipelineArgs, video: string, storyboard: Stor
 }
 
 /** 封面（args.cover 为 false 时跳过；失败只降级为进度消息） */
-export function coverStage(args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], personVideo: string, complete: Complete): Promise<void> {
+export function coverStage(
+  args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], personVideo: string, complete: Complete,
+): Promise<void> {
   const ctx = { workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter };
   return runCover(ctx, args.cover, storyboard, captions, personVideo, complete);
 }

@@ -9,7 +9,9 @@ interface Look { family: string; weight: number; color: string; stroke?: string;
 const LOOKS: Record<string, Look> = {
   blade: { family: '"PingFang SC", system-ui, sans-serif', weight: 900, color: '#FFFFFF', stroke: '#000000', ratio: 10 / 58 },
   wenkai: { family: '"Kaiti SC", "STKaiti", "KaiTi", serif', weight: 700, color: '#FFF6E8', stroke: '#2A1810', ratio: 10 / 60 },
-  smiley: { family: '"PingFang SC", system-ui, sans-serif', weight: 800, color: '#FFFFFF', stroke: '#000000', ratio: 10 / 56, highlight: '#D4F23C', skew: true },
+  smiley: {
+    family: '"PingFang SC", system-ui, sans-serif', weight: 800, color: '#FFFFFF', stroke: '#000000', ratio: 10 / 56, highlight: '#D4F23C', skew: true,
+  },
   minimal: { family: '"PingFang SC", system-ui, sans-serif', weight: 600, color: '#FFFFFF', box: 'rgba(0,0,0,0.55)' },
   kuaile: { family: '"Yuanti SC", "PingFang SC", system-ui, sans-serif', weight: 800, color: '#FFE14D', stroke: '#000000', ratio: 10 / 60 },
   song: { family: '"Songti SC", "Noto Serif SC", "STSong", serif', weight: 900, color: '#FFFFFF', stroke: '#000000', ratio: 8 / 58 },

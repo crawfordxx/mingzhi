@@ -50,7 +50,8 @@ export function SpacesRail({ spaces, currentId, onSelect, onNew }: Props) {
               <span className="nm" title={railName(s)}>{railName(s)}</span>
               <AnimatePresence>
                 {hover === s.id && (
-                  <motion.span className="fly" role="tooltip" initial={{ opacity: 0, x: -6, scale: 0.98 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: -4 }} transition={{ duration: 0.16 }}>
+                  <motion.span className="fly" role="tooltip" initial={{ opacity: 0, x: -6, scale: 0.98 }} animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: -4 }} transition={{ duration: 0.16 }}>
                     {s.title === DEFAULT_TITLE ? railName(s) : s.title}<small>{metaOf(s)}</small>
                   </motion.span>
                 )}

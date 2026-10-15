@@ -140,7 +140,8 @@ export function PreviewStage(props: Props) {
       <motion.div ref={ref} className="frame" style={{ backgroundImage: `url('${artFor(space.id)}')` }}
         initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} transition={{ ...SOFT, delay: 0.05 }}>
         {size && lay && (meta ? (runs.compare && left ? (
-          <CompareView spaceId={space.id} left={{ meta: left, state: runs.stateOf(left.n) }} right={{ meta, state }} clock={clock} h={pairHeight(size.w, size.h)} scoreOf={scoreOf} onRef={onRef} />
+          <CompareView spaceId={space.id} left={{ meta: left, state: runs.stateOf(left.n) }} right={{ meta, state }} clock={clock}
+            h={pairHeight(size.w, size.h)} scoreOf={scoreOf} onRef={onRef} />
         ) : (
           <div className="stagewin">
             <VersionPlayer key="one" spaceId={space.id} meta={meta} state={state} clock={clock} h={lay.h} scoreOf={scoreOf(meta.n)}

@@ -26,6 +26,9 @@ interface Props {
   onRevert: () => void;
 }
 
+/** 自检相对上一版的升降配色 */
+const trendOf = (label: string): string => (label.startsWith('自检 ↑') ? 'up' : label.startsWith('自检 ↓') ? 'down' : '');
+
 const tookOf = (events: WorkEvent[]): string => {
   const end = events.find((e) => e.step === 'done');
   return events.length && end ? fmtDuration((end.t - events[0].t) / 1000) : '—';
@@ -56,11 +59,17 @@ export function VersionCard({ spaceId, thumbSec, meta, parent, totalShots, event
         <div className="vt">v{meta.n}<It l className="ver-it">({changedLabel(meta, totalShots)})</It>
           {viewing && <motion.span layoutId={`now-${spaceId}`} className="now" transition={SOFT}>预览中</motion.span>}
         </div>
-        <div className="facts">{facts.map(([b, s]) => <div key={s}><b>{b}</b><span className={s.startsWith('自检 ↑') ? 'up' : s.startsWith('自检 ↓') ? 'down' : ''}>{s}</span></div>)}</div>
+        <div className="facts">
+          {facts.map(([b, s]) => <div key={s}><b>{b}</b><span className={trendOf(s)}>{s}</span></div>)}
+        </div>
         <div className="acts">
           <Tap className="btn btn-g sm" onClick={onView} disabled={viewing}>{viewing ? '正在预览' : '预览'}</Tap>
           <Tap className="btn btn-k sm" onClick={onExport} disabled={exporting}>{exporting ? <span className="spin" /> : Ico.down}导出</Tap>
-          {!latest && <Tap className="btn btn-w sm" onClick={onRevert} disabled={busy} title={busy ? '等当前任务完成' : `以 v${meta.n} 为准出一个新版本`}>{Ico.undo}回退到此版本</Tap>}
+          {!latest && (
+            <Tap className="btn btn-w sm" onClick={onRevert} disabled={busy} title={busy ? '等当前任务完成' : `以 v${meta.n} 为准出一个新版本`}>
+              {Ico.undo}回退到此版本
+            </Tap>
+          )}
         </div>
       </div>
     </motion.div>

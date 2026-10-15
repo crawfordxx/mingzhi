@@ -58,7 +58,14 @@ export async function withCancelSignal<T>(signal: AbortSignal | undefined, fn: (
   }
 }
 
-export interface RenderOptions { workDir: string; props: TalkProps; output: string; concurrency?: number; onProgress?: (ratio: number) => void; signal?: AbortSignal }
+export interface RenderOptions {
+  workDir: string;
+  props: TalkProps;
+  output: string;
+  concurrency?: number;
+  onProgress?: (ratio: number) => void;
+  signal?: AbortSignal;
+}
 
 /** 整条渲染先写带随机后缀的临时文件，成功后改名；取消或失败时不覆盖已有的好文件 */
 export async function renderTalk(opts: RenderOptions): Promise<void> {
@@ -162,6 +169,8 @@ export async function renderAudioTrack(opts: SegmentRenderOptions): Promise<void
   const { serveUrl, props: inputProps } = opts;
   await withCancelSignal(opts.signal, async (cancelSignal) => {
     const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
-    await renderMedia({ composition, serveUrl, inputProps, codec: 'aac', outputLocation: opts.output, concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal });
+    await renderMedia({
+      composition, serveUrl, inputProps, codec: 'aac', outputLocation: opts.output, concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
+    });
   });
 }

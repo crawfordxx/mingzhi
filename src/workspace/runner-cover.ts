@@ -14,7 +14,9 @@ import { COVER_FILES } from './runner-files.js';
  * 封面：在 base/covers/<风格>/ 里生成（已付费的底图按风格与标题缓存，换回用过的风格不再付费），
  * 成功后把两张封面复制进版本目录。用复制而不是硬链接：缓存目录里的封面下次会被原地重画。
  */
-export async function makeCover(env: VersionEnv, args: PipelineArgs, style: CoverStyleId, storyboard: Storyboard, captions: TimedCaption[], person: string): Promise<void> {
+export async function makeCover(
+  env: VersionEnv, args: PipelineArgs, style: CoverStyleId, storyboard: Storyboard, captions: TimedCaption[], person: string,
+): Promise<void> {
   const workDir = join(env.base, 'covers', style);
   mkdirSync(workDir, { recursive: true });
   let made: ProjectArtifacts | undefined;

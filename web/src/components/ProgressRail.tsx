@@ -52,7 +52,8 @@ export function ProgressRail({ label = '播放进度', t, duration, marks = [], 
       <motion.span className="kb" style={{ left: pctOf(t, duration) }} animate={{ scale: drag ? 1.35 : 1 }} transition={SPRING} />
       <AnimatePresence>
         {tip !== undefined && duration > 0 && (
-          <motion.span className="ptip" style={{ left: pctOf(tip, duration) }} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 2 }} transition={{ duration: 0.12 }}>
+          <motion.span className="ptip" style={{ left: pctOf(tip, duration) }} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 2 }} transition={{ duration: 0.12 }}>
             {mmss(tip)}{nameAt ? <span> · {nameAt(tip)}</span> : null}
           </motion.span>
         )}

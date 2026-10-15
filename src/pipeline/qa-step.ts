@@ -58,7 +58,10 @@ export interface QaCardsContext {
 export async function runQaCards(ctx: QaCardsContext, storyboard: Storyboard, captions: TimedCaption[], complete: Complete<'qa-cards'>): Promise<{ storyboard: Storyboard; report: CardQaEntry[] }> {
   let res: { storyboard: Storyboard; report: CardQaEntry[] };
   try {
-    res = await (ctx.qaCards ?? realQaCards)({ client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, ffmpeg: ctx.ffmpeg, reserveYuan: ctx.reserveYuan, signal: ctx.signal, onProgress: ctx.onProgress, ...(ctx.only ? { only: ctx.only } : {}) });
+    res = await (ctx.qaCards ?? realQaCards)({
+      client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, ffmpeg: ctx.ffmpeg, reserveYuan: ctx.reserveYuan,
+      signal: ctx.signal, onProgress: ctx.onProgress, ...(ctx.only ? { only: ctx.only } : {}),
+    });
   } catch (err) {
     rethrowIfBalance(err);
     rethrowIfCancelled(err);

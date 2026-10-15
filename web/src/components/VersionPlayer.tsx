@@ -57,9 +57,14 @@ function PlayerBody({ spaceId, meta, state, clock, h, muted, scoreOf, locked, on
     <>
       <div className="titlebar"><Lights /><span className="tt">v{meta.n} — {mmss(s.t)} {name}</span></div>
       <div className={`vid real${locked ? ' locked' : ''}`} style={{ height: h }} onClick={click}>
-        <video ref={clock.bind(`v${meta.n}`)} src={mediaUrl(spaceId, meta.n, 'final.mp4')} playsInline preload="auto" muted={muted} aria-label={`v${meta.n} 成片`} />
+        <video ref={clock.bind(`v${meta.n}`)} src={mediaUrl(spaceId, meta.n, 'final.mp4')} playsInline preload="auto" muted={muted}
+          aria-label={`v${meta.n} 成片`} />
         <AnimatePresence>
-          {changed && <motion.span className="hl badge" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={SOFT}>本版改动</motion.span>}
+          {changed && (
+            <motion.span className="hl badge" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={SOFT}>
+              本版改动
+            </motion.span>
+          )}
         </AnimatePresence>
         {!locked && ready && <span className="tip">点一下，插入 @{mmss(refSecond(s.t, shot))} {name}</span>}
       </div>

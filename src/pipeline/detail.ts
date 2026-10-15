@@ -33,7 +33,8 @@ export function transcriptDetail(t: Transcript): ProgressDetail {
   });
   const lines = [...groups.values()].flatMap((indices) => splitLines(indices, t.tokens)).map((indices) => {
     const tokens = indices.map((i) => t.tokens[i]);
-    return { from: indices[0], start: tokens[0].start, end: tokens[tokens.length - 1].end, text: tokens.map((x) => x.text).join(''), tokens: tokens.map((x) => x.text) };
+    const texts = tokens.map((x) => x.text);
+    return { from: indices[0], start: tokens[0].start, end: tokens[tokens.length - 1].end, text: texts.join(''), tokens: texts };
   });
   return { kind: 'transcript', data: { lines } };
 }
@@ -58,7 +59,8 @@ export function cutsDetail(cuts: Cut[], tokens: Token[]): ProgressDetail {
     const first = tokens[c.from];
     const last = tokens[c.to];
     if (!first || !last) return [];
-    return [{ from: c.from, to: c.to, start: first.start, end: last.end, text: tokens.slice(c.from, c.to + 1).map((t) => t.text).join(''), type: c.type, reason: c.reason }];
+    const text = tokens.slice(c.from, c.to + 1).map((t) => t.text).join('');
+    return [{ from: c.from, to: c.to, start: first.start, end: last.end, text, type: c.type, reason: c.reason }];
   });
   return { kind: 'cut', data: { cuts: items } };
 }
@@ -103,7 +105,9 @@ export function cardScoreDetail(shotIndex: number, score: CardScore, passed: boo
 export function cardsDetail(report: CardQaEntry[]): ProgressDetail {
   const cards = report.map((e) => {
     const last = e.scores[e.scores.length - 1];
-    return { shotIndex: e.shotIndex, ...(last ? { score: four(last) } : {}), revised: e.revised, passed: e.passed, ...(e.skipped ? { skipped: e.skipped } : {}) };
+    return {
+      shotIndex: e.shotIndex, ...(last ? { score: four(last) } : {}), revised: e.revised, passed: e.passed, ...(e.skipped ? { skipped: e.skipped } : {}),
+    };
   });
   return { kind: 'qa', data: { phase: 'cards', cards } };
 }

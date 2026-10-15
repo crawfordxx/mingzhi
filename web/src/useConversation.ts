@@ -86,7 +86,8 @@ export function useConversation({ space, base, busy, notify, refresh }: Deps) {
     const message = composeMessage(r.refs, text);
     const id = space.id;
     const aiId = newId();
-    update(id, (list) => [...list, { id: newId(), kind: 'user', at: Date.now(), message, base }, { id: aiId, kind: 'ai', at: Date.now() + 1, base, pending: true }]);
+    const now = Date.now();
+    update(id, (list) => [...list, { id: newId(), kind: 'user', at: now, message, base }, { id: aiId, kind: 'ai', at: now + 1, base, pending: true }]);
     setDraft(''); r.setRefs([]);
     sending.current = true;
     try {

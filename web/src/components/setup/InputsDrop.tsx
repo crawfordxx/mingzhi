@@ -17,7 +17,10 @@ interface Props {
 /** index 有值 = 已在服务端的第 index 段 */
 interface Row { key: string; name: string; meta: string; progress?: number; state: Upload['state']; error?: string; index?: number }
 
-const describe = (u?: Upload) => (!u ? '已上传' : u.meta ? `${fmtDuration(u.meta.durationSec)} · ${u.meta.width}×${u.meta.height} · ${fmtSize(u.size)}` : fmtSize(u.size));
+const describe = (u?: Upload): string => {
+  if (!u) return '已上传';
+  return u.meta ? `${fmtDuration(u.meta.durationSec)} · ${u.meta.width}×${u.meta.height} · ${fmtSize(u.size)}` : fmtSize(u.size);
+};
 
 function rowsOf(inputs: readonly string[], uploads: readonly Upload[]): Row[] {
   // key 用「文件名 + 第几次出现」而不是下标，删掉前面一段时后面的行不会被当成新行重建
@@ -32,20 +35,30 @@ function rowsOf(inputs: readonly string[], uploads: readonly Upload[]): Row[] {
 
 function RowAction({ r, onCancel, onDismiss, onRemove }: { r: Row } & Pick<Props, 'onCancel' | 'onDismiss' | 'onRemove'>) {
   if (r.state === 'uploading') {
-    return <><span className="in-pct">{Math.round((r.progress ?? 0) * 100)}%</span><button type="button" className="in-x" onClick={() => onCancel(r.key)} aria-label={`取消上传 ${r.name}`} title="取消上传">{Ico.close}</button></>;
+    return (
+      <>
+        <span className="in-pct">{Math.round((r.progress ?? 0) * 100)}%</span>
+        <button type="button" className="in-x" onClick={() => onCancel(r.key)} aria-label={`取消上传 ${r.name}`} title="取消上传">{Ico.close}</button>
+      </>
+    );
   }
   if (r.state === 'error') return <button type="button" className="in-x" onClick={() => onDismiss(r.key)} aria-label="移除这条" title="移除">{Ico.close}</button>;
   return (
     <span className="in-done">
       <motion.span className="in-ok" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING}>{Ico.check}</motion.span>
-      {r.index !== undefined && <button type="button" className="in-x in-del" onClick={() => onRemove(r.index as number)} aria-label={`删除 ${r.name}`} title="删除这段">{Ico.close}</button>}
+      {r.index !== undefined && (
+        <button type="button" className="in-x in-del" onClick={() => onRemove(r.index as number)} aria-label={`删除 ${r.name}`} title="删除这段">
+          {Ico.close}
+        </button>
+      )}
     </span>
   );
 }
 
 function InputRow({ r, i, ...acts }: { r: Row; i: number } & Pick<Props, 'onCancel' | 'onDismiss' | 'onRemove'>) {
   return (
-    <motion.div layout className={`in-row ${r.state}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} transition={SOFT}>
+    <motion.div layout className={`in-row ${r.state}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }}
+      transition={SOFT}>
       <It className="in-n">{String(i + 1).padStart(2, '0')}</It>
       <span className="in-ico">{Ico.film}</span>
       <span className="in-txt">

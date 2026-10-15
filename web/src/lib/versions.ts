@@ -54,7 +54,9 @@ const avg = (q: QaScore): number => (q.layout + q.hierarchy + q.motion + q.brand
  * 不按镜头序号沿用：节奏、删段之后序号对应的已经是另一张卡。
  * versions 为完成的版本号（升序）；qaOf 给某版本按镜头序号的分数；cardsOf 给某版本各镜头的卡片内容键（全屏为 undefined）。
  */
-export function shotScore(n: number, i: number, versions: number[], qaOf: (n: number) => Record<number, QaScore>, cardsOf: (n: number) => (string | undefined)[]): number | undefined {
+export function shotScore(
+  n: number, i: number, versions: number[], qaOf: (n: number) => Record<number, QaScore>, cardsOf: (n: number) => (string | undefined)[],
+): number | undefined {
   const own = qaOf(n)[i];
   if (own) return avg(own);
   const key = cardsOf(n)[i];

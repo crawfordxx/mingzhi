@@ -31,11 +31,14 @@ export function InlineOptions({ options, picked, applying, applied, disabled, un
             <motion.button key={o.label} type="button" className={`iopt${on ? ' on' : ''}${locked && !on ? ' off' : ''}`}
               disabled={disabled || locked} aria-pressed={on} onClick={() => onPick(i)}
               initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: locked && !on ? 0.45 : 1, y: 0, scale: 1 }}
-              transition={{ ...SPRING, delay: 0.08 + i * 0.06 }} whileHover={locked || disabled ? undefined : { y: -2 }} whileTap={locked || disabled ? undefined : { scale: 0.96 }}>
+              transition={{ ...SPRING, delay: 0.08 + i * 0.06 }}
+              whileHover={locked || disabled ? undefined : { y: -2 }} whileTap={locked || disabled ? undefined : { scale: 0.96 }}>
               <It l className="iopt-k">{LETTER[i]}</It>
               <span>{o.label}</span>
               <AnimatePresence mode="popLayout" initial={false}>
-                {on && (applying ? <motion.span key="s" className="spin iopt-s" initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} />
+                {on && (applying
+                  ? <motion.span key="s" className="spin iopt-s" initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }} />
                   : <motion.span key="c" className="iopt-c" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING}>{Ico.check}</motion.span>)}
               </AnimatePresence>
             </motion.button>

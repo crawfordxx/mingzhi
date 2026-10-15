@@ -20,12 +20,17 @@ import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.
 import { costDetail, detailOfStep, type ProgressDetail } from './detail.js';
 import type { PipelineQa, QaDeps } from './qa-step.js';
 import type { MediaDeps } from './media-deps.js';
-import { analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, finalQaStage, matteStage, qaCardsStage, storyboardStage, type Analysis, type Complete } from './stages.js';
+import {
+  analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, finalQaStage, matteStage, qaCardsStage, storyboardStage,
+  type Analysis, type Complete,
+} from './stages.js';
 
 export { throttledMatteProgress, throttledRenderProgress } from './stages.js';
 
 /** edit：工作台修改版本的说明（应用了哪些修改、复用了什么）；runPipeline 不发 */
-export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'qa-cards' | 'compose' | 'loudness' | 'qa-final' | 'cover' | 'edit' | 'done';
+export type PipelineStep =
+  | 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll'
+  | 'qa-cards' | 'compose' | 'loudness' | 'qa-final' | 'cover' | 'edit' | 'done';
 /** detail 是给工作台「剪辑直播」用的结构化数据（可选，旧调用方可以忽略；message 文本不变） */
 export interface ProgressEvent { step: PipelineStep; message: string; detail?: ProgressDetail }
 export interface PipelineArgs {
@@ -61,13 +66,17 @@ function costEvent(step: PipelineStep, meter: CostMeter): ProgressEvent {
 }
 
 /** 当前账目快照写进 project.json；预算不限时 budget 为 null（JSON 里没有 Infinity） */
-export const costsOf = (meter: CostMeter): NonNullable<ProjectFile['costs']> => ({ total: meter.total, budget: Number.isFinite(meter.budget) ? meter.budget : null, entries: [...meter.entries] });
+export const costsOf = (meter: CostMeter): NonNullable<ProjectFile['costs']> => ({
+  total: meter.total, budget: Number.isFinite(meter.budget) ? meter.budget : null, entries: [...meter.entries],
+});
 
 /**
  * 每步完成的统一处理：补上当前账目落盘 → 带明细回调进度 → 花费变化时再发一条 cost 事件 → 检查取消。
  * 工作台的版本运行器也用它（record 指向版本目录的 project.json）。
  */
-export function makeComplete(o: { record: (patch: ProjectPatch) => ProjectFile; meter: CostMeter; onProgress?: (e: ProgressEvent) => void; signal?: AbortSignal }): Complete {
+export function makeComplete(o: {
+  record: (patch: ProjectPatch) => ProjectFile; meter: CostMeter; onProgress?: (e: ProgressEvent) => void; signal?: AbortSignal;
+}): Complete {
   let lastCost: number | null = null;
   return (step, message, patch = {}) => {
     const project = o.record({ ...patch, costs: costsOf(o.meter) });
@@ -137,7 +146,10 @@ async function runSteps(args: PipelineArgs, projectPath: string, complete: Compl
   const p = await produce(args, analysis, complete);
   const { storyboard, cards } = await qaCardsStage(args, meter, p.storyboard, p.captions, complete);
   const raw = join(args.workDir, 'final.raw.mp4');
-  await composeStage(args, { person: p.base, subject: p.subject, captions: p.captions, storyboard, outputDurationSec: analysis.plan.outputDurationSec, raw, output: args.output, cacheDir: args.cacheDir ?? join(args.workDir, 'segments') }, complete);
+  const cacheDir = args.cacheDir ?? join(args.workDir, 'segments');
+  const outputDurationSec = analysis.plan.outputDurationSec;
+  const input = { person: p.base, subject: p.subject, captions: p.captions, storyboard, outputDurationSec, raw, output: args.output, cacheDir };
+  await composeStage(args, input, complete);
   const hard = await finalQaStage(args, args.output, storyboard, cards, complete);
   await coverStage(args, meter, storyboard, p.captions, p.base, complete);
   complete('done', args.output);

@@ -25,7 +25,8 @@ export interface MediaDeps {
 }
 
 const REAL_MEDIA: MediaDeps = {
-  probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut, matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness, concat: concatSources,
+  probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut,
+  matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness, concat: concatSources,
 };
 
 /** 注入的实现覆盖真实实现 */

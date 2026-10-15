@@ -23,7 +23,11 @@ export class KeyCache {
   private cached: { value: ActiveKey | null; at: number } | null = null;
   private seen: readonly string[] = [];
 
-  constructor(private readonly cfg: Pick<AppConfig, 'dataDir' | 'kexiangKey'>, private readonly store: KeyStore, private readonly now: () => number = Date.now) {
+  constructor(
+    private readonly cfg: Pick<AppConfig, 'dataDir' | 'kexiangKey'>,
+    private readonly store: KeyStore,
+    private readonly now: () => number = Date.now,
+  ) {
     if (cfg.kexiangKey) this.remember(cfg.kexiangKey);
   }
 

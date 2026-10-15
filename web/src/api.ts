@@ -71,7 +71,15 @@ export interface VersionState {
 export interface ExportResult { dir: string; files: string[] }
 export type EventSink = (e: WorkEvent) => void
 
-export interface Status { version: string; keyConfigured: boolean; modelsReady: boolean; assetsReady: boolean; ffmpegReady: boolean; /** 服务以假模型模式启动（仅测试） */ fake?: boolean }
+export interface Status {
+  version: string;
+  keyConfigured: boolean;
+  modelsReady: boolean;
+  assetsReady: boolean;
+  ffmpegReady: boolean;
+  /** 服务以假模型模式启动（仅测试） */
+  fake?: boolean;
+}
 export type KeySource = 'env' | 'keychain' | 'file';
 export interface KeyInfo { configured: boolean; source?: KeySource; masked?: string }
 
@@ -203,8 +211,14 @@ export function createHttpApi(): Api {
     uploadBackground: (id, file, opts) => sendFile(`/api/spaces/${enc(id)}/background`, file, opts),
     estimate: (id) => json(`/api/spaces/${enc(id)}/estimate`),
     start: (id) => json(`/api/spaces/${enc(id)}/start`, { method: 'POST' }),
-    messages: (id, message, version) => json(`/api/spaces/${enc(id)}/messages`, { method: 'POST', body: JSON.stringify({ message, ...(version ? { version } : {}) }) }, PLAN_TIMEOUT_MS),
-    apply: (id, ops, parent, summary) => json(`/api/spaces/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify({ ops, ...(parent ? { parent } : {}), ...(summary ? { summary } : {}) }) }),
+    messages: (id, message, version) => {
+      const body = JSON.stringify({ message, ...(version ? { version } : {}) });
+      return json(`/api/spaces/${enc(id)}/messages`, { method: 'POST', body }, PLAN_TIMEOUT_MS);
+    },
+    apply: (id, ops, parent, summary) => {
+      const body = JSON.stringify({ ops, ...(parent ? { parent } : {}), ...(summary ? { summary } : {}) });
+      return json(`/api/spaces/${enc(id)}/apply`, { method: 'POST', body });
+    },
     revert: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/revert`, { method: 'POST' }),
     cancel: (id) => json(`/api/spaces/${enc(id)}/cancel`, { method: 'POST' }),
     exportVersion: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/export`, { method: 'POST' }, PLAN_TIMEOUT_MS),

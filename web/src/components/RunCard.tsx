@@ -47,7 +47,8 @@ export function RunCard({ meta, events, onCancel, shots, hot, backdrop }: Props)
         {/* 等待时的说明文字交叉淡入（Uber 加载页的副标题轮换） */}
         <span className="run-msg">
           <AnimatePresence mode="wait" initial={false}>
-            <motion.span key={failed ? 'f' : cur?.step ?? 'q'} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18 }}>
+            <motion.span key={failed ? 'f' : cur?.step ?? 'q'} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.18 }}>
               {failed ? view.error ?? '出片失败' : cur ? `正在：${cur.message}` : '等前面的任务完成'}
             </motion.span>
           </AnimatePresence>

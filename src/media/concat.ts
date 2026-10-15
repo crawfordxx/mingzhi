@@ -50,8 +50,14 @@ export function canvasFor(sizes: { width: number; height: number }[]): { width: 
 export function buildConcatFilter(frames: number[], size: { width: number; height: number }): string {
   const { width: w, height: h } = size;
   const parts = frames.map((n, i) => {
-    const video = `[${i}:v]fps=${FPS}:start_time=0,scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},setsar=1,tpad=stop_mode=clone:stop_duration=${GAP_FRAMES / FPS + 1},trim=end_frame=${n},setpts=PTS-STARTPTS[v${i}]`;
-    const audio = `[${i}:a]aresample=${AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end_sample=${n * SAMPLES_PER_FRAME},asetpts=PTS-STARTPTS[a${i}]`;
+    const video = [
+      `[${i}:v]fps=${FPS}:start_time=0`, `scale=${w}:${h}:force_original_aspect_ratio=increase`, `crop=${w}:${h}`, 'setsar=1',
+      `tpad=stop_mode=clone:stop_duration=${GAP_FRAMES / FPS + 1}`, `trim=end_frame=${n}`, `setpts=PTS-STARTPTS[v${i}]`,
+    ].join(',');
+    const audio = [
+      `[${i}:a]aresample=${AUDIO_RATE}`, 'aformat=sample_fmts=fltp:channel_layouts=stereo', 'apad',
+      `atrim=end_sample=${n * SAMPLES_PER_FRAME}`, `asetpts=PTS-STARTPTS[a${i}]`,
+    ].join(',');
     return `${video};${audio}`;
   });
   const inputs = frames.map((_, i) => `[v${i}][a${i}]`).join('');

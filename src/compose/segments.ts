@@ -63,7 +63,10 @@ const CODE_DIRS = [join(ROOT, 'render'), join(ROOT, 'src')];
 const REMOTION_PACKAGES = ['remotion', '@remotion/renderer', '@remotion/bundler'];
 
 function walk(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    if (e.isDirectory()) return walk(join(dir, e.name));
+    return /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : [];
+  });
 }
 
 /** 参与代码指纹的文件清单 */
@@ -148,7 +151,10 @@ async function concatWithAudio(opts: ConcatOptions): Promise<void> {
   writeFileSync(opts.listFile, `${opts.files.map(concatLine).join('\n')}\n`);
   const tmp = tmpName(opts.output);
   try {
-    await run(opts.ffmpeg, ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', opts.listFile, '-i', opts.audio, '-map', '0:v', '-map', '1:a', '-c', 'copy', '-t', String(opts.durationSec), '-movflags', '+faststart', tmp]);
+    await run(opts.ffmpeg, [
+      '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', opts.listFile, '-i', opts.audio,
+      '-map', '0:v', '-map', '1:a', '-c', 'copy', '-t', String(opts.durationSec), '-movflags', '+faststart', tmp,
+    ]);
     renameSync(tmp, opts.output);
   } finally {
     rmSync(tmp, { force: true });
@@ -156,7 +162,9 @@ async function concatWithAudio(opts: ConcatOptions): Promise<void> {
 }
 
 /** 渲染到临时文件再改名，中途取消不会留下半截缓存 */
-async function renderToCache(backend: SegmentBackend, serveUrl: string, props: TalkProps, range: FrameRange, file: string, signal?: AbortSignal): Promise<void> {
+async function renderToCache(
+  backend: SegmentBackend, serveUrl: string, props: TalkProps, range: FrameRange, file: string, signal?: AbortSignal,
+): Promise<void> {
   const tmp = tmpName(file);
   try {
     await backend.renderVideo({ serveUrl, props, output: tmp, startFrame: range.start, endFrame: range.end, signal });
@@ -194,7 +202,10 @@ export async function renderSegmented(opts: SegmentedOptions): Promise<Segmented
     }
     await backend.renderAudio({ serveUrl, props, output: audio, signal: opts.signal });
   });
-  await backend.concat({ ffmpeg: opts.ffmpeg ?? 'ffmpeg', files: todo.map((s) => s.file), audio, listFile: join(workDir, 'segments.txt'), output: opts.output, durationSec: secToFrame(props.durationSec) / CANVAS.fps });
+  await backend.concat({
+    ffmpeg: opts.ffmpeg ?? 'ffmpeg', files: todo.map((s) => s.file), audio, listFile: join(workDir, 'segments.txt'),
+    output: opts.output, durationSec: secToFrame(props.durationSec) / CANVAS.fps,
+  });
   return {
     rendered: done.filter((d) => !d.reused).map((d) => d.i),
     reused: done.filter((d) => d.reused).map((d) => d.i),

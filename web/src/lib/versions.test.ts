@@ -5,7 +5,8 @@ import { budgetState, changedLabel, failedVersions, firstDone, isFirst, liveVers
 const v = (n: number, status: VersionMeta['status'], parent?: number, changedShots: number[] = []): VersionMeta =>
   ({ n, status, createdAt: '2026-10-15T00:00:00Z', summary: parent ? '改' : '首个版本', changedShots, costYuan: 0, ...(parent ? { parent } : {}) });
 const space = (versions: VersionMeta[], job: Space['job'] = null): Space =>
-  ({ id: 's', title: 't', createdAt: '', inputs: ['a.mp4'], versions, settings: { captionStyle: 'blade', budgetYuan: 10, broll: true, maxVideos: 1 }, job, totalCostYuan: 0 });
+  ({ id: 's', title: 't', createdAt: '', inputs: ['a.mp4'], versions, job, totalCostYuan: 0,
+    settings: { captionStyle: 'blade', budgetYuan: 10, broll: true, maxVideos: 1 } });
 
 describe('首版 = 第一个没有父版本且完成的版本（不是 v1）', () => {
   it('v1 取消后重开：v2 是首版，剪辑直播卡跟着 v2', () => {

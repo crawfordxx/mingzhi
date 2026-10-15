@@ -40,7 +40,10 @@ function Title({ text }: { text: string }) {
 /** 标题栏：随对话流滚动浮出阴影，底边一条细进度线（motion useScroll + useSpring） */
 function ChatHeader({ space, stream, running }: { space: Space; stream: RefObject<HTMLDivElement>; running: number }) {
   const { scrollY, scrollYProgress } = useScroll({ container: stream, layoutEffect: false });
-  const shadow = useTransform(scrollY, [0, 24], ['0 1px 0 rgba(0,0,0,0), 0 10px 24px -14px rgba(0,0,0,0)', '0 1px 0 rgba(0,0,0,.06), 0 10px 24px -14px rgba(0,0,0,.3)']);
+  const shadow = useTransform(scrollY, [0, 24], [
+    '0 1px 0 rgba(0,0,0,0), 0 10px 24px -14px rgba(0,0,0,0)',
+    '0 1px 0 rgba(0,0,0,.06), 0 10px 24px -14px rgba(0,0,0,.3)',
+  ]);
   const smooth = useSpring(scrollYProgress, { stiffness: 140, damping: 30 });
   const progress = useReducedMotion() ? scrollYProgress : smooth;
   return (
@@ -68,7 +71,8 @@ function Dock({ wb, space, composer, keyReady }: { wb: Workbench; space: Space; 
         </motion.div>
       ) : (
         <motion.div key="dock" className="composer" exit={{ opacity: 0, y: 8 }} transition={SOFT}>
-          <BudgetFooter budget={space.settings.budgetYuan} spent={spentOf(space)} estimate={wb.estimate} estimating={wb.estimating} blocker={blockerOf(wb, space, keyReady)}
+          <BudgetFooter budget={space.settings.budgetYuan} spent={spentOf(space)} estimate={wb.estimate} estimating={wb.estimating}
+            blocker={blockerOf(wb, space, keyReady)}
             starting={wb.starting} onBudget={(v) => wb.updateSettings({ budgetYuan: v })} onStart={wb.start} />
         </motion.div>
       )}
@@ -100,7 +104,9 @@ export function ChatFlow({ wb, space, options, composer, runs, convo, replay, on
             )}
             {showKey && !started && <Msg root={stream} delay={0.06}><KeyCard onVerified={wb.keyVerified} /></Msg>}
             <Msg root={stream} delay={started ? 0 : 0.12}><SetupCard wb={wb} space={space} options={options} /></Msg>
-            {(space.versions.length > 0 || !!space.job) && <Thread space={space} options={options} runs={runs} convo={convo} replay={replay} stream={stream} onSeek={onSeek} liveN={liveN} />}
+            {(space.versions.length > 0 || !!space.job) && (
+              <Thread space={space} options={options} runs={runs} convo={convo} replay={replay} stream={stream} onSeek={onSeek} liveN={liveN} />
+            )}
           </motion.div>
         </AnimatePresence>
       </div>

@@ -38,7 +38,9 @@ export function writeAss(env: VersionEnv, a: BaseAnalysis, captions: TimedCaptio
 }
 
 /** 剪辑类修改：字幕重新对时、找回的片段补字幕、分镜平移（都不调模型），并说明被删掉的卡片 */
-export function retime(env: VersionEnv, a: BaseAnalysis, parent: VersionState, next: VersionState, plan: CutPlan): { captions: TimedCaption[]; storyboard: Storyboard } {
+export function retime(
+  env: VersionEnv, a: BaseAnalysis, parent: VersionState, next: VersionState, plan: CutPlan,
+): { captions: TimedCaption[]; storyboard: Storyboard } {
   const captions = captionsForRestored(a.transcript.tokens, next.restored, plan, retimeCaptions(next.captions, parent.plan, plan));
   env.complete('captions', `${captions.length} 行字幕 · 按新剪辑重新对时（未调用模型）`, { captions, artifacts: { ass: writeAss(env, a, captions) } });
   const storyboard = remapStoryboard(parent.plan, plan, next.storyboard);

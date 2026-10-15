@@ -29,7 +29,8 @@ function PromptRow({ saved, onCommit }: { saved: string; onCommit: (prompt: stri
   };
   const pending = draft.trim().length >= 2 && draft.trim() !== saved;
   return (
-    <motion.div className="bg-prompt" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SOFT}>
+    <motion.div className="bg-prompt" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+      transition={SOFT}>
       <div className="bg-prompt-in">
         <span className="bgp-ico">{Ico.spark}</span>
         <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
@@ -64,7 +65,11 @@ export function BackgroundPicker({ options, value, uploading, onChange, onUpload
         {tile('prompt', value?.kind === 'prompt' || writing, () => setWriting(true),
           <span className="bgt-act">{Ico.spark}</span>, '一句话生成')}
       </div>
-      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="sr" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(f); }} />
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="sr" onChange={(e) => {
+        const f = e.target.files?.[0];
+        e.target.value = '';
+        if (f) onUpload(f);
+      }} />
       <AnimatePresence initial={false}>
         {writing && <PromptRow saved={value?.kind === 'prompt' ? value.prompt : ''} onCommit={(prompt) => onChange({ kind: 'prompt', prompt })} />}
       </AnimatePresence>

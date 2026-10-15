@@ -65,9 +65,13 @@ const describeBackground = (bg: VersionState['settings']['background']): string 
 export function buildEditContext(state: VersionState, message: string, tracks: Track[] = loadTracks()): EditContext {
   const { shots } = state.storyboard;
   return {
-    shots: shots.map((s, index) => ({ index, start: round(s.start), end: round(s.end), layout: s.layout, template: s.card?.template, title: cardTitle(s.card) })),
+    shots: shots.map((s, index) => ({
+      index, start: round(s.start), end: round(s.end), layout: s.layout, template: s.card?.template, title: cardTitle(s.card),
+    })),
     captions: state.captions.map((c, index) => ({ index, start: round(c.start), end: round(c.end), text: c.text })),
-    settings: { background: describeBackground(state.settings.background), captionStyle: state.settings.captionStyle, coverStyle: state.coverStyle, bgm: state.bgm.bgm },
+    settings: {
+      background: describeBackground(state.settings.background), captionStyle: state.settings.captionStyle, coverStyle: state.coverStyle, bgm: state.bgm.bgm,
+    },
     refs: parseTimeRefs(message).map((r) => resolveRef(r, state)),
     presets: PRESETS.map((p) => ({ id: p.id, name: p.name })),
     captionStyles: Object.entries(CAPTION_STYLES).map(([id, s]) => ({ id, name: s.name })),

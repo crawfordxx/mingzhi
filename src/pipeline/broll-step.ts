@@ -122,7 +122,8 @@ function progressHooks(ctx: BrollContext, total: number): Pick<FulfillOptions, '
 async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: Storyboard, durationSec: number, complete: Complete): Promise<Storyboard> {
   try {
     const res = await fulfillVisuals(storyboard, resolveDeps(ctx, broll), {
-      workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter, reserveYuan: ctx.reserveYuan, signal: ctx.signal, ...(ctx.deferShots ? { deferShots: ctx.deferShots } : {}),
+      workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter, reserveYuan: ctx.reserveYuan,
+      signal: ctx.signal, ...(ctx.deferShots ? { deferShots: ctx.deferShots } : {}),
       ...progressHooks(ctx, visualsOf(storyboard).length),
     });
     complete('broll', brollSummary(res.assets, res.failures.length, res.costYuan),

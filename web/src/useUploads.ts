@@ -6,14 +6,24 @@ import { useCallback, useRef, useState } from 'react';
 import { api, ApiError, type Space, type UploadedInput } from './api';
 import { isImageFile, isVideoFile } from './lib/media';
 
-export interface Upload { key: string; name: string; size: number; progress: number; state: 'uploading' | 'done' | 'error'; error?: string; meta?: UploadedInput }
+export interface Upload {
+  key: string;
+  name: string;
+  size: number;
+  progress: number;
+  state: 'uploading' | 'done' | 'error';
+  error?: string;
+  meta?: UploadedInput;
+}
 type Buckets = Readonly<Record<string, readonly Upload[]>>;
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const isCancel = (err: unknown) => err instanceof ApiError && err.message === '已取消';
 
 /** 按下标删除已上传的一段口播（出片前） */
-function useRemoveInput(space: Space | undefined, putSpace: (s: Space) => void, refresh: (s: Space) => void, notify: (m: string) => void, forget: (name: string) => void) {
+function useRemoveInput(
+  space: Space | undefined, putSpace: (s: Space) => void, refresh: (s: Space) => void, notify: (m: string) => void, forget: (name: string) => void,
+) {
   const forgetRef = useRef(forget);
   forgetRef.current = forget;
   const removeInput = useCallback(async (index: number) => {
@@ -93,6 +103,9 @@ export function useUploads(space: Space | undefined, putSpace: (s: Space) => voi
 
 
   const uploads = space ? buckets[space.id] ?? [] : [];
-  const removeInput = useRemoveInput(space, putSpace, refresh, notify, (name) => { if (space) edit(space.id, (l) => l.filter((u) => !(u.state === 'done' && u.name === name))); });
+  const forget = (name: string) => {
+    if (space) edit(space.id, (l) => l.filter((u) => !(u.state === 'done' && u.name === name)));
+  };
+  const removeInput = useRemoveInput(space, putSpace, refresh, notify, forget);
   return { uploads, addInputs, cancelUpload, dropUpload, removeInput, ...useBackgroundUpload(space, putSpace, refresh, notify) };
 }

@@ -29,11 +29,13 @@ function DiffPill({ left, right, clock }: Pick<Props, 'left' | 'right' | 'clock'
   const a = left.meta.qaScore;
   const b = right.meta.qaScore;
   return (
-    <motion.div className="diff" initial={{ opacity: 0, y: 12, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }} exit={{ opacity: 0, y: 8, x: '-50%' }} transition={SOFT}>
+    <motion.div className="diff" initial={{ opacity: 0, y: 12, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }}
+      exit={{ opacity: 0, y: 8, x: '-50%' }} transition={SOFT}>
       <span>同步播放 · {right.meta.changedShots.length === 0 ? '画面没有变化' : all ? '每段都变了' : `只有 ${marks.length} 段不同`}</span>
       {/* 差异胶囊里的 @时间 逐个弹出（Duolingo 对比表的错峰 + 回弹） */}
       {marks.slice(0, 3).map((m, i) => (
-        <motion.span key={m.sec} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 420, damping: 18, delay: 0.25 + i * 0.08 }}>
+        <motion.span key={m.sec} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 18, delay: 0.25 + i * 0.08 }}>
           <TimeRefChip r={{ sec: m.sec + 0.01, label: m.label }} onClick={() => clock.seek(m.sec + 0.01)} />
         </motion.span>
       ))}

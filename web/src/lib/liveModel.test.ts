@@ -3,7 +3,8 @@ import type { WorkEvent } from '../api';
 import { cutCounts, cutTokenSet, qaAverage, reduceLive } from './liveModel';
 
 let seq = 0;
-const e = (t: number, step: string, message: string, detail?: WorkEvent['detail']): WorkEvent => ({ seq: ++seq, t, spaceId: 's', version: 1, step, message, ...(detail ? { detail } : {}) });
+const e = (t: number, step: string, message: string, detail?: WorkEvent['detail']): WorkEvent =>
+  ({ seq: ++seq, t, spaceId: 's', version: 1, step, message, ...(detail ? { detail } : {}) });
 
 const events: WorkEvent[] = [
   e(0, 'probe', '540×960 · 0:58'),
@@ -13,7 +14,9 @@ const events: WorkEvent[] = [
   e(950, 'plan', '原片 0:58 → 成片 0:51'),
   e(2000, 'matte', '抠像 10%', { kind: 'progress', data: { stage: 'matte', pct: 10 } }),
   e(3000, 'matte', '抠像 60%', { kind: 'progress', data: { stage: 'matte', pct: 60 } }),
-  e(4000, 'storyboard', '2 个镜头', { kind: 'shot', data: { shots: [{ index: 0, start: 0, end: 20, layout: 'split' }, { index: 1, start: 20, end: 50.5, layout: 'full' }] } }),
+  e(4000, 'storyboard', '2 个镜头', {
+    kind: 'shot', data: { shots: [{ index: 0, start: 0, end: 20, layout: 'split' }, { index: 1, start: 20, end: 50.5, layout: 'full' }] },
+  }),
   e(4100, 'qa-cards', '第 1 镜', { kind: 'qa', data: { phase: 'score', shotIndex: 0, score: { layout: 9, hierarchy: 8, motion: 8.5, brand: 9.5 } } }),
   e(4200, 'cuts', '已花费 ¥0.20', { kind: 'cost', data: { total: 0.2, budget: 10 } }),
 ];

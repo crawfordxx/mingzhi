@@ -84,7 +84,10 @@ export async function defaultRunnerCtx(app: Pick<AppCtx, 'cfg' | 'store' | 'bus'
   const prices = await loadPricesOrEmpty(app.deps, key);
   return {
     store: app.store, bus: app.bus, cfg: { ...app.cfg, kexiangKey: key }, prices, signal,
-    clients: (meter) => ({ llm: new KexiangClient(key, undefined, undefined, meter), task: new KexiangTaskClient(key, undefined, undefined, undefined, meter) }),
+    clients: (meter) => ({
+      llm: new KexiangClient(key, undefined, undefined, meter),
+      task: new KexiangTaskClient(key, undefined, undefined, undefined, meter),
+    }),
     ...app.deps.ctxOverrides,
   };
 }

@@ -71,7 +71,8 @@ async function patchSpace(app: AppCtx, c: RouteCtx): Promise<void> {
 async function uploadInput(app: AppCtx, c: RouteCtx): Promise<void> {
   const before = loadSpace(app, c.params.id);
   requirePristine(app, before, '追加口播');
-  const file = await receiveFile(c.req, { parent: join(spaceDir(app, before.id), 'inputs'), allowed: VIDEO_EXTS, maxBytes: MAX_VIDEO_BYTES, kind: '视频' });
+  const parent = join(spaceDir(app, before.id), 'inputs');
+  const file = await receiveFile(c.req, { parent, allowed: VIDEO_EXTS, maxBytes: MAX_VIDEO_BYTES, kind: '视频' });
   try {
     const info = await app.deps.probe(file.path).catch(() => {
       throw new HttpError(400, '这不是可识别的视频文件（或文件已损坏）');
@@ -106,7 +107,8 @@ function deleteInput(app: AppCtx, c: RouteCtx): void {
 async function uploadBackground(app: AppCtx, c: RouteCtx): Promise<void> {
   const before = loadSpace(app, c.params.id);
   requirePristine(app, before, '换自定义背景');
-  const file = await receiveFile(c.req, { parent: join(spaceDir(app, before.id), BACKGROUNDS_DIR), allowed: IMAGE_EXTS, maxBytes: MAX_IMAGE_BYTES, kind: '图片' });
+  const parent = join(spaceDir(app, before.id), BACKGROUNDS_DIR);
+  const file = await receiveFile(c.req, { parent, allowed: IMAGE_EXTS, maxBytes: MAX_IMAGE_BYTES, kind: '图片' });
   try {
     if (!looksLikeImage(file.path)) throw new HttpError(400, '这不是有效的 jpg / png / webp 图片');
     const background: BackgroundSpec = { kind: 'file', path: file.path };

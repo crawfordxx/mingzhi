@@ -44,7 +44,9 @@ export function VersionSwitcher({ versions, view, active, onView, compare, canCo
           );
         })}
         {active && !shown.some((v) => v.n === active) && (
-          <button type="button" aria-disabled="true" onClick={() => onBusy(`v${active} 排队中`)}><span className="pulse" /><span className="lbl">v{active}</span></button>
+          <button type="button" aria-disabled="true" onClick={() => onBusy(`v${active} 排队中`)}>
+            <span className="pulse" /><span className="lbl">v{active}</span>
+          </button>
         )}
       </div>
       <button type="button" className={`sw${compare ? ' on' : ''}`} onClick={() => (canCompare ? onCompare(!compare) : onBusy('有两个版本后才能对比'))}

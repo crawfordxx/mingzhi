@@ -42,7 +42,9 @@ export function serveFile(req: IncomingMessage, res: ServerResponse, path: strin
     throw new HttpError(404, '文件不存在');
   }
   const range = parseRange(req.headers.range, size);
-  const headers = { 'Content-Type': opts.type ?? mimeOf(path), 'Accept-Ranges': 'bytes', 'Cache-Control': opts.cacheControl ?? 'no-cache', 'X-Content-Type-Options': 'nosniff' };
+  const headers = {
+    'Content-Type': opts.type ?? mimeOf(path), 'Accept-Ranges': 'bytes', 'Cache-Control': opts.cacheControl ?? 'no-cache', 'X-Content-Type-Options': 'nosniff',
+  };
   if (range === 'invalid') {
     res.writeHead(416, { ...headers, 'Content-Range': `bytes */${size}` });
     res.end();

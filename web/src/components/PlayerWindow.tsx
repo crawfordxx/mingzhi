@@ -24,7 +24,8 @@ function Backdrop({ space, options }: { space: Space; options: Options }) {
   const label = spec?.kind === 'prompt' ? '一句话生成的背景' : spec ? '上传的背景' : '保留原背景';
   return (
     <AnimatePresence initial={false}>
-      <motion.div key={bg.thumb ?? bg.name} className="vid-bg" initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
+      <motion.div key={bg.thumb ?? bg.name} className="vid-bg" initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
         {bg.thumb ? <img src={bg.thumb} alt="" draggable={false} /> : <span className="vid-plain"><small>{label}</small>{spec ? bg.name : null}</span>}
       </motion.div>
     </AnimatePresence>
@@ -40,27 +41,35 @@ export function PlayerWindow({ space, options, lay, totalSec }: Props) {
   const last = space.versions.at(-1);
   const running = last?.status === 'running' ? last.n : undefined;
   return (
-    <motion.div className="player" style={{ width: lay.w + 16, left: lay.left, top: lay.top }} initial={{ opacity: 0, y: 28, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ ...SOFT, delay: 0.18 }}>
+    <motion.div className="player" style={{ width: lay.w + 16, left: lay.left, top: lay.top }}
+      initial={{ opacity: 0, y: 28, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ ...SOFT, delay: 0.18 }}>
       <div className="titlebar"><Lights /><span className="tt">{space.title} — 9:16</span></div>
       <div className="vid" style={{ height: lay.h }}>
         <Backdrop space={space} options={options} />
         <Silhouette />
         <div className="vid-cap" style={{ top: CAPTION_TOP }}>
           <AnimatePresence mode="wait" initial={false}>
-            <motion.span key={s.captionStyle} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2 }}>
+            <motion.span key={s.captionStyle} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2 }}>
               <CaptionSample id={s.captionStyle} size={Math.round(lay.w * 0.075)} />
             </motion.span>
           </AnimatePresence>
         </div>
         <span className="hl badge">设置示意</span>
-        {cover && <motion.img key={cover.id} className="vid-cover" src={cover.example} alt={`封面：${cover.name}`} initial={{ opacity: 0, rotate: -6, y: 8 }} animate={{ opacity: 1, rotate: -3, y: 0 }} transition={SOFT} />}
+        {cover && (
+          <motion.img key={cover.id} className="vid-cover" src={cover.example} alt={`封面：${cover.name}`}
+            initial={{ opacity: 0, rotate: -6, y: 8 }} animate={{ opacity: 1, rotate: -3, y: 0 }} transition={SOFT} />
+        )}
       </div>
       <div className="pctl">
         <button type="button" className="pbtn" disabled aria-label="播放（出片后可用）">{Ico.play}</button>
         <span className="ptime"><b>00:00</b> / {totalSec > 0 ? fmtDuration(totalSec) : '--:--'}</span>
         <div className="pbar" aria-hidden="true" />
       </div>
-      <div className="pmeta"><span>{backgroundLabel(space, options).name} · {cap?.name ?? s.captionStyle}{cover ? ` · ${cover.name}封面` : ''}</span><span>{running ? `正在出 v${running}` : '还没有成片'}</span></div>
+      <div className="pmeta">
+        <span>{backgroundLabel(space, options).name} · {cap?.name ?? s.captionStyle}{cover ? ` · ${cover.name}封面` : ''}</span>
+        <span>{running ? `正在出 v${running}` : '还没有成片'}</span>
+      </div>
     </motion.div>
   );
 }

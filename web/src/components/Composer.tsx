@@ -63,7 +63,8 @@ export function Composer({ ready, convo, clock, shots, locked, onExport }: Props
         <div className="tags" ref={tags}>
           <AnimatePresence initial={false}>
             {refs.map((r, i) => (
-              <motion.span layout key={`${r.sec}-${r.label}`} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }} transition={SPRING}>
+              <motion.span layout key={`${r.sec}-${r.label}`} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.7 }} transition={SPRING}>
                 <TimeRefChip r={r} onRemove={() => convo.removeRef(i)} />
               </motion.span>
             ))}

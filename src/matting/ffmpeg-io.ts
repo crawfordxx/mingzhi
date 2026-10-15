@@ -49,7 +49,14 @@ export async function forEachFrame(p: ChildProcessWithoutNullStreams, frameBytes
 }
 
 /** tmp：编码进程写入的临时文件，成功后改名为 output */
-export interface Encoder { proc: ChildProcessWithoutNullStreams; done: Promise<void>; write: (frame: Buffer) => Promise<void>; broken: () => boolean; tmp: string; output: string }
+export interface Encoder {
+  proc: ChildProcessWithoutNullStreams;
+  done: Promise<void>;
+  write: (frame: Buffer) => Promise<void>;
+  broken: () => boolean;
+  tmp: string;
+  output: string;
+}
 
 /** 先写临时文件，成功后再改名：取消或失败时不破坏已有的好文件 */
 export const tmpOf = (output: string): string => `${output}.${randomUUID().slice(0, 8)}.tmp.mp4`;

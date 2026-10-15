@@ -20,7 +20,8 @@ const DEFAULT_BLUR = 6;
 
 /** 三路输出可任选：output 换背景成片（需要 backgroundPath）、matteOutput 灰度遮罩、fgrOutput 去溢色前景；都是 30fps、与 input 同尺寸、帧一一对应 */
 export interface MatteOptions {
-  input: string; output?: string; backgroundPath?: string; cfg: AppConfig; blurSigma?: number; colorMatch?: boolean; onProgress?: (done: number, total: number) => void;
+  input: string; output?: string; backgroundPath?: string; cfg: AppConfig; blurSigma?: number; colorMatch?: boolean;
+  onProgress?: (done: number, total: number) => void;
   /** 取消信号：逐帧检查，取消时抛 CancelledError 并结束子进程 */
   signal?: AbortSignal;
   /** alpha 遮罩存成灰度视频；与 fgrOutput 配套后，换背景只需合成（见 composite-matte.ts），不必重新推理 */
@@ -138,11 +139,15 @@ interface Layer { enc: Encoder; frame: (fgr: Float32Array, pha: Float32Array) =>
 const personArgs = (input: string, tmp: string, w: number, h: number): string[] => [...rawInput('rgb24', w, h, OUT_FPS),
   '-i', input, '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', tmp];
 /** 灰度遮罩：alpha 量化到 0–255 的全范围 gray，crf 10 近无损（实测渐变往返误差 0） */
-const matteArgs = (tmp: string, w: number, h: number): string[] => [...rawInput('gray', w, h, OUT_FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '10', '-pix_fmt', 'gray', tmp];
+const matteArgs = (tmp: string, w: number, h: number): string[] => [
+  ...rawInput('gray', w, h, OUT_FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '10', '-pix_fmt', 'gray', tmp,
+];
 /** 前景编码质量：实测见 task-5-report「修复轮 2」 */
 const FGR_CRF = 18;
 /** 去溢色前景：RGB 直接编码（libx264rgb，不经 YUV 转换与色度抽样） */
-const fgrArgs = (tmp: string, w: number, h: number): string[] => [...rawInput('rgb24', w, h, OUT_FPS), '-c:v', 'libx264rgb', '-preset', 'veryfast', '-crf', String(FGR_CRF), '-pix_fmt', 'rgb24', tmp];
+const fgrArgs = (tmp: string, w: number, h: number): string[] => [
+  ...rawInput('rgb24', w, h, OUT_FPS), '-c:v', 'libx264rgb', '-preset', 'veryfast', '-crf', String(FGR_CRF), '-pix_fmt', 'rgb24', tmp,
+];
 
 /** 按选项打开各路输出：换背景成片（需要背景）、灰度遮罩、去溢色前景 */
 function openLayers(opts: MatteOptions, w: number, h: number, bg: Buffer | null, gains: Rgb): Layer[] {
@@ -152,7 +157,12 @@ function openLayers(opts: MatteOptions, w: number, h: number, bg: Buffer | null,
     layers.push({ enc: startEncoder(opts.cfg, args(tmp), tmp, output), frame });
   };
   const rgb = Buffer.alloc(w * h * 3);
-  if (opts.output && bg) open(opts.output, (t) => personArgs(opts.input, t, w, h), (fgr, pha) => { compositeFrame(fgr, pha, bg, gains, rgb); return Buffer.from(rgb); });
+  if (opts.output && bg) {
+    open(opts.output, (t) => personArgs(opts.input, t, w, h), (fgr, pha) => {
+      compositeFrame(fgr, pha, bg, gains, rgb);
+      return Buffer.from(rgb);
+    });
+  }
   const alpha = Buffer.alloc(w * h);
   if (opts.matteOutput) open(opts.matteOutput, (t) => matteArgs(t, w, h), (_fgr, pha) => alphaBytes(pha, alpha));
   const fg = Buffer.alloc(w * h * 3);

@@ -42,7 +42,10 @@ export function BudgetFooter({ budget, spent, estimate, estimating, blocker, sta
       <div className="bud-row">
         <label className="bud-k" htmlFor="budget">本项目上限</label>
         <div className="bud-track" style={{ ['--v' as string]: pct(local) }}>
-          {has && <motion.span className={`bud-band${over ? ' over' : ''}`} initial={false} animate={{ left: pct(estimate.low), width: `calc(${pct(estimate.high)} - ${pct(estimate.low)})` }} transition={SOFT} />}
+          {has && (
+            <motion.span className={`bud-band${over ? ' over' : ''}`} initial={false} transition={SOFT}
+              animate={{ left: pct(estimate.low), width: `calc(${pct(estimate.high)} - ${pct(estimate.low)})` }} />
+          )}
           <input id="budget" type="range" min={BUDGET_MIN} max={BUDGET_MAX} step={1} value={local}
             onChange={(e) => setLocal(Number(e.target.value))} onPointerUp={() => local !== budget && onBudget(local)}
             onKeyUp={() => local !== budget && onBudget(local)} aria-valuetext={`上限 ${local} 元`} />
@@ -68,15 +71,23 @@ export function BudgetFooter({ budget, spent, estimate, estimating, blocker, sta
           <span className="go-note">{blocker ?? <It l>(只在需要时扣费)</It>}</span>
         </div>
       </div>
-      <AnimatePresence initial={false}>
-        {open && has && (
-          <motion.ul className="est-items" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SOFT}>
-            {estimate.items.map((i) => (
-              <li key={i.label}><span>{i.label}</span><b>{i.low === i.yuan ? yuan(i.yuan) : `${yuan(i.low)}–${yuan(i.yuan)}`}</b></li>
-            ))}
-          </motion.ul>
-        )}
-      </AnimatePresence>
+      <EstimateItems items={open && has ? estimate.items : undefined} />
     </motion.div>
+  );
+}
+
+/** 预估明细（展开时才有 items） */
+function EstimateItems({ items }: { items?: Estimate['items'] }) {
+  return (
+    <AnimatePresence initial={false}>
+      {items && (
+        <motion.ul className="est-items" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+          transition={SOFT}>
+          {items.map((i) => (
+            <li key={i.label}><span>{i.label}</span><b>{i.low === i.yuan ? yuan(i.yuan) : `${yuan(i.low)}–${yuan(i.yuan)}`}</b></li>
+          ))}
+        </motion.ul>
+      )}
+    </AnimatePresence>
   );
 }

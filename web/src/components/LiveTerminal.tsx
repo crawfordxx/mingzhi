@@ -38,7 +38,12 @@ function Step({ s }: { s: StepLine }) {
     <div className="ln typed">
       {head}<span className="k">{s.label}</span>{'  '}
       <span className={s.state === 'fail' ? 'neg' : 'd'}>{tidy(s)}</span>
-      {s.state === 'run' && s.pct !== undefined && <><span className="tw-bar"><motion.i initial={false} animate={{ width: `${s.pct}%` }} transition={SOFT} /></span><span className="pct">{s.pct}%</span></>}
+      {s.state === 'run' && s.pct !== undefined && (
+        <>
+          <span className="tw-bar"><motion.i initial={false} animate={{ width: `${s.pct}%` }} transition={SOFT} /></span>
+          <span className="pct">{s.pct}%</span>
+        </>
+      )}
       {s.state === 'ok' && elapsed(s) && <span className="d"> · {elapsed(s)}</span>}
     </div>
   );
@@ -68,7 +73,8 @@ export function LiveTerminal({ view, title, command, comment, animate, place }: 
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: animate ? 'smooth' : 'auto' });
   }, [view.steps.length, view.status, animate]);
   return (
-    <motion.div className={`tw term${animate ? '' : ' still'}`} style={place} initial={{ opacity: 0, y: 24, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.96 }} transition={SOFT}>
+    <motion.div className={`tw term${animate ? '' : ' still'}`} style={place} initial={{ opacity: 0, y: 24, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.96 }} transition={SOFT}>
       <div className="titlebar"><Lights size={10} /><span className="tt">Terminal — {title} — 100×30</span></div>
       <div className="term-body" ref={body}>
         {command && <div className="ln typed"><span className="p">$ </span>{command}</div>}
@@ -77,7 +83,8 @@ export function LiveTerminal({ view, title, command, comment, animate, place }: 
         {view.steps.map((s) => <Step key={s.step} s={s} />)}
         {view.status === 'done' && (
           <>
-            <div className="ln typed"><span className="p">→ </span>{view.sourceSec !== undefined ? fmtDuration(view.sourceSec) : '—'} → {view.outputSec !== undefined ? fmtDuration(view.outputSec) : '—'}
+            <div className="ln typed"><span className="p">→ </span>
+              {view.sourceSec !== undefined ? fmtDuration(view.sourceSec) : '—'} → {view.outputSec !== undefined ? fmtDuration(view.outputSec) : '—'}
               {view.shots.length ? ` · ${view.shots.length} 个镜头` : ''}{view.cost ? ` · ${yuan(view.cost.total)}` : ''}</div>
             <div className="ln"><span className="p">$ </span><span className="caret" /></div>
           </>

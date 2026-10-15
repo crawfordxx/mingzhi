@@ -33,7 +33,9 @@ export function handleEvents(app: AppCtx, c: RouteCtx): void {
   const version = pickVersion(app, id, c.query.get('version'));
   const resumeFrom = Number(req.headers['last-event-id'] ?? c.query.get('lastEventId') ?? 0);
   let last = Number.isFinite(resumeFrom) ? resumeFrom : 0;
-  res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no',
+  });
   res.write(`retry: 3000\n: connected v${version}\n\n`);
   const send = (e: WorkEvent): void => {
     if (e.version !== version || e.seq <= last) return;

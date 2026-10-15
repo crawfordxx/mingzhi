@@ -71,7 +71,8 @@ function checkOptions(raw: unknown, state: VersionState, tracks: Track[]): { opt
 /** 让模型根据用户的一句话和当前版本给出修改方案；非法操作（含版式规则不允许的）逐条丢弃并在回复末尾说明，整体不可用时抛中文错误 */
 export async function planEdit(client: LlmClient, message: string, state: VersionState, tracks: Track[] = loadTracks()): Promise<EditPlan> {
   const context = buildEditContext(state, message, tracks);
-  const raw = await client.chatJson({ model: EDIT_MODEL, system: SYSTEM_PROMPT, user: `${formatContext(context)}\n\n用户的话：${message}`, reasoningEffort: 'low', label: '修改' });
+  const user = `${formatContext(context)}\n\n用户的话：${message}`;
+  const raw = await client.chatJson({ model: EDIT_MODEL, system: SYSTEM_PROMPT, user, reasoningEffort: 'low', label: '修改' });
   const top = TopSchema.safeParse(raw);
   if (!top.success) throw new Error('模型返回的修改方案格式不对（缺少 reply 或 ops 不是数组），请换个说法再试一次');
   const direct = validateOps(top.data.ops, state, tracks);

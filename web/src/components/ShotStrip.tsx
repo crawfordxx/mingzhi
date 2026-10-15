@@ -16,7 +16,8 @@ function Tile({ s, backdrop, animate, hot, onSeek }: TileProps) {
   return (
     <motion.button type="button" className={`tile ${s.layout}${hot ? ' hot' : ''}`} disabled={!onSeek} onClick={() => onSeek?.(s.start + 0.01)}
       title={`#${s.index + 1} · ${cardName(s)}${s.title ? `「${s.title}」` : ''} · ${fmtDuration(s.start)}–${fmtDuration(s.end)}`}
-      initial={animate ? { opacity: 0, y: 8, scale: 1.18 } : false} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ ...SPRING, delay: animate ? s.index * 0.07 : 0 }}>
+      initial={animate ? { opacity: 0, y: 8, scale: 1.18 } : false} animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ ...SPRING, delay: animate ? s.index * 0.07 : 0 }}>
       {backdrop ? <img src={backdrop} alt="" draggable={false} /> : <span className="tile-bg" />}
       <img className="tile-sil" src="/art/silhouette.webp" alt="" draggable={false} />
       {s.layout === 'split' && <span className="tile-card"><i /><i /><i /></span>}

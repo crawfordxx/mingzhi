@@ -21,7 +21,8 @@ export function InsertRef({ r, onInsert }: { r?: TimeRef; onInsert: (r: TimeRef)
     <AnimatePresence mode="popLayout" initial={false}>
       {r && (
         <motion.button key={`${r.sec}-${r.label}`} type="button" className="ref-insert" onClick={() => onInsert(r)}
-          initial={{ opacity: 0, y: 6, filter: 'blur(3px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} exit={{ opacity: 0, y: -4, filter: 'blur(2px)' }}
+          initial={{ opacity: 0, y: 6, filter: 'blur(3px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, y: -4, filter: 'blur(2px)' }}
           transition={{ ...SPRING, filter: { duration: 0.2, ease: 'easeOut' } }} whileTap={{ scale: 0.96 }}>
           {Ico.plus}插入 <span className="hl ref sm">@{mmss(r.sec)}<span className="ref-nm">{r.label}</span></span>
         </motion.button>

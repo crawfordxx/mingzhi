@@ -37,11 +37,15 @@ function Command({ space }: { space: Space }) {
 export function StageTerminal({ space, options, estimate, totalSec, place }: Props) {
   const files = space.inputs;
   const coverId = space.settings.coverStyle ?? DEFAULT_COVER;
-  const names = [space.settings.background ? backgroundLabel(space, options).name : '原背景',
-    options.captionStyles.find((c) => c.id === space.settings.captionStyle)?.name, options.coverStyles.find((c) => c.id === coverId)?.name].filter(Boolean).join(' · ');
+  const names = [
+    space.settings.background ? backgroundLabel(space, options).name : '原背景',
+    options.captionStyles.find((c) => c.id === space.settings.captionStyle)?.name,
+    options.coverStyles.find((c) => c.id === coverId)?.name,
+  ].filter(Boolean).join(' · ');
   const est = estimate && estimate.high > 0 ? `${yuan(estimate.low)}–${yuan(estimate.high)}` : '—';
   return (
-    <motion.div className="tw" style={place} initial={{ opacity: 0, y: 24, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.96 }} transition={{ ...SOFT, delay: 0.32 }}>
+    <motion.div className="tw" style={place} initial={{ opacity: 0, y: 24, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 16, scale: 0.96 }} transition={{ ...SOFT, delay: 0.32 }}>
       <div className="titlebar"><Lights size={10} /><span className="tt">Terminal — {space.title} — 100×30</span></div>
       <div className="tw-body">
         <Command space={space} />
