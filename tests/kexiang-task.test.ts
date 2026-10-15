@@ -79,6 +79,38 @@ describe('KexiangTaskClient', () => {
     expect(order).toEqual(['submit', 'poll', 'submit', 'poll']);
   });
 
+  it('状态大小写不敏感：FAILED 也按失败处理', async () => {
+    const { impl } = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'FAILED' } }]);
+    await expect(new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('可想任务失败');
+  });
+
+  it('轮询连续失败最多容忍 3 次，成功后重置计数', async () => {
+    const { impl } = fakeFetch([
+      { body: { id: 1 } },
+      { status: 500, body: { msg: '服务繁忙' } },
+      { status: 500, body: { msg: '服务繁忙' } },
+      { body: { task_status: 'success', service_output: { imgUrl: 'https://x/ok.jpg' } } },
+    ]);
+    const res = await new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' });
+    expect(res.url).toBe('https://x/ok.jpg');
+  });
+
+  it('轮询连续第 4 次失败时报错，并带任务 id', async () => {
+    const { impl } = fakeFetch([
+      { body: { id: 42 } },
+      { status: 500, body: { msg: '服务繁忙' } },
+      { status: 500, body: { msg: '服务繁忙' } },
+      { status: 500, body: { msg: '服务繁忙' } },
+      { status: 500, body: { msg: '服务繁忙' } },
+    ]);
+    await expect(new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('可想任务 42 查询失败');
+  });
+
+  it('成功状态但没有对应地址时报错', async () => {
+    const { impl } = fakeFetch([{ body: { id: 9 } }, { body: { task_status: 'success', service_output: {} } }]);
+    await expect(new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('可想任务 9 已完成但没有返回图片地址');
+  });
+
   it('没有 key 时构造报错', () => {
     expect(() => new KexiangTaskClient('')).toThrow('MINGZHI_KX_KEY');
   });

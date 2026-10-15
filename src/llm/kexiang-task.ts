@@ -4,6 +4,9 @@ import { pipeline } from 'node:stream/promises';
 
 export const KEXIANG_TASK_BASE = 'https://kexiangai.com/api/v1/user_task';
 const FAILED = new Set(['failed', 'fail', 'error', 'cancelled']);
+const SUCCEEDED = new Set(['success', 'succeeded', 'completed']);
+/** 轮询连续失败的容忍次数，超过则放弃（任务可能仍在云端运行，但已付费，报错让调用方知情） */
+const MAX_POLL_FAILURES = 3;
 
 export interface TaskInput { modelName: string; modelType: string; [key: string]: unknown }
 export interface TaskResult { taskId: string; url: string; cost?: number }
@@ -34,14 +37,24 @@ export class KexiangTaskClient implements TaskClient {
     const submitted = await this.request<{ id?: number | string }>(`${KEXIANG_TASK_BASE}/asyncCreateWithCost`, { method: 'POST', body: JSON.stringify({ user_input: input }) });
     if (submitted.id === undefined) throw new Error(`可想任务提交失败：${JSON.stringify(submitted).slice(0, 200)}`);
     const taskId = String(submitted.id);
+    let pollFailures = 0;
     for (let waited = 0; waited < timeoutMs; waited += this.pollMs) {
       await this.sleep(this.pollMs);
-      const q = await this.request<TaskQuery>(`${KEXIANG_TASK_BASE}/get/passAuth/${taskId}`);
+      let q: TaskQuery;
+      try {
+        q = await this.request<TaskQuery>(`${KEXIANG_TASK_BASE}/get/passAuth/${taskId}`);
+        pollFailures = 0;
+      } catch (err) {
+        pollFailures += 1;
+        if (pollFailures > MAX_POLL_FAILURES) throw new Error(`可想任务 ${taskId} 查询失败：${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
       const out = q.service_output ?? {};
-      const status = String(q.task_status ?? '');
+      const status = String(q.task_status ?? '').toLowerCase();
       if (out.failReason || FAILED.has(status)) throw new Error(`可想任务失败：${out.failReason ?? status}`);
       const url = kind === 'image' ? out.imgUrl : out.videoUrl;
       if (url) return { taskId, url, ...(q.cost !== undefined ? { cost: q.cost } : {}) };
+      if (SUCCEEDED.has(status)) throw new Error(`可想任务 ${taskId} 已完成但没有返回${kind === 'image' ? '图片' : '视频'}地址`);
       onStatus?.(status);
     }
     throw new Error(`可想任务 ${taskId} 等待超时（${Math.round(timeoutMs / 1000)} 秒）`);
