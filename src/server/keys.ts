@@ -12,7 +12,7 @@ const KEY_TTL_MS = 10_000;
 const MIN_KEY_CHARS = 6;
 const REDACTED = 'sk-***';
 /** 任何 sk- 开头的长串都当作 key */
-const KEY_LIKE = /sk-[A-Za-z0-9_-]{16,}/g;
+const KEY_LIKE = /(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{16,}/g;
 
 /**
  * 当前 key 的短时缓存（避免每次错误响应、每次状态轮询都起一个 security 子进程读钥匙串），

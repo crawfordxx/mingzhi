@@ -61,6 +61,13 @@ describe('事件流里的 key 一律抹除（I1）', () => {
     expect(cache.redact('旧 first-key-0123456789 新 sk-second-key-987654321')).toBe('旧 sk-*** 新 sk-***');
   });
 
+  it('抹除只认独立的 sk- 串，不误伤 task-render-segments-abcdef 这类普通文本', async () => {
+    const cache = new KeyCache({ dataDir: '/nonexistent' }, { get: async () => null, set: async () => undefined, clear: async () => undefined });
+    await cache.get();
+    expect(cache.redact('task-render-segments-abcdef disk-cache-directory-name')).toBe('task-render-segments-abcdef disk-cache-directory-name');
+    expect(cache.redact(`key=${'sk-'}abcdefghijklmnop1234`)).toBe('key=sk-***');
+  });
+
   it('错误响应与状态轮询不会每次都去读钥匙串', async () => {
     t = await startTestApp({ key: GOOD_KEY });
     let reads = 0;
