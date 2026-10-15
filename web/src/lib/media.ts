@@ -33,6 +33,7 @@ export const fmtSize = (bytes: number): string =>
 
 export const yuan = (v: number): string => `¥${v.toFixed(2)}`;
 
-/** 口播只收视频与音频；按扩展名兜底（有些系统给 .mov 的 type 为空） */
-export const isMediaFile = (f: File): boolean => /^(video|audio)\//.test(f.type) || /\.(mov|mp4|m4v|mkv|webm|mp3|m4a|wav|aac)$/i.test(f.name);
+/** 口播只收视频（服务端用 ffprobe 认 mp4/mov/m4v/mkv/webm/avi）；按扩展名兜底，有些系统给 .mov 的 type 为空 */
+export const VIDEO_ACCEPT = 'video/*,.mp4,.mov,.m4v,.mkv,.webm,.avi';
+export const isVideoFile = (f: File): boolean => /^video\//.test(f.type) || /\.(mp4|mov|m4v|mkv|webm|avi)$/i.test(f.name);
 export const isImageFile = (f: File): boolean => /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic)$/i.test(f.name);

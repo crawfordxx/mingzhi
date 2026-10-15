@@ -1,11 +1,11 @@
 /** 工作台状态：项目列表、当前项目、选项、预估与上传队列；所有更新走不可变替换 */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, type Estimate, type Options, type Space, type SpaceSettings, type Status } from './api';
-import { isImageFile, isMediaFile, probeVideo, type VideoMeta } from './lib/media';
+import { api, ApiError, type Estimate, type Options, type SettingsPatch, type Space, type Status } from './api';
+import { useUploads } from './useUploads';
 
-export interface Upload { key: string; name: string; size: number; progress: number; state: 'uploading' | 'done' | 'error'; error?: string; meta?: VideoMeta }
+export type { Upload } from './useUploads';
 
-const errText = (err: unknown): string => (err instanceof ApiError || err instanceof Error ? err.message : String(err));
+export const errText = (err: unknown): string => (err instanceof ApiError || err instanceof Error ? err.message : String(err));
 
 function useToast() {
   const [toast, setToast] = useState<string>();
@@ -17,7 +17,14 @@ function useToast() {
   return { toast, notify: useCallback((msg: string) => setToast(msg), []) };
 }
 
-/** 首屏：状态、选项、项目一起取；没有项目时建一个空的 */
+type BootData = { status: Status; options: Options; spaces: Space[] };
+/** 首屏数据只取一次（StrictMode 开发模式下 effect 会跑两遍，不能建出两个空项目） */
+let bootOnce: Promise<BootData> | undefined;
+const loadBoot = () => (bootOnce ??= (async () => {
+  const [status, options, list] = await Promise.all([api.status(), api.options(), api.listSpaces()]);
+  return { status, options, spaces: list.length ? list : [await api.createSpace()] };
+})());
+
 function useBoot() {
   const [status, setStatus] = useState<Status>();
   const [options, setOptions] = useState<Options>();
@@ -26,28 +33,28 @@ function useBoot() {
   const [loadError, setLoadError] = useState<string>();
   useEffect(() => {
     let alive = true;
-    (async () => {
-      try {
-        const [st, opts, list] = await Promise.all([api.status(), api.options(), api.listSpaces()]);
-        const all = list.length ? list : [await api.createSpace()];
-        if (!alive) return;
-        setStatus(st); setOptions(opts); setSpaces(all); setCurrentId(all[0].id);
-      } catch (err) {
-        if (alive) setLoadError(errText(err));
-      }
-    })();
+    loadBoot().then((d) => {
+      if (!alive) return;
+      setStatus(d.status); setOptions(d.options); setSpaces(d.spaces); setCurrentId(d.spaces[0].id);
+    }, (err: unknown) => { bootOnce = undefined; if (alive) setLoadError(errText(err)); });
     return () => { alive = false; };
   }, []);
   return { status, setStatus, options, spaces, setSpaces, currentId, setCurrentId, loadError };
 }
 
-/** 预估：只采纳最后一次请求的结果，避免快速改设置时旧结果覆盖新结果 */
-function useEstimate(notify: (m: string) => void) {
+/** 预估：只采纳当前项目最后一次请求的结果；没有口播时不请求（服务端会 400） */
+function useEstimate(current: Space | undefined, notify: (m: string) => void) {
   const [estimate, setEstimate] = useState<Estimate>();
   const [estimating, setEstimating] = useState(false);
   const seq = useRef(0);
-  const refresh = useCallback(async (id: string) => {
+  const currentRef = useRef(current);
+  currentRef.current = current;
+  /** 传入服务端刚返回的项目；不是当前项目就忽略（切回来时会重新估） */
+  const refresh = useCallback(async (target: Space) => {
+    const id = target.id;
+    if (currentRef.current?.id !== id) return;
     const mine = ++seq.current;
+    if (!target.inputs.length) { setEstimate(undefined); setEstimating(false); return; }
     setEstimating(true);
     try {
       const est = await api.estimate(id);
@@ -59,91 +66,64 @@ function useEstimate(notify: (m: string) => void) {
       if (mine === seq.current) setEstimating(false);
     }
   }, [notify]);
-  return { estimate, setEstimate, estimating, refresh };
+  return { estimate, estimating, refresh };
 }
 
-/** 口播逐段上传：本地先读时长/分辨率，上传进度来自 XHR */
-function useUploads(space: Space | undefined, putSpace: (s: Space) => void, after: (id: string) => void, notify: (m: string) => void) {
-  const [uploads, setUploads] = useState<Upload[]>([]);
-  const patch = (key: string, p: Partial<Upload>) => setUploads((list) => list.map((u) => (u.key === key ? { ...u, ...p } : u)));
-  const addInputs = useCallback(async (files: File[]) => {
-    if (!space) return;
-    const media = files.filter(isMediaFile);
-    if (media.length < files.length) notify('只收视频或音频文件，其他文件已跳过');
-    for (const file of media) {
-      const key = `${file.name}-${file.size}-${Date.now()}`;
-      setUploads((list) => [...list, { key, name: file.name, size: file.size, progress: 0, state: 'uploading' }]);
-      void probeVideo(file).then((meta) => meta && patch(key, { meta }));
-      try {
-        putSpace(await api.uploadInput(space.id, file, (p) => patch(key, { progress: p })));
-        patch(key, { progress: 1, state: 'done' });
-      } catch (err) {
-        patch(key, { state: 'error', error: errText(err) });
-      }
-    }
-    after(space.id);
-  }, [space, putSpace, after, notify]);
-  const dropUpload = useCallback((key: string) => setUploads((list) => list.filter((u) => u.key !== key)), []);
-  return { uploads, setUploads, addInputs, dropUpload };
-}
-
-/** 当前项目上的操作：改设置（乐观更新，失败回滚）、上传背景、开始出片 */
-function useSpaceActions(space: Space | undefined, putSpace: (s: Space) => void, refresh: (id: string) => void, notify: (m: string) => void) {
-  const [bgUpload, setBgUpload] = useState<{ name: string; progress: number }>();
+/**
+ * 当前项目上的操作。设置保存按顺序串行（一句话背景失焦提交后紧接着点开始，也保证先存设置再开始）；
+ * 保存失败时以服务端为准重新取一次项目，而不是回滚到闭包里的旧值。
+ */
+function useSpaceActions(space: Space | undefined, putSpace: (s: Space) => void, refresh: (s: Space) => void, notify: (m: string) => void) {
   const [starting, setStarting] = useState(false);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
 
-  const updateSettings = useCallback(async (patch: Partial<SpaceSettings>) => {
-    if (!space) return;
-    putSpace({ ...space, settings: { ...space.settings, ...patch } });
-    try {
-      putSpace(await api.patchSpace(space.id, { settings: patch }));
-      refresh(space.id);
-    } catch (err) {
-      putSpace(space);
-      notify(`没保存上：${errText(err)}`);
-    }
-  }, [space, putSpace, refresh, notify]);
-
-  const uploadBackground = useCallback(async (file: File) => {
-    if (!space) return;
-    if (!isImageFile(file)) { notify('背景只收图片（jpg / png / webp）'); return; }
-    setBgUpload({ name: file.name, progress: 0 });
-    try {
-      putSpace(await api.uploadBackground(space.id, file, (p) => setBgUpload({ name: file.name, progress: p })));
-      refresh(space.id);
-    } catch (err) {
-      notify(`背景上传失败：${errText(err)}`);
-    } finally {
-      setBgUpload(undefined);
-    }
+  const updateSettings = useCallback((patch: SettingsPatch) => {
+    if (!space) return Promise.resolve();
+    const { background, ...rest } = { ...space.settings, ...patch };
+    putSpace({ ...space, settings: background ? { ...rest, background } : rest });
+    const id = space.id;
+    const run = queue.current.then(async () => {
+      let saved: Space | undefined;
+      try {
+        saved = await api.patchSpace(id, { settings: patch });
+      } catch (err) {
+        notify(`没保存上：${errText(err)}`);
+        saved = await api.getSpace(id).catch(() => undefined);
+      }
+      if (saved) { putSpace(saved); refresh(saved); }
+    });
+    queue.current = run;
+    return run;
   }, [space, putSpace, refresh, notify]);
 
   const start = useCallback(async () => {
     if (!space) return;
     setStarting(true);
     try {
-      await api.start(space.id);
-      putSpace(await api.getSpace(space.id));
-    } catch (err) {
-      notify(errText(err));
+      await queue.current;
+      try { await api.start(space.id); } catch (err) { notify(errText(err)); return; }
+      try { putSpace(await api.getSpace(space.id)); } catch (err) { notify(`已开始出片，但刷新项目状态失败：${errText(err)}`); }
     } finally {
       setStarting(false);
     }
   }, [space, putSpace, notify]);
 
-  return { bgUpload, starting, updateSettings, uploadBackground, start };
+  return { starting, updateSettings, start };
 }
 
 export function useWorkbench() {
   const { toast, notify } = useToast();
   const { status, setStatus, options, spaces, setSpaces, currentId, setCurrentId, loadError } = useBoot();
-  const { estimate, setEstimate, estimating, refresh } = useEstimate(notify);
   const space = useMemo(() => spaces.find((s) => s.id === currentId), [spaces, currentId]);
+  const { estimate, estimating, refresh } = useEstimate(space, notify);
   const putSpace = useCallback((next: Space) => setSpaces((list) => list.map((s) => (s.id === next.id ? next : s))), [setSpaces]);
-  const { uploads, setUploads, addInputs, dropUpload } = useUploads(space, putSpace, refresh, notify);
+  const up = useUploads(space, putSpace, refresh, notify);
   const actions = useSpaceActions(space, putSpace, refresh, notify);
 
-  useEffect(() => { setUploads([]); setEstimate(undefined); if (currentId) void refresh(currentId); }, [currentId, refresh, setUploads, setEstimate]);
+  // 只在切换项目时重估；其余时机由上传/保存拿到服务端结果后触发
+  const spaceRef = useRef(space);
+  spaceRef.current = space;
+  useEffect(() => { if (spaceRef.current) void refresh(spaceRef.current); }, [currentId, refresh]);
 
   const newSpace = useCallback(async () => {
     try {
@@ -157,10 +137,7 @@ export function useWorkbench() {
 
   const keyVerified = useCallback(() => setStatus((s) => (s ? { ...s, keyConfigured: true } : s)), [setStatus]);
 
-  return {
-    status, options, spaces, space, loadError, toast, estimate, estimating, uploads, ...actions,
-    selectSpace: setCurrentId, newSpace, addInputs, dropUpload, keyVerified, notify,
-  };
+  return { status, options, spaces, space, loadError, toast, estimate, estimating, ...up, ...actions, selectSpace: setCurrentId, newSpace, keyVerified, notify };
 }
 
 export type Workbench = ReturnType<typeof useWorkbench>;

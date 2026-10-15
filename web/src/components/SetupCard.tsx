@@ -43,7 +43,9 @@ interface Props { wb: Workbench; space: Space; options: Options }
 
 export function blockerOf(wb: Workbench, space: Space, keyReady: boolean): string | undefined {
   if (!keyReady) return '先在上方连上可想 AI';
+  if (space.job) return '已在出片';
   if (wb.uploads.some((u) => u.state === 'uploading')) return '等口播传完…';
+  if (wb.bgUpload) return '等背景图传完…';
   if (!space.inputs.length) return '先放入至少一段口播';
   return undefined;
 }
@@ -70,18 +72,18 @@ export function SetupCard({ wb, space, options }: Props) {
   return (
     <motion.div layout className="card setup" transition={SOFT}>
       <Section n={1} title="口播" value={space.inputs.length ? `${space.inputs.length} 段` : undefined} aside={<It>(1–N 段)</It>}>
-        <InputsDrop inputs={space.inputs} uploads={wb.uploads} onFiles={wb.addInputs} onDismiss={wb.dropUpload} />
+        <InputsDrop inputs={space.inputs} uploads={wb.uploads} onFiles={wb.addInputs} onCancel={wb.cancelUpload} onDismiss={wb.dropUpload} onRemove={wb.removeInput} />
       </Section>
       <Section n={2} title="背景" value={bg.name}
-        aside={<button type="button" className={`keep${s.background ? '' : ' on'}`} onClick={() => wb.updateSettings({ background: undefined })} aria-pressed={!s.background}>不换背景</button>}>
+        aside={<button type="button" className={`keep${s.background ? '' : ' on'}`} onClick={() => void wb.updateSettings({ background: null })} aria-pressed={!s.background}>不换背景</button>}>
         <BackgroundPicker options={options.backgrounds} value={s.background} uploading={wb.bgUpload}
-          onChange={(b) => wb.updateSettings({ background: b })} onUpload={wb.uploadBackground} />
+          onChange={(b) => void wb.updateSettings({ background: b })} onUpload={wb.uploadBackground} />
       </Section>
       <Section n={3} title="字幕样式" value={cap?.name}>
-        <CaptionPicker options={options.captionStyles} value={s.captionStyle} backdrop={bg.thumb} onChange={(id) => wb.updateSettings({ captionStyle: id })} />
+        <CaptionPicker options={options.captionStyles} value={s.captionStyle} backdrop={bg.thumb} onChange={(id) => void wb.updateSettings({ captionStyle: id })} />
       </Section>
       <Section n={4} title="封面风格" value={cover?.name} aside={<It>(示例图，不含真人)</It>}>
-        <CoverPicker options={options.coverStyles} value={coverId} onChange={(id) => wb.updateSettings({ coverStyle: id })} />
+        <CoverPicker options={options.coverStyles} value={coverId} onChange={(id) => void wb.updateSettings({ coverStyle: id })} />
       </Section>
     </motion.div>
   );

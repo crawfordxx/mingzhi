@@ -10,9 +10,12 @@ import { backgroundLabel, DEFAULT_COVER } from './SetupCard';
 /** 字幕中心在 1080×1920 画布的 y=1400（src/captions/styles.ts 的 FULL_CAPTION_Y） */
 const CAPTION_TOP = `${(1400 / 1920) * 100}%`;
 
-/** 抽象人形剪影（磨砂玻璃），只示意人物放在哪，不是真人 */
+/**
+ * 人物位置示意：无面孔的磨砂玻璃半身像（GPT Image 生成的抽象模特胸像，亮度转透明度）。
+ * 底层用同形遮罩做背景模糊，上层叠半透明高光，像一块立在背景前的玻璃，不是真人
+ */
 const Silhouette = () => (
-  <span className="sil" aria-hidden="true"><i className="sil-head" /><i className="sil-body" /></span>
+  <span className="sil" aria-hidden="true"><span className="sil-glass" /><img className="sil-img" src="/art/silhouette.webp" alt="" draggable={false} /></span>
 );
 
 function Backdrop({ space, options }: { space: Space; options: Options }) {
@@ -44,7 +47,7 @@ export function PlayerWindow({ space, options, lay, totalSec }: Props) {
         <div className="vid-cap" style={{ top: CAPTION_TOP }}>
           <AnimatePresence mode="wait" initial={false}>
             <motion.span key={s.captionStyle} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2 }}>
-              <CaptionSample id={s.captionStyle} preview={cap?.preview || undefined} size={Math.round(lay.w * 0.075)} />
+              <CaptionSample id={s.captionStyle} size={Math.round(lay.w * 0.075)} />
             </motion.span>
           </AnimatePresence>
         </div>

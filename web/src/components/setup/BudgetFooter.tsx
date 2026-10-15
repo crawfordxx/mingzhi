@@ -1,5 +1,5 @@
 /** 设置卡底栏：预算滑块（轨道上标出预估区间）+ 预估花费（数字滚动）+ 明细 +「开始出片」黑胶囊 */
-import { AnimatePresence, motion, useSpring, useTransform } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from 'motion/react';
 import { useEffect, useState } from 'react';
 import type { Estimate } from '../../api';
 import { yuan } from '../../lib/media';
@@ -9,8 +9,9 @@ export const BUDGET_MIN = 3;
 export const BUDGET_MAX = 30;
 
 function Num({ value }: { value: number }) {
+  const reduce = useReducedMotion();
   const spring = useSpring(value, { stiffness: 180, damping: 26 });
-  useEffect(() => { spring.set(value); }, [spring, value]);
+  useEffect(() => { if (reduce) spring.jump(value); else spring.set(value); }, [spring, value, reduce]);
   const text = useTransform(spring, (v) => v.toFixed(2));
   return <motion.span>{text}</motion.span>;
 }

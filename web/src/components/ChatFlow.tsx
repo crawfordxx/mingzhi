@@ -1,5 +1,5 @@
 /** 左侧对话流：标题 + 欢迎语 + key 卡 + 设置卡；开始出片后在这里接剪辑直播（下一个任务） */
-import { AnimatePresence, motion, useScroll, useSpring, useTransform } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring, useTransform } from 'motion/react';
 import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import { spentOf, type Options, type Space } from '../api';
 import { yuan } from '../lib/media';
@@ -36,7 +36,8 @@ function Title({ text }: { text: string }) {
 function ChatHeader({ space, stream }: { space: Space; stream: RefObject<HTMLDivElement> }) {
   const { scrollY, scrollYProgress } = useScroll({ container: stream, layoutEffect: false });
   const shadow = useTransform(scrollY, [0, 24], ['0 1px 0 rgba(0,0,0,0), 0 10px 24px -14px rgba(0,0,0,0)', '0 1px 0 rgba(0,0,0,.06), 0 10px 24px -14px rgba(0,0,0,.3)']);
-  const progress = useSpring(scrollYProgress, { stiffness: 140, damping: 30 });
+  const smooth = useSpring(scrollYProgress, { stiffness: 140, damping: 30 });
+  const progress = useReducedMotion() ? scrollYProgress : smooth;
   return (
     <motion.header className="chat-head" style={{ boxShadow: shadow }}>
       <div>

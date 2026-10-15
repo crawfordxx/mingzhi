@@ -22,6 +22,8 @@ export const Ico = {
   spark: <svg viewBox="0 0 16 16" {...stroke}><path d="M8 2.5 9.3 6.7 13.5 8 9.3 9.3 8 13.5 6.7 9.3 2.5 8l4.2-1.3z" /></svg>,
   film: <svg viewBox="0 0 16 16" {...stroke}><rect x="3" y="2" width="10" height="12" rx="2" /><path d="M6 6.5v3l3-1.5z" fill="currentColor" stroke="none" /></svg>,
   key: <svg viewBox="0 0 16 16" {...stroke}><circle cx="5.5" cy="10.5" r="3" /><path d="m7.6 8.4 5.4-5.4M11 5l1.6 1.6M9.5 6.5l1.2 1.2" /></svg>,
+  chevL: <svg viewBox="0 0 16 16" {...stroke} strokeWidth={1.8}><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>,
+  chevR: <svg viewBox="0 0 16 16" {...stroke} strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" /></svg>,
   lock: <svg viewBox="0 0 16 16" {...stroke}><rect x="3.5" y="7" width="9" height="6.5" rx="1.6" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" /></svg>,
 };
 

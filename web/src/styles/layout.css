@@ -7,6 +7,7 @@
 .bar .btn svg { width: 13px; height: 13px; }
 .bar-msg { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
 .bar-msg b { font-weight: 600; display: inline-block; }
+.bar-mock { font: 600 12px/1 var(--sans); color: #fff; background: var(--negative); border-radius: 999px; padding: 5px 9px; }
 .bar-sep { color: var(--brand-3); margin: 0 6px; }
 
 /* ---------- Spaces ---------- */

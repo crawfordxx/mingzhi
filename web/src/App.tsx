@@ -1,5 +1,6 @@
 /** 工作台外壳：公告条 / Spaces 栏 / 对话流 / 大预览 */
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import { useEffect } from 'react';
 import { spentOf } from './api';
 import { AnnouncementBar } from './components/AnnouncementBar';
 import { ChatFlow } from './components/ChatFlow';
@@ -11,8 +12,15 @@ import { It, SPRING } from './ui';
 
 export function App() {
   const wb = useWorkbench();
+  // 文件拖到拖入区以外时，阻止浏览器直接打开视频、把工作台换掉
+  useEffect(() => {
+    const stop = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); };
+    window.addEventListener('dragover', stop);
+    window.addEventListener('drop', stop);
+    return () => { window.removeEventListener('dragover', stop); window.removeEventListener('drop', stop); };
+  }, []);
   const { space, options } = wb;
-  const totalSec = wb.uploads.reduce((a, u) => a + (u.state === 'done' && u.meta ? u.meta.duration : 0), 0);
+  const totalSec = wb.estimate?.durationSec ?? 0;
   const ready = !!space?.versions.some((v) => v.status === 'done');
 
   return (

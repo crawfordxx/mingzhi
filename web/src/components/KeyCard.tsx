@@ -1,11 +1,14 @@
 /** 首次无 key：输入框 + 去可想 AI 注册（不带邀请码）+ 校验状态；通过后收成一行 */
 import { AnimatePresence, motion, useAnimationControls } from 'motion/react';
 import { useState, type FormEvent } from 'react';
-import { api, type KeyInfo } from '../api';
+import { api, type KeyInfo, type KeySource } from '../api';
 import { Ico, It, SOFT, SPRING, Tap } from '../ui';
 import { KEXIANG_URL } from './AnnouncementBar';
 
 type Phase = { kind: 'idle' } | { kind: 'checking' } | { kind: 'error'; message: string } | { kind: 'ok'; info: KeyInfo };
+
+/** 按服务端返回的实际存储位置说明 key 在哪（安全相关，不能写死） */
+const WHERE: Record<KeySource, string> = { keychain: '(存在系统钥匙串)', file: '(存在本机数据目录，仅本人可读)', env: '(来自环境变量 MINGZHI_KX_KEY)' };
 
 function KeyDone({ info }: { info: KeyInfo }) {
   return (
@@ -13,7 +16,7 @@ function KeyDone({ info }: { info: KeyInfo }) {
       <motion.span className="key-ok" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ ...SPRING, delay: 0.1 }}>{Ico.check}</motion.span>
       <span>可想 AI 已连接</span>
       <span className="key-mask">{info.masked ?? ''}</span>
-      <It className="key-where">(存在本机钥匙串)</It>
+      {info.source && <It className="key-where">{WHERE[info.source]}</It>}
     </motion.div>
   );
 }
@@ -66,16 +69,16 @@ export function KeyCard({ onVerified }: { onVerified: () => void }) {
         <span className="key-ico">{Ico.key}</span>
         <div>
           <h3>先连上可想 AI <It l>(只需一次)</It></h3>
-          <p>剪口误、配图和做封面会调用可想 AI 的模型。key 只保存在这台电脑的钥匙串里，不会上传到别处。</p>
+          <p>剪口误、配图和做封面会调用可想 AI 的模型。key 只保存在这台电脑上（优先系统钥匙串），不会上传到别处。</p>
         </div>
       </div>
       <motion.div className={`key-row${phase.kind === 'error' ? ' bad' : ''}`} animate={shake}>
-        <label className="key-field">
-          <span className="sr">可想 AI key</span>
-          <input type={reveal ? 'text' : 'password'} value={value} placeholder="sk-…" autoComplete="off" spellCheck={false} disabled={checking}
+        <div className="key-field">
+          <input type={reveal ? 'text' : 'password'} value={value} placeholder="sk-…" autoComplete="new-password" spellCheck={false} disabled={checking}
+            aria-label="可想 AI key" name="kexiang-key" data-1p-ignore data-lpignore="true"
             onChange={(e) => { setValue(e.target.value); if (phase.kind === 'error') setPhase({ kind: 'idle' }); }} />
-          <button type="button" className="key-eye" onClick={() => setReveal((r) => !r)} aria-label={reveal ? '隐藏 key' : '显示 key'}>{reveal ? '隐藏' : '显示'}</button>
-        </label>
+          <button type="button" className="key-eye" onClick={() => setReveal((r) => !r)} aria-pressed={reveal}>{reveal ? '隐藏' : '显示'}</button>
+        </div>
         <Tap type="submit" className="btn btn-k key-go" disabled={checking}>
           {checking ? <><span className="spin" />校验中</> : '校验并保存'}
         </Tap>

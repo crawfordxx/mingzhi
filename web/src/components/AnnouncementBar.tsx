@@ -1,5 +1,6 @@
 /** 顶部公告条（ego 的 --brand-1 条 + 黑色小胶囊）：开源声明 + 本项目已花费 + 去可想 AI 查看余额 */
 import { motion } from 'motion/react';
+import { isMock } from '../api';
 import { yuan } from '../lib/media';
 import { Ico, It, SOFT } from '../ui';
 
@@ -8,6 +9,7 @@ export const KEXIANG_URL = 'https://kexiangai.com';
 export function AnnouncementBar({ spent }: { spent: number }) {
   return (
     <motion.div className="bar" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={SOFT}>
+      {isMock && <span className="bar-mock" title="地址栏带了 ?mock=1：项目、花费与 key 状态都是假的">演示数据</span>}
       <span className="bar-msg">
         明知AI剪辑 <It>(MIT)</It> 开源免费，识别在本机完成
         <span className="bar-sep" aria-hidden="true">·</span>
