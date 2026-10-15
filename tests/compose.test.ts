@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
-import { renderCardStill, renderTalk } from '../src/compose/render.js';
+import { availableParallelism } from 'node:os';
+import { defaultConcurrency, renderCardStill, renderTalk, withBundle } from '../src/compose/render.js';
 
 describe('renderTalk（真实 Remotion 渲染，首次运行会下载 Chrome Headless Shell）', () => {
   it('2 秒：分屏卡片 + 全屏，输出 1080×1920 30fps 带音轨', async () => {
@@ -33,4 +34,25 @@ describe('renderTalk（真实 Remotion 渲染，首次运行会下载 Chrome Hea
     expect(existsSync(output)).toBe(true);
     expect(statSync(output).size).toBeGreaterThan(1000);
   }, 300_000);
+});
+
+describe('渲染封装', () => {
+  it('默认并发不超过 CPU 核数', () => {
+    expect(defaultConcurrency()).toBeLessThanOrEqual(availableParallelism());
+    expect(defaultConcurrency()).toBeGreaterThanOrEqual(1);
+  });
+
+  it('打包目录在成功与失败后都被删除，且 publicDir 是软链而不是拷贝', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-bundle-'));
+    writeFileSync(join(workDir, 'a.txt'), 'x');
+    let okDir = '';
+    await withBundle(workDir, async (serveUrl) => {
+      okDir = serveUrl;
+      expect(lstatSync(join(serveUrl, 'public')).isSymbolicLink()).toBe(true);
+    });
+    expect(existsSync(okDir)).toBe(false);
+    let failDir = '';
+    await expect(withBundle(workDir, async (serveUrl) => { failDir = serveUrl; throw new Error('boom'); })).rejects.toThrow('boom');
+    expect(existsSync(failDir)).toBe(false);
+  }, 120_000);
 });
