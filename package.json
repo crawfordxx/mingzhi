@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -13,6 +15,7 @@
     "mingzhi": "tsx src/cli.ts"
   },
   "dependencies": {
+    "onnxruntime-node": "1.20.1",
     "sherpa-onnx-node": "1.13.8",
     "zod": "3.23.8"
   },

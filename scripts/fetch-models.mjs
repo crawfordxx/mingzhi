@@ -1,5 +1,6 @@
 // 下载 SenseVoice（int8）与 Silero VAD 到 ~/.mingzhi/models（可用 MINGZHI_DATA_DIR 覆盖）
-import { existsSync, mkdirSync, createWriteStream, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, createWriteStream, renameSync, rmSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { pipeline } from 'node:stream/promises';
@@ -28,5 +29,13 @@ if (!existsSync(join(dir, SV, 'model.int8.onnx'))) {
   execFileSync('tar', ['xjf', tar, '-C', dir]);
   rmSync(tar, { force: true });
   rmSync(join(dir, SV, 'model.onnx'), { force: true }); // 只保留 int8 版，省 700MB
+}
+// RobustVideoMatting（抠像），GitHub release v1.0.0；下载后校验 sha256
+const RVM = 'rvm_mobilenetv3_fp32.onnx';
+const RVM_SHA256 = '88d4531297118f595bf2fd60f6f566aec2e559393802d1f436c380f0cbbd2828';
+if (!existsSync(join(dir, RVM))) {
+  await download(`https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/${RVM}`, join(dir, RVM));
+  const sha = createHash('sha256').update(readFileSync(join(dir, RVM))).digest('hex');
+  if (sha !== RVM_SHA256) { rmSync(join(dir, RVM), { force: true }); throw new Error(`${RVM} 校验失败：${sha}`); }
 }
 console.log(`模型就绪：${dir}`);
