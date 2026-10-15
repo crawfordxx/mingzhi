@@ -34,7 +34,9 @@ function sanitizePhoto(card: Extract<CardSpec, { template: 'photo' }>, files: Se
   const { image, video, visual } = card.props;
   const usable = (image !== undefined && files.has(image)) || (video !== undefined && files.has(video));
   if (!usable && !visual) return null;
-  return { template: 'photo', props: stripUnavailable(card.props, files) };
+  const props = stripUnavailable(card.props, files);
+  // 已有可用素材时不再按 visual 另取，避免重复生成或覆盖模型选定的文件
+  return { template: 'photo', props: usable ? omitKey(props, 'visual') : props };
 }
 
 /** 卡片字段清理：图片/视频不可用则去掉（photo 见 sanitizePhoto，什么都没有则丢弃镜头）；去掉无效的高亮项 */

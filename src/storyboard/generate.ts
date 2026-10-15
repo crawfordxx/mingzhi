@@ -14,7 +14,7 @@ const CTA_ACTIONS = ['关注', '点赞', '收藏'];
 
 const catalogText = CATALOG.map((c) => `- ${c.id}：${c.use}\n  props：${c.props}`).join('\n');
 
-const SYSTEM_PROMPT = `你是短视频口播的分镜导演。输入是成片时间轴上的字幕（每行 [开始-结束] 文字，单位秒，保留 2 位小数）、总时长和可用图片列表。请为整条视频设计分镜：画面分上下两半，split 镜头上半屏显示信息卡片、下半屏是人物；full 镜头人物全屏。
+const SYSTEM_PROMPT = `你是短视频口播的分镜导演。输入是成片时间轴上的字幕（每行 [开始-结束] 文字，单位秒，保留 2 位小数）、总时长和可用素材列表。请为整条视频设计分镜：画面分上下两半，split 镜头上半屏显示信息卡片、下半屏是人物；full 镜头人物全屏。
 
 输出严格的 JSON，不要任何多余文字：
 {"shots":[{"start":秒,"end":秒,"layout":"split|full","card":{"template":"模板名","props":{…}}}]}
@@ -27,7 +27,7 @@ full 镜头不带 card（cta 除外）。镜头按时间顺序首尾相接，覆
 4. 最后一个镜头用 cta（layout 为 full），覆盖最后一句字幕；actions 固定为 ["关注","点赞","收藏"]。
 5. 卡片文字是提炼后的信息，不要照抄字幕；数字、专名与字幕保持一致，不要编造字幕里没有的数据。
 6. 每个字段严格遵守下面写明的长度上限，超出会被丢弃；不同相邻镜头尽量换用不同模板。
-7. photo 与 browser.image 只能用「可用图片」列表里的文件名；列表为「无」时不要使用 photo，browser 也不要带 image。
+7. image、video 只能填「可用素材」列表里的文件名，不要编造文件名；需要新素材时不写文件名，改在 visual 里写需求（截图 screenshot、生图 generate、视频 video，各模板允许的来源见目录；生图与视频提示词用英文）。素材优先级：能截官方网页就用 screenshot，其次 generate；video 只用于开头最关键的那张 hook，全片最多 1 个。photo 必须带 image、video、visual 之一，列表为「无」时只能写 visual；browser 不带 image 时可以写 screenshot 类 visual。
 
 模板目录：
 ${catalogText}`;
@@ -37,7 +37,7 @@ const formatCaptions = (captions: TimedCaption[]): string =>
 
 function buildUserMessage(captions: TimedCaption[], durationSec: number, images: string[]): string {
   const imageLine = images.length > 0 ? images.join('，') : '无';
-  return `总时长：${durationSec.toFixed(2)} 秒\n可用图片：${imageLine}\n字幕：\n${formatCaptions(captions)}`;
+  return `总时长：${durationSec.toFixed(2)} 秒\n可用素材：${imageLine}\n字幕：\n${formatCaptions(captions)}`;
 }
 
 /** 前几个不合格镜头的 zod 错误摘要，供重试时告诉模型哪里错了 */

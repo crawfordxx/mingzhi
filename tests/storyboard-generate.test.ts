@@ -25,7 +25,7 @@ describe('CATALOG', () => {
 });
 
 describe('generateStoryboard', () => {
-  it('用 gemini-3.5-flash（low），用户消息含带时间的字幕、总时长与可用图片；返回归一化后的分镜', async () => {
+  it('用 gemini-3.5-flash（low），用户消息含带时间的字幕、总时长与可用素材；返回归一化后的分镜', async () => {
     const { client, calls } = scripted(good);
     const res = await generateStoryboard(client, caps, 9, ['broll/a.jpg']);
     expect(calls[0]).toMatchObject({ model: STORYBOARD_MODEL, reasoningEffort: 'low' });
@@ -87,10 +87,10 @@ describe('generateStoryboard：重试保护与择优', () => {
     expect(calls[1].user).toContain('2 个镜头不合格');
     expect(calls[1].user).toContain('card.props.title');
   });
-  it('可用图片为空时写「可用图片：无」，且不再含镜头数提示', async () => {
+  it('可用素材为空时写「可用素材：无」，且不再含镜头数提示', async () => {
     const { client, calls } = scripted(good);
     await generateStoryboard(client, caps, 9, []);
-    expect(calls[0].user).toContain('可用图片：无');
+    expect(calls[0].user).toContain('可用素材：无');
     expect(calls[0].user).not.toContain('镜头数约');
   });
   it('cta 的 actions 固定为 关注/点赞/收藏', async () => {

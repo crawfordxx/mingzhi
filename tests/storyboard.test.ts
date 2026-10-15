@@ -302,6 +302,12 @@ describe('normalizeStoryboard：镜头限长 8 秒', () => {
 });
 
 describe('素材需求 visual', () => {
+  it('photo 已有可用图片时去掉 visual（不再重复取素材）', () => {
+    const raw = { shots: [{ start: 0, end: 4, layout: 'split', card: { template: 'photo', props: { image: 'broll/a.jpg', visual: { source: 'generate', prompt: 'a jar of coins on a wooden table' } } } }] };
+    const { storyboard } = normalizeStoryboard(raw, 4, ['broll/a.jpg']);
+    expect(storyboard.shots[0].card).toEqual({ template: 'photo', props: { image: 'broll/a.jpg' } });
+  });
+
   it('photo 可以只带 visual 不带 image；hook 只允许 generate/video；browser 只允许 screenshot', () => {
     expect(CardSpecSchema.safeParse({ template: 'photo', props: { visual: { source: 'generate', prompt: 'a jar of coins on a wooden table, warm light' } } }).success).toBe(true);
     expect(CardSpecSchema.safeParse({ template: 'hook', props: { index: 1, total: 1, headline: '钩子', highlight: [], visual: { source: 'screenshot', query: 'x y' } } }).success).toBe(false);
