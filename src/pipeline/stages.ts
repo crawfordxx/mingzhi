@@ -167,16 +167,16 @@ export function brollStage(
   return runBroll({ ...args, workDir: brollDir, reserveYuan: coverReserve(args), ...(deferShots ? { deferShots } : {}) }, storyboard, durationSec, complete);
 }
 
-/** 卡片自检（args.qa 为 false 时跳过）；only 给出时只检查这些镜头 */
+/** 卡片自检（args.qa 为 false 时跳过）；only 给出时只检查这些镜头；keep 里的镜头只打分不重写 */
 export async function qaCardsStage(
-  args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], complete: Complete, only?: number[],
+  args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], complete: Complete, only?: number[], keep?: number[],
 ): Promise<{ storyboard: Storyboard; cards: CardQaEntry[] }> {
   if (args.qa === false) return { storyboard, cards: [] };
   const onProgress = (message: string, info?: { shotIndex: number; attempt: number; score: CardScore; passed: boolean }): void =>
     args.onProgress?.({ step: 'qa-cards', message, ...(info ? { detail: cardScoreDetail(info.shotIndex, info.score, info.passed, info.attempt) } : {}) });
   const ctx = {
     llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), signal: args.signal,
-    qaCards: args.qaDeps?.qaCards, onProgress, ...(only ? { only } : {}),
+    qaCards: args.qaDeps?.qaCards, onProgress, ...(only ? { only } : {}), ...(keep?.length ? { keep } : {}),
   };
   const res = await runQaCards(ctx, storyboard, captions, complete);
   return { storyboard: res.storyboard, cards: res.report };

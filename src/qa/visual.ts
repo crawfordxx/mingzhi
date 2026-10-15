@@ -73,6 +73,8 @@ export interface QaCardsOptions {
   signal?: AbortSignal;
   /** 只检查这些镜头序号的卡片（工作台新版本只检查改动过的卡片）；缺省检查全部分屏卡片 */
   only?: number[];
+  /** 只打分、不重写的镜头序号：用户在对话里指定的卡片，重写会换掉用户要的模板和文字，回复就和成片对不上了 */
+  keep?: number[];
   /** msg 是给人看的进度文案；info 带本次打分的结构化数据，供工作台直播 */
   onProgress?: (msg: string, info?: { shotIndex: number; attempt: number; score: CardScore; passed: boolean }) => void;
 }
@@ -81,6 +83,8 @@ export interface QaCardsOptions {
 const canAffordStep = (opts: QaCardsOptions): boolean => opts.meter.canSpend(STEP_BUDGET_YUAN + (opts.reserveYuan ?? 0));
 /** 预算不足时的原因后缀：有预留时写明，免得误以为总预算耗尽 */
 const reserveNote = (opts: QaCardsOptions): string => ((opts.reserveYuan ?? 0) > 0 ? `（已为封面预留 ¥${(opts.reserveYuan ?? 0).toFixed(2)}）` : '');
+
+const KEEP_NOTE = '你指定的卡片只打分、不重写';
 
 const captionsIn = (captions: TimedCaption[], shot: Shot): TimedCaption[] => captions.filter((c) => c.end > shot.start && c.start < shot.end);
 
@@ -122,6 +126,7 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
       const line = `第 ${index + 1} 镜卡片自检：版式 ${s.layout} 层级 ${s.hierarchy} 动效 ${s.motion} 品牌 ${s.brand}`;
       opts.onProgress?.(line, { shotIndex: index, attempt: scores.length, score: s, passed: isPass(s) });
       if (isPass(version.score) || revised >= MAX_REVISIONS) break;
+      if (opts.keep?.includes(index)) { skipped = KEEP_NOTE; break; }
       if (!canAffordStep(opts)) { skipped = `预算不足，停止重写${reserveNote(opts)}`; break; }
       const base = versions.reduce(better);
       const next = await reviseCard(opts.client, { ...shot, card: base.card }, captionsIn(opts.captions, shot), base.score, images);

@@ -115,6 +115,14 @@ describe('qaCards', () => {
     expect(res.report.map((r) => r.shotIndex)).toEqual([2]);
     expect(res.storyboard).toEqual(storyboard);
   });
+  it('keep：用户在对话里指定的卡片只打分、不重写（不换模板也不改字），报告写明原因', async () => {
+    const { client, calls } = fake([sc(5), sc(9)], [{ card: { template: 'photo', props: { label: '不该出现' } } }]);
+    const res = await qaCards({ client, workDir: dir, storyboard, captions: caps, meter: meter(), ffmpeg: 'ffmpeg', keep: [0] });
+    expect(res.report[0]).toMatchObject({ shotIndex: 0, revised: 0, passed: false, scores: [sc(5)] });
+    expect(res.report[0].skipped).toContain('你指定的卡片');
+    expect(res.storyboard.shots[0].card).toEqual(card('原始'));
+    expect(calls.filter((c) => !c.images?.length)).toHaveLength(0);
+  });
   it('任一维度 <8 即不通过', async () => {
     const { client } = fake([{ ...sc(9), motion: 7 }, sc(9)], []);
     const res = await run(client, meter(), { ...storyboard, shots: [storyboard.shots[0]] });

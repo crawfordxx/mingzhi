@@ -43,6 +43,15 @@ describe('本版改动 = 与父版本逐镜头内容比较（I2）', () => {
     expect(v3.shotHashes).toEqual(metaOf(f, 1).shotHashes);
   });
 
+  it('对话里换上的卡片：卡片自检只打分不重写（keep），回复说换成什么成片里就是什么', async () => {
+    const f = await afterV1();
+    const k = splitShots(stateOf(f, 1))[1];
+    await runNextVersion(f.ctx, f.spaceId, 1, [card(k, '2. 手机放到另一个房间')], '换成标题卡');
+    expect(f.calls.qaOnly).toEqual([[k]]);
+    expect(f.calls.qaKeep).toEqual([[k]]);
+    expect(stateOf(f, 2).storyboard.shots[k].card).toEqual({ template: 'title', props: { title: '2. 手机放到另一个房间' } });
+  });
+
   it('回退（空操作）与只换封面：画面和父版本一样，changedShots 为空、哈希沿用父版本', async () => {
     const f = await afterV1();
     await runNextVersion(f.ctx, f.spaceId, 1, [card(splitShots(stateOf(f, 1))[0], '新标题')], '换卡片');

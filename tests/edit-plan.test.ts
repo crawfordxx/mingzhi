@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Track } from '../src/assets/catalog.js';
 import { buildEditContext, formatContext } from '../src/edit/context.js';
+import { applyOps } from '../src/edit/apply.js';
 import { EDIT_MODEL, planEdit } from '../src/edit/plan.js';
 import type { ChatOptions, LlmClient } from '../src/llm/kexiang.js';
 import { makeState } from './helpers/edit-state.js';
@@ -103,6 +104,32 @@ describe('planEdit', () => {
     const plan = await planEdit(client, '换卡', state, tracks);
     expect(plan.ops).toHaveLength(1);
     expect(plan.reply).toContain('2 处');
+  });
+
+  it('换模板：replaceCard 能把图片卡（photo）换成标题卡（title），校验与版式整理都不会把模板改回去', async () => {
+    const { client } = scripted({ reply: '已把 @00:07 换成标题卡', ops: [
+      { type: 'replaceCard', shotIndex: 2, card: { template: 'title', props: { title: '2. 手机放到另一个房间' } } },
+    ] });
+    const plan = await planEdit(client, '@00:07 这张卡换成大字标题「2. 手机放到另一个房间」', state, tracks);
+    expect(plan.reply).toBe('已把 @00:07 换成标题卡');
+    expect(applyOps(state, plan.ops).storyboard.shots[2].card).toEqual({ template: 'title', props: { title: '2. 手机放到另一个房间' } });
+  });
+
+  it('提示词要求换模板写新模板、回复只说 ops 里真正写了的修改', async () => {
+    const { client, calls } = scripted({ reply: '好', ops: [] });
+    await planEdit(client, 'x', state, tracks);
+    expect(calls[0].system).toContain('换模板');
+    expect(calls[0].system).toContain('只描述 ops');
+  });
+
+  it('模型说改了、但写的操作全都没法执行：回复里明确说这次没有执行任何修改，而不是只在末尾补一句', async () => {
+    const { client } = scripted({ reply: '已替换为图片卡', ops: [
+      { type: 'replaceCard', shotIndex: 2, card: { template: 'photo', props: { label: '方法二' } } },
+    ] });
+    const plan = await planEdit(client, '换成图片', state, tracks);
+    expect(plan.ops).toEqual([]);
+    expect(plan.reply).toContain('这次没有执行任何修改');
+    expect(plan.reply).toContain('photo 卡片需要 visual');
   });
 
   it('整个输出非法时抛中文错误', async () => {
