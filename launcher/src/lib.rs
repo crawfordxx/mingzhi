@@ -3,11 +3,13 @@
 
 pub mod download;
 pub mod error;
+pub mod fsx;
 pub mod hash;
 pub mod install;
 pub mod manifest;
 pub mod paths;
 pub mod progress;
 pub mod proxy;
+pub mod single;
 pub mod state;
 pub mod unpack;

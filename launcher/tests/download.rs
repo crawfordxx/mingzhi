@@ -189,3 +189,194 @@ fn 所有镜像都失败时报错() {
         .unwrap_err();
     assert!(err.to_string().contains("下载失败"), "{err}");
 }
+
+// ---- 以下为审查后补的用例 ----
+
+#[test]
+fn 响应超出清单大小立即中止并换镜像() {
+    let data = sample_bytes(20_000, 11);
+    let mut chunked = data.clone();
+    chunked.extend(sample_bytes(2_000_000, 12)); // 不声明长度，多出 2MB
+    let server = TestServer::start();
+    server.route("/big.bin", vec![Behavior::ServeChunked(chunked)]);
+    server.route(
+        "/declared.bin",
+        vec![Behavior::ServeIgnoreRange(sample_bytes(500_000, 13))],
+    );
+    server.route("/ok.bin", vec![Behavior::Serve(data.clone())]);
+    let it = item(
+        "h",
+        &data,
+        "data/h.bin",
+        vec![
+            server.url("/big.bin"),
+            server.url("/declared.bin"),
+            server.url("/ok.bin"),
+        ],
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("h.part");
+
+    let dl = downloader();
+    dl.download(&it, &part).unwrap();
+
+    assert_eq!(fs::read(&part).unwrap(), data);
+    assert_eq!(
+        server.requests("/big.bin").len(),
+        1,
+        "超限属于镜像问题，不应重试"
+    );
+    assert_eq!(server.requests("/declared.bin").len(), 1);
+    assert_eq!(
+        dl.progress().snapshot().downloaded,
+        data.len() as u64,
+        "被丢弃的字节要从进度里扣掉"
+    );
+}
+
+#[test]
+fn 超限且无其它镜像时不留part文件() {
+    let data = sample_bytes(20_000, 14);
+    let mut chunked = data.clone();
+    chunked.extend(vec![7u8; 100_000]);
+    let server = TestServer::start();
+    server.route("/big.bin", vec![Behavior::ServeChunked(chunked)]);
+    let it = item("i", &data, "data/i.bin", vec![server.url("/big.bin")]);
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("i.part");
+
+    assert!(downloader().download(&it, &part).is_err());
+    assert!(!part.exists());
+}
+
+#[test]
+fn 五百错误重试同一镜像() {
+    let data = sample_bytes(10_000, 15);
+    let server = TestServer::start();
+    server.route(
+        "/s.bin",
+        vec![Behavior::Status(503), Behavior::Serve(data.clone())],
+    );
+    let it = item("j", &data, "data/j.bin", vec![server.url("/s.bin")]);
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("j.part");
+
+    downloader().download(&it, &part).unwrap();
+    assert_eq!(server.requests("/s.bin").len(), 2);
+}
+
+#[test]
+fn 续传时收到416则丢弃重来() {
+    let data = sample_bytes(30_000, 16);
+    let server = TestServer::start();
+    server.route(
+        "/r.bin",
+        vec![Behavior::Status(416), Behavior::Serve(data.clone())],
+    );
+    let it = item("k", &data, "data/k.bin", vec![server.url("/r.bin")]);
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("k.part");
+    fs::write(&part, &data[..10_000]).unwrap();
+
+    let dl = downloader();
+    dl.download(&it, &part).unwrap();
+
+    assert_eq!(fs::read(&part).unwrap(), data);
+    let reqs = server.requests("/r.bin");
+    assert_eq!(reqs[0].range.as_deref(), Some("bytes=10000-"));
+    assert_eq!(reqs[1].range, None);
+    assert_eq!(dl.progress().snapshot().downloaded, data.len() as u64);
+}
+
+#[test]
+fn 续传位置与服务器不一致时丢弃重来() {
+    let data = sample_bytes(30_000, 17);
+    let server = TestServer::start();
+    server.route(
+        "/c.bin",
+        vec![
+            Behavior::BadContentRange(data.clone()),
+            Behavior::Serve(data.clone()),
+        ],
+    );
+    let it = item("l", &data, "data/l.bin", vec![server.url("/c.bin")]);
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("l.part");
+    fs::write(&part, &data[..10_000]).unwrap();
+
+    downloader().download(&it, &part).unwrap();
+    assert_eq!(
+        fs::read(&part).unwrap(),
+        data,
+        "不能把错位的内容接在旧数据后面"
+    );
+}
+
+#[test]
+fn 经http代理下载() {
+    let data = sample_bytes(10_000, 18);
+    let proxy = TestServer::start();
+    // 代理收到的是绝对形式的请求目标
+    proxy.route(
+        "http://files.example.invalid/x.bin",
+        vec![Behavior::Serve(data.clone())],
+    );
+    let cfg =
+        ProxyConfig::from_sources(|k| (k == "HTTP_PROXY").then(|| proxy.base.clone()), || None);
+    let it = item(
+        "m",
+        &data,
+        "data/m.bin",
+        vec!["http://files.example.invalid/x.bin".to_string()],
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("m.part");
+
+    Downloader::new(cfg, Progress::new())
+        .with_retry_delay(Duration::ZERO)
+        .download(&it, &part)
+        .unwrap();
+
+    assert_eq!(fs::read(&part).unwrap(), data);
+    assert_eq!(
+        proxy.requests("http://files.example.invalid/x.bin").len(),
+        1
+    );
+}
+
+#[test]
+fn 错误信息不含url里的凭据() {
+    let data = sample_bytes(100, 19);
+    let server = TestServer::start();
+    let url = server
+        .url("/nope.bin")
+        .replace("http://", "http://user:s3cret@");
+    let it = item("n", &data, "data/n.bin", vec![url]);
+    let tmp = tempfile::tempdir().unwrap();
+
+    let err = downloader()
+        .download(&it, &tmp.path().join("n.part"))
+        .unwrap_err()
+        .to_string();
+    assert!(!err.contains("s3cret"), "{err}");
+}
+
+#[test]
+fn 不支持的socks代理有明确提示() {
+    let data = sample_bytes(100, 20);
+    let server = TestServer::start();
+    let cfg = ProxyConfig::from_sources(
+        |k| (k == "HTTPS_PROXY").then(|| "socks5://user:s3cret@127.0.0.1:1080".to_string()),
+        || None,
+    );
+    assert_eq!(cfg.warnings().len(), 1);
+    assert!(cfg.warnings()[0].contains("不支持") && !cfg.warnings()[0].contains("s3cret"));
+
+    let it = item("o", &data, "data/o.bin", vec![server.url("/none.bin")]);
+    let tmp = tempfile::tempdir().unwrap();
+    let err = Downloader::new(cfg, Progress::new())
+        .with_retry_delay(Duration::ZERO)
+        .download(&it, &tmp.path().join("o.part"))
+        .unwrap_err();
+    assert!(err.to_string().contains("不支持"), "{err}");
+}

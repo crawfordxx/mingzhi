@@ -18,6 +18,12 @@ pub enum Behavior {
     /// 声明完整长度，却只发出前 N 字节就断开连接
     CutAfter(Vec<u8>, usize),
     NotFound,
+    /// 返回指定状态码（空 body）
+    Status(u16),
+    /// 不声明长度（chunked）整份返回，用来测「超出清单大小」
+    ServeChunked(Vec<u8>),
+    /// 206 但 Content-Range 起点与请求不符
+    BadContentRange(Vec<u8>),
 }
 
 /// 一条请求记录。
@@ -173,6 +179,27 @@ fn respond(request: tiny_http::Request, behavior: Behavior, range: Option<String
                 }
             }
         }
+        Behavior::Status(code) => {
+            let _ = request.respond(Response::empty(code));
+        }
+        Behavior::ServeChunked(data) => {
+            let resp = Response::new(StatusCode(200), vec![], io::Cursor::new(data), None, None);
+            let _ = request.respond(resp);
+        }
+        Behavior::BadContentRange(data) => {
+            let len = data.len();
+            let resp = Response::new(
+                StatusCode(206),
+                vec![header(
+                    "Content-Range",
+                    &format!("bytes 0-{}/{}", len - 1, len),
+                )],
+                io::Cursor::new(data),
+                Some(len),
+                None,
+            );
+            let _ = request.respond(resp);
+        }
         Behavior::CutAfter(data, cut) => {
             let len = data.len();
             let reader = CutReader { data, pos: 0, cut };
@@ -206,9 +233,8 @@ pub fn item(id: &str, data: &[u8], dest: &str, urls: Vec<String>) -> Item {
         sha256: sha256_bytes(data),
         size: data.len() as u64,
         dest: dest.to_string(),
-        unpack: None,
-        strip: 0,
         urls,
+        ..Default::default()
     }
 }
 

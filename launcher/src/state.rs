@@ -8,7 +8,7 @@
 //! 文件里除 `installed` 外的字段（如 Task 3 的用户设置）原样保留。
 
 use crate::error::{Context, Error, Result};
-use crate::manifest::Item;
+use crate::manifest::{Item, UnpackKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -68,7 +68,7 @@ impl State {
         let json = serde_json::to_string_pretty(self).ctx("序列化 state 失败")?;
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, json).ctx(format!("写入 {} 失败", tmp.display()))?;
-        fs::rename(&tmp, path).ctx(format!("保存 {} 失败", path.display()))
+        crate::fsx::rename(&tmp, path).ctx(format!("保存 {} 失败", path.display()))
     }
 
     /// 返回登记了该项的新状态。
@@ -83,36 +83,40 @@ impl State {
         let Ok(meta) = fs::metadata(dest) else {
             return Check::Missing;
         };
-        let size_ok = meta.len() == item.size;
-        let is_dir_item = item.unpack.is_some();
+        let record_matches = self
+            .installed
+            .get(&item.id)
+            .filter(|rec| rec.sha256.eq_ignore_ascii_case(&item.sha256));
 
-        match self.installed.get(&item.id) {
-            Some(rec) if rec.sha256.eq_ignore_ascii_case(&item.sha256) => {
-                if is_dir_item {
-                    return if meta.is_dir() {
-                        Check::UpToDate
-                    } else {
-                        Check::Missing
-                    };
-                }
-                if !meta.is_file() || !size_ok {
-                    return Check::Missing;
-                }
+        // 解包 / gz / 取 entry 的项：dest 里的内容与下载文件的 sha 对不上，只能信记录
+        if item.is_derived() {
+            let want_dir = item.unpack != Some(UnpackKind::Gz);
+            return if record_matches.is_some() && meta.is_dir() == want_dir {
+                Check::UpToDate
+            } else {
+                Check::Missing
+            };
+        }
+
+        let size_ok = meta.is_file() && meta.len() == item.size;
+        match record_matches {
+            Some(rec) if size_ok => {
                 if rec.mtime_ms.is_some() && rec.mtime_ms == mtime_ms(&meta) {
                     Check::UpToDate
                 } else {
                     Check::NeedHash
                 }
             }
-            // 没有记录（如用户手工放入的文件）：单文件大小对得上才值得算 sha
-            _ if !is_dir_item && meta.is_file() && size_ok => Check::NeedHash,
-            _ => Check::Missing,
+            Some(_) => Check::Missing,
+            // 没有记录（如用户手工放入的文件）：大小对得上才值得算 sha
+            None if size_ok => Check::NeedHash,
+            None => Check::Missing,
         }
     }
 
     /// 为刚安装（或刚确认一致）的项生成记录。
     pub fn record_for(item: &Item, dest: &Path) -> InstalledItem {
-        let mtime = if item.unpack.is_some() {
+        let mtime = if item.is_derived() {
             None
         } else {
             fs::metadata(dest).ok().and_then(|m| mtime_ms(&m))

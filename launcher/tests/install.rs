@@ -217,3 +217,315 @@ fn 某项失败时返回带项名的错误() {
     let err = sync(&fx.root, &manifest, PLATFORM, &downloader()).unwrap_err();
     assert!(err.to_string().contains("broken"), "{err}");
 }
+
+// ---- 以下为审查后补的用例 ----
+
+use mingzhi_launcher::manifest::{Entry, Item, Marker};
+
+fn zip_bytes(files: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, body) in files {
+        w.start_file(
+            *name,
+            zip::write::SimpleFileOptions::default().unix_permissions(0o644),
+        )
+        .unwrap();
+        w.write_all(body).unwrap();
+    }
+    w.finish().unwrap().into_inner()
+}
+
+fn gz_bytes(data: &[u8]) -> Vec<u8> {
+    let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    e.write_all(data).unwrap();
+    e.finish().unwrap()
+}
+
+fn new_root() -> (tempfile::TempDir, AppRoot) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = AppRoot::new(tmp.path().join("Mingzhi"));
+    (tmp, root)
+}
+
+/// app（整体替换型）+ 嵌套在 app 目录里的 chrome（带 marker）。chrome 故意排在 app 前面。
+fn nested_manifest(server: &TestServer, app_files: &[(&str, &[u8])]) -> Manifest {
+    let app = zip_bytes(app_files);
+    let chrome = zip_bytes(&[
+        ("chrome-headless-shell", b"CHROME"),
+        ("lib/x.dylib", b"LIB"),
+    ]);
+    server.route("/app.zip", vec![Behavior::Serve(app.clone())]);
+    server.route("/chrome.zip", vec![Behavior::Serve(chrome.clone())]);
+    let chrome_item = Item {
+        marker: Some(Marker {
+            path: "{app}/node_modules/.remotion/chrome-headless-shell/VERSION".into(),
+            content: "149.0.7790.0".into(),
+        }),
+        ..archive_item(
+            "chrome",
+            &chrome,
+            "{app}/node_modules/.remotion/chrome-headless-shell/mac-arm64",
+            UnpackKind::Zip,
+            0,
+            vec![server.url("/chrome.zip")],
+        )
+    };
+    let app_item = archive_item(
+        "app",
+        &app,
+        "{app}",
+        UnpackKind::Zip,
+        0,
+        vec![server.url("/app.zip")],
+    );
+    Manifest {
+        version: "2.0.0".into(),
+        items: vec![chrome_item, app_item],
+    }
+}
+
+fn assert_nested_ok(root: &AppRoot) {
+    let app = root.app().join("2.0.0");
+    assert!(app.join("src/index.js").is_file(), "app 本体");
+    let chrome = app.join("node_modules/.remotion/chrome-headless-shell");
+    assert_eq!(
+        fs::read(chrome.join("mac-arm64/chrome-headless-shell")).unwrap(),
+        b"CHROME"
+    );
+    assert_eq!(
+        fs::read_to_string(chrome.join("VERSION")).unwrap(),
+        "149.0.7790.0"
+    );
+}
+
+#[test]
+fn 嵌套dest先装外层再装内层() {
+    // 并发 2 且 chrome 排在前面：没有顺序约束时 chrome 会先落盘再被 app 的目录替换带走
+    for round in 0..10 {
+        let server = TestServer::start();
+        let manifest = nested_manifest(&server, &[("src/index.js", b"v1")]);
+        let (_tmp, root) = new_root();
+        sync(&root, &manifest, PLATFORM, &downloader())
+            .unwrap_or_else(|e| panic!("第 {round} 轮：{e}"));
+        assert_nested_ok(&root);
+    }
+}
+
+#[test]
+fn 外层被重装时内层已装项也随之重装() {
+    let server = TestServer::start();
+    let manifest = nested_manifest(&server, &[("src/index.js", b"v1")]);
+    let (_tmp, root) = new_root();
+    sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+
+    // 同版本号下 app 包内容变了（sha 变），chrome 没变
+    let server2 = TestServer::start();
+    let manifest2 = nested_manifest(&server2, &[("src/index.js", b"v2-changed")]);
+    let mut manifest2 = manifest2;
+    manifest2.items[0] = manifest.items[0].clone(); // chrome 沿用旧项（sha 不变）
+    manifest2.items[0].urls = vec![server2.url("/chrome.zip")];
+
+    let report = sync(&root, &manifest2, PLATFORM, &downloader()).unwrap();
+    let mut installed = report.installed.clone();
+    installed.sort();
+    assert_eq!(
+        installed,
+        vec!["app", "chrome"],
+        "chrome 在 app 目录内，必须跟着重装"
+    );
+    assert_eq!(
+        fs::read(root.app().join("2.0.0/src/index.js")).unwrap(),
+        b"v2-changed"
+    );
+    assert_nested_ok_after_replace(&root);
+}
+
+fn assert_nested_ok_after_replace(root: &AppRoot) {
+    let chrome = root
+        .app()
+        .join("2.0.0/node_modules/.remotion/chrome-headless-shell");
+    assert!(chrome.join("mac-arm64/chrome-headless-shell").is_file());
+    assert!(chrome.join("VERSION").is_file());
+}
+
+#[test]
+fn marker被删后重新安装该项() {
+    let server = TestServer::start();
+    let manifest = nested_manifest(&server, &[("src/index.js", b"v1")]);
+    let (_tmp, root) = new_root();
+    sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    fs::remove_file(
+        root.app()
+            .join("2.0.0/node_modules/.remotion/chrome-headless-shell/VERSION"),
+    )
+    .unwrap();
+
+    let report = sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    assert_eq!(report.installed, vec!["chrome"]);
+    assert_nested_ok(&root);
+}
+
+#[test]
+fn gz单文件加可执行位且二次运行跳过() {
+    let server = TestServer::start();
+    let gz = gz_bytes(b"#!/bin/sh\necho ffmpeg\n");
+    server.route("/ffmpeg.gz", vec![Behavior::Serve(gz.clone())]);
+    let it = Item {
+        executable: true,
+        kind: "ffmpeg".into(),
+        ..archive_item(
+            "ffmpeg",
+            &gz,
+            "data/bin/ffmpeg",
+            UnpackKind::Gz,
+            0,
+            vec![server.url("/ffmpeg.gz")],
+        )
+    };
+    let manifest = Manifest {
+        version: "1.0.0".into(),
+        items: vec![it],
+    };
+    let (_tmp, root) = new_root();
+
+    let first = sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    assert_eq!(first.installed, vec!["ffmpeg"]);
+    let bin = root.data().join("bin/ffmpeg");
+    assert_eq!(fs::read(&bin).unwrap(), b"#!/bin/sh\necho ffmpeg\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&bin).unwrap().permissions().mode() & 0o111,
+            0o111
+        );
+    }
+
+    let before = server.total_requests();
+    let second = sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    assert_eq!(second.skipped, vec!["ffmpeg"]);
+    assert_eq!(server.total_requests(), before);
+}
+
+#[test]
+fn 压缩包里只取指定entry且缺文件时重装() {
+    let server = TestServer::start();
+    let zip = zip_bytes(&[
+        ("fonts/Noto.ttf", b"FONT"),
+        ("fonts/other.ttf", b"OTHER"),
+        ("README", b"r"),
+    ]);
+    server.route("/font.zip", vec![Behavior::Serve(zip.clone())]);
+    let it = Item {
+        entries: vec![Entry {
+            entry: "fonts/Noto.ttf".into(),
+            dest: "data/assets/fonts/Noto.ttf".into(),
+            transcode: None,
+        }],
+        kind: "asset".into(),
+        ..archive_item(
+            "font",
+            &zip,
+            "data/assets/fonts",
+            UnpackKind::Zip,
+            0,
+            vec![server.url("/font.zip")],
+        )
+    };
+    let manifest = Manifest {
+        version: "1.0.0".into(),
+        items: vec![it],
+    };
+    let (_tmp, root) = new_root();
+
+    sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    assert_eq!(
+        fs::read(root.data().join("assets/fonts/Noto.ttf")).unwrap(),
+        b"FONT"
+    );
+    assert!(
+        !root.data().join("assets/fonts/other.ttf").exists(),
+        "只取清单里的 entry"
+    );
+
+    assert_eq!(
+        sync(&root, &manifest, PLATFORM, &downloader())
+            .unwrap()
+            .skipped,
+        vec!["font"]
+    );
+
+    fs::remove_file(root.data().join("assets/fonts/Noto.ttf")).unwrap();
+    let again = sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    assert_eq!(again.installed, vec!["font"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn 配乐转码排在ffmpeg之后() {
+    // 用一个「拷贝输入到输出」的假 ffmpeg 脚本（gz 打包）验证顺序与参数
+    let server = TestServer::start();
+    let script = b"#!/bin/sh\nwhile [ $# -gt 1 ]; do if [ \"$1\" = \"-i\" ]; then IN=\"$2\"; fi; shift; done\ncp \"$IN\" \"$1\"\n";
+    let ff_gz = gz_bytes(script);
+    let music = zip_bytes(&[("tracks/a.wav", b"RAW-AUDIO")]);
+    server.route("/ffmpeg.gz", vec![Behavior::Serve(ff_gz.clone())]);
+    server.route("/music.zip", vec![Behavior::Serve(music.clone())]);
+    let ffmpeg = Item {
+        executable: true,
+        kind: "ffmpeg".into(),
+        ..archive_item(
+            "ffmpeg",
+            &ff_gz,
+            "data/bin/ffmpeg",
+            UnpackKind::Gz,
+            0,
+            vec![server.url("/ffmpeg.gz")],
+        )
+    };
+    let track = Item {
+        entries: vec![Entry {
+            entry: "tracks/a.wav".into(),
+            dest: "data/assets/music/a.mp3".into(),
+            transcode: Some("mp3".into()),
+        }],
+        kind: "asset".into(),
+        ..archive_item(
+            "music",
+            &music,
+            "data/assets/music",
+            UnpackKind::Zip,
+            0,
+            vec![server.url("/music.zip")],
+        )
+    };
+    // 配乐故意排在 ffmpeg 前面
+    let manifest = Manifest {
+        version: "1.0.0".into(),
+        items: vec![track, ffmpeg],
+    };
+    for _ in 0..5 {
+        let (_tmp, root) = new_root();
+        sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+        assert_eq!(
+            fs::read(root.data().join("assets/music/a.mp3")).unwrap(),
+            b"RAW-AUDIO"
+        );
+        let leftovers: Vec<_> = fs::read_dir(root.data().join("assets/music"))
+            .unwrap()
+            .collect();
+        assert_eq!(leftovers.len(), 1, "不应留下临时文件：{leftovers:?}");
+    }
+}
+
+#[test]
+fn 启动时清理上次崩溃遗留的临时目录() {
+    let fx = fixture();
+    fs::create_dir_all(fx.root.app().join(".1.2.3.unpack-99999")).unwrap();
+    fs::create_dir_all(fx.root.data().join("models")).unwrap();
+    fs::create_dir_all(fx.root.data().join("models/.model.bin.tmp-99999")).unwrap();
+
+    sync(&fx.root, &fx.manifest, PLATFORM, &downloader()).unwrap();
+
+    assert!(!fx.root.app().join(".1.2.3.unpack-99999").exists());
+    assert!(!fx.root.data().join("models/.model.bin.tmp-99999").exists());
+}

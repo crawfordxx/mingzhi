@@ -2,17 +2,29 @@
 //!
 //! 先解到目标旁边的临时目录，成功后再整体 rename 到 dest，
 //! 中途失败或断电不会留下半成品目录。
-//! 安全：拒绝绝对路径、`..`、逃出解包根目录的符号链接。
+//! 安全：
+//! - 拒绝绝对路径与 `..`；
+//! - zip 里的符号链接一律拒绝；tar 的符号链接只能指向解包根内
+//!   （`..` 只允许出现在目标开头），写入任何文件前其上级目录必须都不是符号链接；
+//! - 硬链接的源路径同样校验；
+//! - 解压总字节数有上限，防解压炸弹。
 
 use crate::error::{Context, Error, Result};
+use crate::fsx;
 use crate::manifest::UnpackKind;
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 /// 把 `archive` 解包为目录 `dest`（已存在则被原子替换）。
-/// `strip` 为解包时剥掉的前导目录层数。
-pub fn unpack(archive: &Path, kind: UnpackKind, strip: usize, dest: &Path) -> Result<()> {
+/// `strip` 为解包时剥掉的前导目录层数，`max_bytes` 为解压后总字节上限。
+pub fn unpack(
+    archive: &Path,
+    kind: UnpackKind,
+    strip: usize,
+    dest: &Path,
+    max_bytes: u64,
+) -> Result<()> {
     let parent = dest
         .parent()
         .ok_or_else(|| Error::new(format!("目标路径不合法：{}", dest.display())))?;
@@ -24,10 +36,10 @@ pub fn unpack(archive: &Path, kind: UnpackKind, strip: usize, dest: &Path) -> Re
         .unwrap_or_default();
     let pid = std::process::id();
     let tmp = parent.join(format!(".{name}.unpack-{pid}"));
-    remove_dir_if_exists(&tmp)?;
+    fsx::remove_dir_all(&tmp)?;
     fs::create_dir_all(&tmp).ctx(format!("创建临时目录 {} 失败", tmp.display()))?;
 
-    let result = extract(archive, kind, strip, &tmp)
+    let result = extract(archive, kind, strip, &tmp, Budget::new(max_bytes))
         .and_then(|()| swap_into_place(&tmp, dest, parent, &name, pid));
     if result.is_err() {
         let _ = fs::remove_dir_all(&tmp);
@@ -35,14 +47,49 @@ pub fn unpack(archive: &Path, kind: UnpackKind, strip: usize, dest: &Path) -> Re
     result
 }
 
-fn extract(archive: &Path, kind: UnpackKind, strip: usize, out: &Path) -> Result<()> {
+/// 解压字节预算。
+pub struct Budget {
+    left: u64,
+}
+
+impl Budget {
+    pub fn new(max: u64) -> Self {
+        Self { left: max }
+    }
+
+    pub fn spend(&mut self, n: u64) -> Result<()> {
+        if n > self.left {
+            return Err(Error::new(
+                "压缩包内容异常（解压后体积超出预期），已停止安装",
+            ));
+        }
+        self.left -= n;
+        Ok(())
+    }
+
+    /// 带预算的拷贝：最多多读 1 字节就能发现超限，不会把磁盘写满。
+    pub fn copy<R: Read, W: Write>(&mut self, reader: &mut R, writer: &mut W) -> Result<()> {
+        let mut limited = reader.take(self.left.saturating_add(1));
+        let n = std::io::copy(&mut limited, writer).ctx("写入失败")?;
+        self.spend(n)
+    }
+}
+
+fn extract(
+    archive: &Path,
+    kind: UnpackKind,
+    strip: usize,
+    out: &Path,
+    budget: Budget,
+) -> Result<()> {
     let file = File::open(archive).ctx(format!("打开压缩包 {} 失败", archive.display()))?;
     let what = format!("解包 {} 失败", archive.display());
     match kind {
-        UnpackKind::TarGz => extract_tar(flate2::read::GzDecoder::new(file), strip, out),
-        UnpackKind::TarXz => extract_tar(xz2::read::XzDecoder::new(file), strip, out),
-        UnpackKind::TarZst => extract_tar(zstd::Decoder::new(file).ctx(&what)?, strip, out),
-        UnpackKind::Zip => extract_zip(file, strip, out),
+        UnpackKind::TarGz => extract_tar(flate2::read::GzDecoder::new(file), strip, out, budget),
+        UnpackKind::TarXz => extract_tar(xz2::read::XzDecoder::new(file), strip, out, budget),
+        UnpackKind::TarZst => extract_tar(zstd::Decoder::new(file).ctx(&what)?, strip, out, budget),
+        UnpackKind::Zip => extract_zip(file, strip, out, budget),
+        UnpackKind::Gz => Err(Error::new("gz 是单文件，应使用 unpack_gz")),
     }
     .map_err(|e| Error::new(format!("{what}（{e}）")))
 }
@@ -50,25 +97,43 @@ fn extract(archive: &Path, kind: UnpackKind, strip: usize, out: &Path) -> Result
 /// 用临时目录替换 dest：旧目录先改名挪开，新目录就位后再删旧的。
 fn swap_into_place(tmp: &Path, dest: &Path, parent: &Path, name: &str, pid: u32) -> Result<()> {
     if !dest.exists() {
-        return fs::rename(tmp, dest).ctx(format!("移动到 {} 失败", dest.display()));
+        return fsx::rename(tmp, dest).ctx(format!("移动到 {} 失败", dest.display()));
     }
     let old = parent.join(format!(".{name}.old-{pid}"));
-    remove_dir_if_exists(&old)?;
-    fs::rename(dest, &old).ctx(format!("替换旧目录 {} 失败", dest.display()))?;
-    if let Err(e) = fs::rename(tmp, dest) {
+    fsx::remove_dir_all(&old)?;
+    fsx::rename(dest, &old).ctx(format!("替换旧目录 {} 失败", dest.display()))?;
+    if let Err(e) = fsx::rename(tmp, dest) {
         // 新目录没能就位，把旧的放回去
-        let _ = fs::rename(&old, dest);
+        let _ = fsx::rename(&old, dest);
         return Err(Error::new(format!("移动到 {} 失败：{e}", dest.display())));
     }
-    let _ = fs::remove_dir_all(&old);
+    // 旧目录删不掉（被占用）不影响本次安装，留给下次启动的清理
+    let _ = fsx::remove_dir_all(&old);
     Ok(())
 }
 
-fn remove_dir_if_exists(dir: &Path) -> Result<()> {
-    match fs::remove_dir_all(dir) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(Error::new(format!("清理 {} 失败：{e}", dir.display()))),
+/// 清理 `dir` 下以前崩溃遗留的临时目录/文件（`.xxx.unpack-<pid>`、`.xxx.old-<pid>`、`.xxx.tmp-<pid>`），
+/// 跳过本进程自己的。
+pub fn cleanup_stale(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let own = format!("-{}", std::process::id());
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let stale = name.starts_with('.')
+            && [".unpack-", ".old-", ".tmp-"]
+                .iter()
+                .any(|m| name.contains(m))
+            && !name.ends_with(&own);
+        if stale {
+            let path = entry.path();
+            let _ = if path.is_dir() {
+                fsx::remove_dir_all(&path)
+            } else {
+                fsx::remove_file(&path)
+            };
+        }
     }
 }
 
@@ -94,7 +159,8 @@ pub fn safe_rel_path(raw: &Path, strip: usize) -> Result<Option<PathBuf>> {
     Ok(Some(parts[strip..].iter().collect()))
 }
 
-/// 符号链接目标必须是相对路径，且按字面解析后不能跑出解包根目录。
+/// 符号链接目标必须是相对路径，`..` 只能出现在开头，且回退层数不能超过链接所在目录的深度。
+/// 禁止「先走普通目录再 `..`」是因为中间那一级可能本身就是符号链接，字面计算会失真。
 fn check_symlink_target(link_rel: &Path, target: &Path) -> Result<()> {
     let bad = || {
         Error::new(format!(
@@ -103,13 +169,16 @@ fn check_symlink_target(link_rel: &Path, target: &Path) -> Result<()> {
             target.display()
         ))
     };
-    // 链接所在目录相对根的深度
     let mut depth = link_rel.components().count().saturating_sub(1) as i64;
+    let mut descended = false;
     for comp in target.components() {
         match comp {
-            Component::Normal(_) => depth += 1,
+            Component::Normal(_) => {
+                descended = true;
+                depth += 1;
+            }
             Component::CurDir => {}
-            Component::ParentDir => {
+            Component::ParentDir if !descended => {
                 depth -= 1;
                 if depth < 0 {
                     return Err(bad());
@@ -121,16 +190,19 @@ fn check_symlink_target(link_rel: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
 /// 目标路径的任一上级目录是符号链接都拒绝，防止经由链接写到根目录之外。
 fn ensure_no_symlink_ancestors(root: &Path, rel: &Path) -> Result<()> {
     let mut cur = root.to_path_buf();
     if let Some(parent) = rel.parent() {
         for comp in parent.components() {
             cur.push(comp);
-            if fs::symlink_metadata(&cur)
-                .map(|m| m.file_type().is_symlink())
-                .unwrap_or(false)
-            {
+            if is_symlink(&cur) {
                 return Err(Error::new(format!(
                     "压缩包试图经由符号链接写入：{}",
                     rel.display()
@@ -139,6 +211,18 @@ fn ensure_no_symlink_ancestors(root: &Path, rel: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// 写入普通文件前的准备：上级目录无链接、目标本身也不是已存在的符号链接。
+fn prepare_file(root: &Path, rel: &Path) -> Result<PathBuf> {
+    let target = prepare_parent(root, rel)?;
+    if is_symlink(&target) {
+        return Err(Error::new(format!(
+            "压缩包试图覆盖符号链接：{}",
+            rel.display()
+        )));
+    }
+    Ok(target)
 }
 
 fn prepare_parent(root: &Path, rel: &Path) -> Result<PathBuf> {
@@ -161,7 +245,7 @@ fn make_symlink(_target: &Path, _link: &Path) -> Result<()> {
     Ok(())
 }
 
-fn extract_tar<R: Read>(reader: R, strip: usize, out: &Path) -> Result<()> {
+fn extract_tar<R: Read>(reader: R, strip: usize, out: &Path, mut budget: Budget) -> Result<()> {
     let mut archive = tar::Archive::new(reader);
     archive.set_preserve_permissions(true);
     let entries = archive.entries().ctx("读取 tar 条目失败")?;
@@ -177,40 +261,41 @@ fn extract_tar<R: Read>(reader: R, strip: usize, out: &Path) -> Result<()> {
             ensure_no_symlink_ancestors(out, &rel)?;
             fs::create_dir_all(out.join(&rel)).ctx(format!("创建目录 {} 失败", rel.display()))?;
         } else if kind.is_file() {
-            let target = prepare_parent(out, &rel)?;
+            budget.spend(entry.header().size().ctx("读取条目大小失败")?)?;
+            let target = prepare_file(out, &rel)?;
             entry
                 .unpack(&target)
                 .ctx(format!("写入 {} 失败", rel.display()))?;
         } else if kind.is_symlink() {
-            let link = entry
-                .link_name()
-                .ctx("读取链接目标失败")?
-                .map(|l| l.into_owned());
-            let link =
-                link.ok_or_else(|| Error::new(format!("符号链接缺少目标：{}", rel.display())))?;
+            let link = entry.link_name().ctx("读取链接目标失败")?;
+            let link = link
+                .ok_or_else(|| Error::new(format!("符号链接缺少目标：{}", rel.display())))?
+                .into_owned();
             check_symlink_target(&rel, &link)?;
-            let target = prepare_parent(out, &rel)?;
+            let target = prepare_file(out, &rel)?;
             make_symlink(&link, &target)?;
         } else if kind.is_hard_link() {
-            let link = entry
-                .link_name()
-                .ctx("读取链接目标失败")?
-                .map(|l| l.into_owned());
-            let link =
-                link.ok_or_else(|| Error::new(format!("硬链接缺少目标：{}", rel.display())))?;
+            let link = entry.link_name().ctx("读取链接目标失败")?;
+            let link = link
+                .ok_or_else(|| Error::new(format!("硬链接缺少目标：{}", rel.display())))?
+                .into_owned();
             let Some(src_rel) = safe_rel_path(&link, strip)? else {
                 continue;
             };
-            let target = prepare_parent(out, &rel)?;
-            fs::hard_link(out.join(src_rel), &target)
-                .ctx(format!("创建硬链接 {} 失败", rel.display()))?;
+            ensure_no_symlink_ancestors(out, &src_rel)?;
+            let src = out.join(&src_rel);
+            if is_symlink(&src) {
+                return Err(Error::new(format!("硬链接指向符号链接：{}", rel.display())));
+            }
+            let target = prepare_file(out, &rel)?;
+            fs::hard_link(&src, &target).ctx(format!("创建硬链接 {} 失败", rel.display()))?;
         }
         // 其余类型（pax 头、设备文件等）无需落盘，忽略
     }
     Ok(())
 }
 
-fn extract_zip(file: File, strip: usize, out: &Path) -> Result<()> {
+fn extract_zip(file: File, strip: usize, out: &Path, mut budget: Budget) -> Result<()> {
     let mut archive = zip::ZipArchive::new(file).ctx("读取 zip 失败")?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).ctx("读取 zip 条目失败")?;
@@ -221,21 +306,20 @@ fn extract_zip(file: File, strip: usize, out: &Path) -> Result<()> {
         };
         let mode = entry.unix_mode();
 
+        if mode.is_some_and(|m| m & 0o170000 == 0o120000) {
+            // 我们自己的包不需要 zip 符号链接，一律拒绝
+            return Err(Error::new(format!(
+                "zip 中含有符号链接，已拒绝：{}",
+                rel.display()
+            )));
+        }
         if entry.is_dir() {
             ensure_no_symlink_ancestors(out, &rel)?;
             fs::create_dir_all(out.join(&rel)).ctx(format!("创建目录 {} 失败", rel.display()))?;
-        } else if mode.is_some_and(|m| m & 0o170000 == 0o120000) {
-            let mut link = String::new();
-            entry
-                .read_to_string(&mut link)
-                .ctx(format!("读取符号链接 {} 失败", rel.display()))?;
-            check_symlink_target(&rel, Path::new(&link))?;
-            let target = prepare_parent(out, &rel)?;
-            make_symlink(Path::new(&link), &target)?;
         } else {
-            let target = prepare_parent(out, &rel)?;
+            let target = prepare_file(out, &rel)?;
             let mut dst = File::create(&target).ctx(format!("创建 {} 失败", rel.display()))?;
-            std::io::copy(&mut entry, &mut dst).ctx(format!("写入 {} 失败", rel.display()))?;
+            budget.copy(&mut entry, &mut dst)?;
             drop(dst);
             #[cfg(unix)]
             if let Some(m) = mode {

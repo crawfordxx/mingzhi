@@ -19,7 +19,11 @@ fn run() -> mingzhi_launcher::error::Result<()> {
         })?;
     let manifest = Manifest::load(&manifest_path)?;
     let root = AppRoot::resolve()?;
-    let downloader = Downloader::new(ProxyConfig::from_env(), Progress::new());
+    let proxy = ProxyConfig::from_env();
+    for warning in proxy.warnings() {
+        eprintln!("提示：{warning}");
+    }
+    let downloader = Downloader::new(proxy, Progress::new());
     let report = sync(&root, &manifest, current_platform(), &downloader)?;
     println!(
         "新装 {} 项，跳过 {} 项",

@@ -18,10 +18,30 @@ pub enum UnpackKind {
     Zip,
     #[serde(rename = "tar.zst")]
     TarZst,
+    /// 单文件 gzip（ffmpeg / ffprobe），解出的是文件而不是目录
+    #[serde(rename = "gz")]
+    Gz,
+}
+
+/// 只从压缩包里取出的单个文件（zip 内路径 -> AppRoot 下的 dest）。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Entry {
+    pub entry: String,
+    pub dest: String,
+    /// 目前只有 "mp3"：取出后用 data/bin/ffmpeg 转成 128k 立体声 44.1kHz
+    #[serde(default)]
+    pub transcode: Option<String>,
+}
+
+/// 安装成功后写入的标记文件（Remotion 的 chrome-headless-shell/VERSION）。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Marker {
+    pub path: String,
+    pub content: String,
 }
 
 /// 清单中的一项。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Item {
     pub id: String,
     /// node / ffmpeg / chrome / model / asset / app；用字符串，新增类别时不至于解析失败
@@ -38,6 +58,14 @@ pub struct Item {
     /// 解包时剥掉的前导目录层数（压缩包带一层顶级目录时用），缺省 0
     #[serde(default, alias = "strip_components")]
     pub strip: usize,
+    /// 安装后给 dest 设可执行位（Windows 忽略）
+    #[serde(default)]
+    pub executable: bool,
+    /// 只取压缩包里的这些文件，而不是整体解包
+    #[serde(default)]
+    pub entries: Vec<Entry>,
+    #[serde(default)]
+    pub marker: Option<Marker>,
     /// 按优先级排列的镜像地址
     pub urls: Vec<String>,
 }
@@ -79,6 +107,20 @@ impl Manifest {
             if item.urls.is_empty() {
                 return Err(Error::new(format!("清单项 {} 没有下载地址", item.id)));
             }
+            if !item.entries.is_empty() && item.unpack != Some(UnpackKind::Zip) {
+                return Err(Error::new(format!(
+                    "清单项 {} 的 entries 只能用于 zip",
+                    item.id
+                )));
+            }
+            // 所有路径都在入口处校验一遍，后续流程可以放心 join
+            item.rel_dest()?;
+            for e in &item.entries {
+                rel_path(&item.id, &e.dest, &self.version)?;
+            }
+            if let Some(m) = &item.marker {
+                rel_path(&item.id, &m.path, &self.version)?;
+            }
         }
         Ok(())
     }
@@ -108,28 +150,45 @@ pub fn current_platform() -> &'static str {
 impl Item {
     /// 展开占位符并拼出绝对目标路径；拒绝绝对路径与 `..`。
     pub fn resolve_dest(&self, root: &AppRoot, version: &str) -> Result<PathBuf> {
-        let expanded = self.dest.replace("{app}", &format!("app/{version}"));
-        let mut path = root.root().to_path_buf();
-        let mut any = false;
-        for comp in Path::new(&expanded).components() {
-            match comp {
-                Component::Normal(c) => {
-                    path.push(c);
-                    any = true;
-                }
-                Component::CurDir => {}
-                _ => {
-                    return Err(Error::new(format!(
-                        "清单项 {} 的 dest 不合法：{}",
-                        self.id, self.dest
-                    )))
-                }
-            }
+        resolve_rel(root, &self.id, &self.dest, version)
+    }
+
+    pub fn resolve_marker(&self, root: &AppRoot, version: &str) -> Result<Option<PathBuf>> {
+        self.marker
+            .as_ref()
+            .map(|m| resolve_rel(root, &self.id, &m.path, version))
+            .transpose()
+    }
+
+    /// 单个 entry 的绝对输出路径。
+    pub fn resolve_entry(&self, root: &AppRoot, entry: &Entry, version: &str) -> Result<PathBuf> {
+        resolve_rel(root, &self.id, &entry.dest, version)
+    }
+
+    /// 解包到目录的「整体替换型」项（会清掉 dest 里原有内容）。
+    pub fn replaces_dir(&self) -> bool {
+        matches!(self.unpack, Some(k) if k != UnpackKind::Gz) && self.entries.is_empty()
+    }
+
+    /// 落盘结果不是下载文件本身（解包 / gz / 取 entry），无法用 dest 反推 sha。
+    pub fn is_derived(&self) -> bool {
+        self.unpack.is_some()
+    }
+
+    /// 该项会写入的全部路径（dest、entries、marker）。
+    pub fn footprint(&self, root: &AppRoot, version: &str) -> Result<Vec<PathBuf>> {
+        let mut paths = vec![self.resolve_dest(root, version)?];
+        for e in &self.entries {
+            paths.push(self.resolve_entry(root, e, version)?);
         }
-        if !any {
-            return Err(Error::new(format!("清单项 {} 的 dest 为空", self.id)));
+        if let Some(m) = self.resolve_marker(root, version)? {
+            paths.push(m);
         }
-        Ok(path)
+        Ok(paths)
+    }
+
+    fn rel_dest(&self) -> Result<PathBuf> {
+        rel_path(&self.id, &self.dest, "0")
     }
 
     /// 下载中的 .part 文件名：带上 sha 前缀，清单换版本后不会误续传旧内容。
@@ -148,4 +207,25 @@ impl Item {
         let short: String = self.sha256.chars().take(8).collect();
         format!("{safe}-{short}.part")
     }
+}
+
+/// 展开 `{app}` 并校验为相对路径（只允许普通组件）。
+fn rel_path(id: &str, raw: &str, version: &str) -> Result<PathBuf> {
+    let expanded = raw.replace("{app}", &format!("app/{version}"));
+    let mut path = PathBuf::new();
+    for comp in Path::new(&expanded).components() {
+        match comp {
+            Component::Normal(c) => path.push(c),
+            Component::CurDir => {}
+            _ => return Err(Error::new(format!("清单项 {id} 的路径不合法：{raw}"))),
+        }
+    }
+    if path.as_os_str().is_empty() {
+        return Err(Error::new(format!("清单项 {id} 的路径为空")));
+    }
+    Ok(path)
+}
+
+fn resolve_rel(root: &AppRoot, id: &str, raw: &str, version: &str) -> Result<PathBuf> {
+    Ok(root.root().join(rel_path(id, raw, version)?))
 }

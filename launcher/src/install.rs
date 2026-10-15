@@ -1,20 +1,31 @@
 //! 按清单把各项装到 AppRoot：跳过已装项，其余并发下载 → 校验 → 解包/落盘 → 记入 state。
+//!
+//! 调度约束：
+//! - 目录嵌套：dest 落在另一项「整体替换型」dest 之内的项（chrome 在 app 目录里），
+//!   必须等外层装完再装；外层被重装时，已装好的内层项会被强制重装（否则会被外层替换掉）。
+//! - 配乐转码需要 data/bin/ffmpeg，所以排在 ffmpeg 之后。
 
 use crate::download::Downloader;
 use crate::error::{Context, Error, Result};
+use crate::fsx;
 use crate::hash::sha256_file;
-use crate::manifest::{Item, Manifest};
+use crate::manifest::{Item, Manifest, UnpackKind};
 use crate::paths::AppRoot;
+use crate::single::{extract_entry, set_executable, unpack_gz, write_marker};
 use crate::state::{Check, State};
-use crate::unpack::unpack;
-use std::collections::VecDeque;
+use crate::unpack::{cleanup_stale, unpack};
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex};
 
 /// 同时下载的项数
 pub const CONCURRENCY: usize = 2;
+
+/// 解压总字节上限的下限（清单 size 太小时仍给足空间）
+const MIN_UNPACK_BUDGET: u64 = 512 * 1024 * 1024;
+/// 解压总字节上限 = 清单 size 的倍数
+const UNPACK_RATIO: u64 = 20;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SyncReport {
@@ -27,6 +38,32 @@ pub struct SyncReport {
 struct Job<'a> {
     item: &'a Item,
     dest: PathBuf,
+    /// dest、entries、marker 全部会写入的路径
+    footprint: Vec<PathBuf>,
+}
+
+impl Job<'_> {
+    /// 是否有路径落在 `outer` 目录之内（不含 outer 自身）。
+    fn nested_in(&self, outer: &Path) -> bool {
+        self.footprint
+            .iter()
+            .any(|p| p != outer && p.starts_with(outer))
+    }
+
+    fn needs_ffmpeg(&self) -> bool {
+        self.item.entries.iter().any(|e| e.transcode.is_some())
+    }
+}
+
+/// 清单项处于「已装」状态时，entries 与 marker 输出也必须都在。
+fn outputs_present(job: &Job) -> bool {
+    job.footprint.iter().skip(1).all(|p| p.exists())
+}
+
+fn unpack_budget(item: &Item) -> u64 {
+    item.size
+        .saturating_mul(UNPACK_RATIO)
+        .max(MIN_UNPACK_BUDGET)
 }
 
 /// 同步指定平台的全部清单项。任何一项失败则返回错误（其余已完成的项仍已记入 state）。
@@ -41,68 +78,130 @@ pub fn sync(
     let mut state = State::load(&state_path)?;
     let progress = downloader.progress();
 
-    // 1. 判定哪些要装；需要算 sha 的大文件只在这里算一次
-    let mut report = SyncReport::default();
-    let mut jobs: VecDeque<Job> = VecDeque::new();
+    let mut jobs: Vec<Job> = Vec::new();
     for item in manifest.for_platform(platform) {
-        let dest = item.resolve_dest(root, &manifest.version)?;
-        let up_to_date = match state.check(item, &dest) {
-            Check::UpToDate => true,
+        jobs.push(Job {
+            item,
+            dest: item.resolve_dest(root, &manifest.version)?,
+            footprint: item.footprint(root, &manifest.version)?,
+        });
+    }
+    // 清理上次崩溃遗留的临时目录
+    let parents: HashSet<&Path> = jobs
+        .iter()
+        .flat_map(|j| j.footprint.iter().filter_map(|p| p.parent()))
+        .collect();
+    cleanup_stale(root.root());
+    parents.into_iter().for_each(cleanup_stale);
+
+    // 1. 判定哪些要装；需要算 sha 的大文件只在这里算一次
+    let mut todo: Vec<bool> = Vec::with_capacity(jobs.len());
+    for job in &jobs {
+        let item = job.item;
+        let up_to_date = match state.check(item, &job.dest) {
+            Check::UpToDate => outputs_present(job),
             Check::Missing => false,
             Check::NeedHash => {
                 progress.set_active(&item.id, &format!("校验 {}", item.id));
-                let same = sha256_file(&dest)?.eq_ignore_ascii_case(&item.sha256);
+                let same = sha256_file(&job.dest)?.eq_ignore_ascii_case(&item.sha256);
                 progress.clear_active(&item.id);
                 if same {
-                    state = state.with_installed(&item.id, State::record_for(item, &dest));
+                    state = state.with_installed(&item.id, State::record_for(item, &job.dest));
                 }
                 same
             }
         };
-        if up_to_date {
-            report.skipped.push(item.id.clone());
-        } else {
-            jobs.push_back(Job { item, dest });
+        todo.push(!up_to_date);
+    }
+    // 外层被重装时，内层已装项也要重装（外层替换目录会把它们带走）
+    loop {
+        let mut changed = false;
+        for outer in 0..jobs.len() {
+            if !todo[outer] || !jobs[outer].item.replaces_dir() {
+                continue;
+            }
+            for inner in 0..jobs.len() {
+                if inner != outer && !todo[inner] && jobs[inner].nested_in(&jobs[outer].dest) {
+                    todo[inner] = true;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
         }
     }
     state.save(&state_path)?;
-    progress.set_total(jobs.iter().map(|j| j.item.size).sum());
 
-    // 2. 并发安装
-    let queue = Mutex::new(jobs);
+    let mut report = SyncReport::default();
+    let mut pending = Vec::new();
+    for (i, job) in jobs.iter().enumerate() {
+        if todo[i] {
+            pending.push(i);
+        } else {
+            report.skipped.push(job.item.id.clone());
+        }
+    }
+    progress.set_total(pending.iter().map(|&i| jobs[i].item.size).sum());
+
+    // 2. 依赖：嵌套在外层 dest 内、转码依赖 ffmpeg
+    let ffmpeg = ffmpeg_path(root, platform);
+    let deps: Vec<Vec<usize>> = (0..jobs.len())
+        .map(|j| {
+            pending
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    i != j
+                        && ((jobs[i].item.replaces_dir() && jobs[j].nested_in(&jobs[i].dest))
+                            || (jobs[j].needs_ffmpeg() && jobs[i].dest == ffmpeg))
+                })
+                .collect()
+        })
+        .collect();
+
+    // 3. 并发安装
+    let sched = Mutex::new(Sched {
+        pending,
+        done: HashSet::new(),
+        running: 0,
+        failed: false,
+    });
+    let cv = Condvar::new();
     let shared = Mutex::new(state);
     let installed = Mutex::new(Vec::new());
     let errors = Mutex::new(Vec::new());
-    let abort = AtomicBool::new(false);
 
     std::thread::scope(|scope| {
         for _ in 0..CONCURRENCY {
-            scope.spawn(|| loop {
-                if abort.load(Ordering::Relaxed) {
-                    return;
-                }
-                let Some(job) = queue.lock().ok().and_then(|mut q| q.pop_front()) else {
-                    return;
-                };
-                let outcome = install_one(root, &job, downloader).and_then(|()| {
-                    // 每装完一项立即落盘，中途退出也不会丢进度
-                    let mut guard = shared.lock().map_err(|_| Error::new("state 锁已损坏"))?;
-                    *guard =
-                        guard.with_installed(&job.item.id, State::record_for(job.item, &job.dest));
-                    guard.save(&state_path)
-                });
-                match outcome {
-                    Ok(()) => {
-                        if let Ok(mut v) = installed.lock() {
-                            v.push(job.item.id.clone());
+            scope.spawn(|| {
+                while let Some(idx) = next_job(&sched, &cv, &deps) {
+                    let job = &jobs[idx];
+                    let outcome = install_one(root, &manifest.version, &ffmpeg, job, downloader)
+                        .and_then(|()| {
+                            // 每装完一项立即落盘，中途退出也不会丢进度
+                            let mut guard =
+                                shared.lock().map_err(|_| Error::new("state 锁已损坏"))?;
+                            *guard = guard.with_installed(
+                                &job.item.id,
+                                State::record_for(job.item, &job.dest),
+                            );
+                            guard.save(&state_path)
+                        });
+                    let ok = outcome.is_ok();
+                    match outcome {
+                        Ok(()) => {
+                            if let Ok(mut v) = installed.lock() {
+                                v.push(job.item.id.clone());
+                            }
+                        }
+                        Err(e) => {
+                            if let Ok(mut v) = errors.lock() {
+                                v.push(e.to_string());
+                            }
                         }
                     }
-                    Err(e) => {
-                        abort.store(true, Ordering::Relaxed);
-                        if let Ok(mut v) = errors.lock() {
-                            v.push(e.to_string());
-                        }
-                    }
+                    finish_job(&sched, &cv, idx, ok);
                 }
             });
         }
@@ -116,7 +215,63 @@ pub fn sync(
     }
 }
 
-fn install_one(root: &AppRoot, job: &Job, downloader: &Downloader) -> Result<()> {
+struct Sched {
+    pending: Vec<usize>,
+    done: HashSet<usize>,
+    running: usize,
+    failed: bool,
+}
+
+/// 取下一个依赖已满足的任务；没有可做的但还有任务在跑就等待；全部做完或失败返回 None。
+fn next_job(sched: &Mutex<Sched>, cv: &Condvar, deps: &[Vec<usize>]) -> Option<usize> {
+    let mut g = sched.lock().ok()?;
+    loop {
+        if g.failed || g.pending.is_empty() {
+            return None;
+        }
+        let ready = g
+            .pending
+            .iter()
+            .position(|&i| deps[i].iter().all(|d| g.done.contains(d)));
+        if let Some(pos) = ready {
+            g.running += 1;
+            return Some(g.pending.remove(pos));
+        }
+        if g.running == 0 {
+            return None; // 依赖永远满足不了（不应发生），避免死等
+        }
+        g = cv.wait(g).ok()?;
+    }
+}
+
+fn finish_job(sched: &Mutex<Sched>, cv: &Condvar, idx: usize, ok: bool) {
+    if let Ok(mut g) = sched.lock() {
+        g.running -= 1;
+        if ok {
+            g.done.insert(idx);
+        } else {
+            g.failed = true;
+        }
+    }
+    cv.notify_all();
+}
+
+fn ffmpeg_path(root: &AppRoot, platform: &str) -> PathBuf {
+    let name = if platform.starts_with("win32") {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
+    root.data().join("bin").join(name)
+}
+
+fn install_one(
+    root: &AppRoot,
+    version: &str,
+    ffmpeg: &Path,
+    job: &Job,
+    downloader: &Downloader,
+) -> Result<()> {
     let item = job.item;
     let progress = downloader.progress();
     let part = root.downloads().join(item.part_name());
@@ -127,23 +282,49 @@ fn install_one(root: &AppRoot, job: &Job, downloader: &Downloader) -> Result<()>
     downloaded?;
 
     progress.set_active(&item.id, &format!("安装 {}", item.id));
-    let placed = place(item, &part, job);
+    let placed = place(root, version, ffmpeg, job, &part);
     progress.clear_active(&item.id);
     placed
 }
 
 /// 把校验过的下载文件放到目标位置：解包项解包后删掉压缩包，其余直接 rename。
-fn place(item: &Item, part: &std::path::Path, job: &Job) -> Result<()> {
+fn place(root: &AppRoot, version: &str, ffmpeg: &Path, job: &Job, part: &Path) -> Result<()> {
+    let item = job.item;
+    let budget = unpack_budget(item);
     match item.unpack {
-        Some(kind) => {
-            unpack(part, kind, item.strip, &job.dest)?;
-            fs::remove_file(part).ctx(format!("清理 {} 失败", part.display()))
+        Some(UnpackKind::Gz) => unpack_gz(part, &job.dest, budget)?,
+        Some(UnpackKind::Zip) if !item.entries.is_empty() => {
+            for entry in &item.entries {
+                let dest = item.resolve_entry(root, entry, version)?;
+                extract_entry(
+                    part,
+                    &entry.entry,
+                    &dest,
+                    entry.transcode.as_deref(),
+                    ffmpeg,
+                    budget,
+                )?;
+                if item.executable {
+                    set_executable(&dest)?;
+                }
+            }
         }
+        Some(kind) => unpack(part, kind, item.strip, &job.dest, budget)?,
         None => {
             if let Some(dir) = job.dest.parent() {
                 fs::create_dir_all(dir).ctx(format!("创建目录 {} 失败", dir.display()))?;
             }
-            fs::rename(part, &job.dest).ctx(format!("移动到 {} 失败", job.dest.display()))
+            fsx::rename(part, &job.dest).ctx(format!("移动到 {} 失败", job.dest.display()))?;
         }
     }
+    // 压缩包删不掉（杀软占用）不影响已装好的结果
+    let _ = fsx::remove_file(part);
+
+    if item.executable && item.entries.is_empty() {
+        set_executable(&job.dest)?;
+    }
+    if let (Some(marker), Some(path)) = (&item.marker, item.resolve_marker(root, version)?) {
+        write_marker(&path, &marker.content)?;
+    }
+    Ok(())
 }

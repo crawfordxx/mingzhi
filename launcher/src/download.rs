@@ -10,7 +10,7 @@ use crate::error::{Context, Error, Result};
 use crate::hash::sha256_file;
 use crate::manifest::Item;
 use crate::progress::Progress;
-use crate::proxy::ProxyConfig;
+use crate::proxy::{redact, ProxyConfig};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -81,7 +81,7 @@ impl Downloader {
                 }
 
                 if file_len(part) != item.size {
-                    match self.fetch(url, part, &mut counted) {
+                    match self.fetch(url, item.size, part, &mut counted) {
                         Ok(()) => {}
                         Err(FetchError::NextMirror(msg)) => {
                             failures.push(format!("{url}：{msg}"));
@@ -108,11 +108,16 @@ impl Downloader {
             }
         }
 
-        let detail = failures.last().cloned().unwrap_or_default();
-        Err(Error::new(format!(
+        let detail = redact(&failures.last().cloned().unwrap_or_default());
+        let mut msg = format!(
             "{} 下载失败，所有镜像均不可用（最后一次：{detail}）",
             item.id
-        )))
+        );
+        for w in self.proxy.warnings() {
+            msg.push('；');
+            msg.push_str(w);
+        }
+        Err(Error::new(msg))
     }
 
     /// 大小与 sha256 是否与清单一致。
@@ -149,7 +154,8 @@ impl Downloader {
             .timeout_connect(CONNECT_TIMEOUT)
             .timeout_read(READ_TIMEOUT);
         if let Some(p) = self.proxy.proxy_for(url) {
-            builder = builder.proxy(ureq::Proxy::new(p).ctx(format!("代理地址 {p} 不可用"))?);
+            builder =
+                builder.proxy(ureq::Proxy::new(p).ctx(format!("代理地址 {} 不可用", redact(p)))?);
         }
         Ok(builder.build())
     }
@@ -158,6 +164,7 @@ impl Downloader {
     fn fetch(
         &self,
         url: &str,
+        limit: u64,
         part: &Path,
         counted: &mut u64,
     ) -> std::result::Result<(), FetchError> {
@@ -190,12 +197,14 @@ impl Downloader {
 
         let resume = match resp.status() {
             206 => {
-                let start = resp
-                    .header("Content-Range")
-                    .and_then(parse_content_range_start);
-                if start != Some(offset) {
+                let range = resp.header("Content-Range").and_then(parse_content_range);
+                if range.map(|r| r.0) != Some(offset) {
                     let _ = self.discard(part, counted);
                     return Err(FetchError::Retry("续传位置与服务器不一致".into()));
+                }
+                if range.and_then(|r| r.1).is_some_and(|total| total != limit) {
+                    let _ = self.discard(part, counted);
+                    return Err(FetchError::NextMirror("文件总长度与清单不符".into()));
                 }
                 true
             }
@@ -203,6 +212,14 @@ impl Downloader {
             200 => false,
             other => return Err(FetchError::NextMirror(format!("意外的状态码 {other}"))),
         };
+        // 声明的长度就已超出清单大小：一个字节都不写
+        let declared = resp
+            .header("Content-Length")
+            .and_then(|v| v.trim().parse::<u64>().ok());
+        let start = if resume { offset } else { 0 };
+        if declared.is_some_and(|len| start + len > limit) {
+            return Err(FetchError::NextMirror("文件长度超出清单声明".into()));
+        }
         if !resume && offset > 0 {
             self.discard(part, counted)
                 .map_err(|e| FetchError::Retry(e.to_string()))?;
@@ -229,6 +246,12 @@ impl Downloader {
             })?;
             self.progress.add(n as u64);
             *counted += n as u64;
+            // 没声明长度的响应（chunked）也要拦住：超过清单大小立即中止并删除
+            if *counted > limit {
+                drop(file);
+                let _ = self.discard(part, counted);
+                return Err(FetchError::NextMirror("返回内容超出清单声明的大小".into()));
+            }
         }
     }
 }
@@ -237,14 +260,10 @@ fn file_len(path: &Path) -> u64 {
     fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
-/// 解析 `bytes 100-199/200` 中的起始位置。
-fn parse_content_range_start(value: &str) -> Option<u64> {
-    value
-        .trim()
-        .strip_prefix("bytes ")?
-        .split('-')
-        .next()?
-        .trim()
-        .parse()
-        .ok()
+/// 解析 `bytes 100-199/200`，返回 (起始位置, 总长度)；总长度为 `*` 时是 None。
+fn parse_content_range(value: &str) -> Option<(u64, Option<u64>)> {
+    let rest = value.trim().strip_prefix("bytes ")?;
+    let (range, total) = rest.split_once('/')?;
+    let start = range.split('-').next()?.trim().parse().ok()?;
+    Some((start, total.trim().parse().ok()))
 }

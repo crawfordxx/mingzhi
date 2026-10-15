@@ -239,3 +239,89 @@ fn 进度计数与回退() {
     assert_eq!((s.downloaded, s.total), (5, 100));
     assert_eq!(s.active, vec!["校验 a"]);
 }
+
+// ---- 以下为审查后补的用例 ----
+
+#[test]
+fn 解析task1清单新字段_未知字段不致失败() {
+    let json = r#"{
+      "version": "0.3.0",
+      "futureTopLevel": 1,
+      "items": [
+        {"id":"ffmpeg-darwin-arm64","kind":"ffmpeg","platform":"darwin-arm64","sha256":"aa","size":10,
+         "dest":"data/bin/ffmpeg","unpack":"gz","executable":true,"urls":["https://a/f.gz"],"license":"GPL","newField":{"x":1}},
+        {"id":"chrome","kind":"chrome","platform":"darwin-arm64","sha256":"bb","size":10,
+         "dest":"{app}/node_modules/.remotion/chrome-headless-shell/mac-arm64","unpack":"zip",
+         "marker":{"path":"{app}/node_modules/.remotion/chrome-headless-shell/VERSION","content":"149.0.7790.0"},
+         "urls":["https://a/c.zip"]},
+        {"id":"music-a","kind":"asset","platform":"any","sha256":"cc","size":10,"dest":"data/assets/music","unpack":"zip",
+         "entries":[{"entry":"a/b.wav","dest":"data/assets/music/b.mp3","transcode":"mp3"}],"urls":["https://a/m.zip"]}
+      ]
+    }"#;
+    let m = Manifest::parse(json).unwrap();
+    assert_eq!(m.items[0].unpack, Some(UnpackKind::Gz));
+    assert!(m.items[0].executable);
+    assert_eq!(m.items[1].marker.as_ref().unwrap().content, "149.0.7790.0");
+    assert_eq!(m.items[2].entries[0].transcode.as_deref(), Some("mp3"));
+
+    let root = AppRoot::new("/r");
+    let marker = m.items[1].resolve_marker(&root, "0.3.0").unwrap().unwrap();
+    assert_eq!(
+        marker,
+        PathBuf::from("/r/app/0.3.0/node_modules/.remotion/chrome-headless-shell/VERSION")
+    );
+    assert!(m.items[1].replaces_dir() && !m.items[0].replaces_dir() && !m.items[2].replaces_dir());
+}
+
+#[test]
+fn entries与marker路径同样校验() {
+    let base = |extra: &str| {
+        format!(
+            r#"{{"version":"1","items":[{{"id":"a","platform":"any","sha256":"x","size":1,"dest":"d","unpack":"zip",{extra},"urls":["u"]}}]}}"#
+        )
+    };
+    assert!(Manifest::parse(&base(r#""entries":[{"entry":"e","dest":"../x"}]"#)).is_err());
+    assert!(Manifest::parse(&base(r#""marker":{"path":"/abs","content":""}"#)).is_err());
+    assert!(Manifest::parse(&base(r#""entries":[{"entry":"e","dest":"ok/x"}]"#)).is_ok());
+    // entries 只能配 zip
+    let tar = r#"{"version":"1","items":[{"id":"a","platform":"any","sha256":"x","size":1,"dest":"d","unpack":"tar.gz","entries":[{"entry":"e","dest":"x"}],"urls":["u"]}]}"#;
+    assert!(Manifest::parse(tar).is_err());
+}
+
+#[test]
+fn 解析task1的真实锁文件() {
+    // Task 1 生成的 manifest.lock.json（顶层是 schemaVersion + items），补上 version 后应能完整解析
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.lock.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return; // 锁文件不在时跳过（它由 Task 1 提交）
+    };
+    let mut value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    value["version"] = "0.1.0".into();
+    let m = Manifest::parse(&value.to_string()).unwrap();
+    assert!(!m.items.is_empty());
+    for platform in ["darwin-arm64", "darwin-x64", "win32-x64"] {
+        let ids: Vec<_> = m
+            .for_platform(platform)
+            .iter()
+            .map(|i| i.kind.clone())
+            .collect();
+        for kind in ["node", "ffmpeg", "chrome", "model"] {
+            assert!(ids.iter().any(|k| k == kind), "{platform} 缺少 {kind}");
+        }
+    }
+}
+
+#[test]
+fn 凭据脱敏() {
+    use mingzhi_launcher::proxy::redact;
+    assert_eq!(
+        redact("连接 http://user:pw@host:8080/a 失败"),
+        "连接 http://***@host:8080/a 失败"
+    );
+    assert_eq!(
+        redact("socks5://u:p@127.0.0.1:1080"),
+        "socks5://***@127.0.0.1:1080"
+    );
+    assert_eq!(redact("https://example.com/a@b"), "https://example.com/a@b");
+    assert_eq!(redact("没有链接"), "没有链接");
+}

@@ -7,6 +7,8 @@ pub struct ProxyConfig {
     https: Option<String>,
     http: Option<String>,
     no_proxy: Vec<String>,
+    /// 无法使用的代理设置（如 socks），给界面做明确提示
+    warnings: Vec<String>,
 }
 
 impl ProxyConfig {
@@ -53,11 +55,32 @@ impl ProxyConfig {
             .or(sys_https)
             .or(sys_http.clone());
         let http = env_http.or(sys_http);
+        let mut warnings = Vec::new();
+        let mut usable = |raw: Option<String>| {
+            raw.and_then(|r| {
+                let n = normalize(&r);
+                if n.is_none() {
+                    warnings.push(format!(
+                        "暂不支持 {} 这种代理，已改为直连；请改用 HTTP 代理（http://地址:端口）",
+                        redact(&r)
+                    ));
+                }
+                n
+            })
+        };
+        let (https, http) = (usable(https), usable(http));
+        warnings.dedup();
         Self {
-            https: https.and_then(normalize),
-            http: http.and_then(normalize),
+            https,
+            http,
             no_proxy,
+            warnings,
         }
+    }
+
+    /// 无法使用的代理设置说明（如 socks），界面应提示用户。
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
     }
 
     /// 访问该 URL 应使用的代理；None 表示直连。
@@ -85,8 +108,8 @@ impl ProxyConfig {
     }
 }
 
-/// 只接受 ureq 能直接用的 http 代理；socks 等忽略。补全缺省的 scheme。
-fn normalize(raw: String) -> Option<String> {
+/// 只接受 ureq 能直接用的 http 代理；socks / https 代理返回 None。补全缺省的 scheme。
+fn normalize(raw: &str) -> Option<String> {
     let raw = raw.trim().trim_end_matches('/').to_string();
     if raw.starts_with("http://") {
         Some(raw)
@@ -95,6 +118,28 @@ fn normalize(raw: String) -> Option<String> {
     } else {
         Some(format!("http://{raw}"))
     }
+}
+
+/// 抹掉文本里 `scheme://用户:密码@主机` 中的凭据，避免进入错误信息和日志。
+pub fn redact(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(pos) = rest.find("://") {
+        let (head, tail) = rest.split_at(pos + 3);
+        out.push_str(head);
+        let authority_end = tail
+            .find(|c: char| c == '/' || c == '?' || c == '#' || c.is_whitespace())
+            .unwrap_or(tail.len());
+        match tail[..authority_end].rfind('@') {
+            Some(at) => {
+                out.push_str("***@");
+                rest = &tail[at + 1..];
+            }
+            None => rest = tail,
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn is_loopback(host: &str) -> bool {
