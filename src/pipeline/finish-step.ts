@@ -8,6 +8,7 @@ import type { TimedCaption } from '../captions/lines.js';
 import { CAPTION_STYLES, type CaptionStyleId } from '../captions/styles.js';
 import { COVER_STYLES, DEFAULT_COVER_STYLE, type CoverStyleId } from '../cover/styles.js';
 import { coverTitle, makeCovers, type MakeCoversOptions, type MakeCoversResult } from '../cover/generate.js';
+import { rethrowIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
@@ -36,6 +37,7 @@ const lufs = (n: number): string => n.toFixed(1);
 export async function runLoudness(cfg: AppConfig, raw: string, output: string, complete: Complete): Promise<void> {
   await rm(output, { force: true });
   const res = await normalizeLoudness(raw, output, cfg).catch((err: unknown) => {
+    rethrowIfCancelled(err);
     throw new Error(`响度统一失败（渲染结果保留在 ${raw}）：${err instanceof Error ? err.message : String(err)}`);
   });
   await rm(raw, { force: true });
@@ -102,6 +104,7 @@ export async function runCover(ctx: CoverContext, cover: CoverOptions | undefine
     });
   } catch (err) {
     rethrowIfBalance(err);
+    rethrowIfCancelled(err);
     complete('cover', `封面生成失败，已跳过（成片不受影响）：${errText(err)}`);
   }
 }

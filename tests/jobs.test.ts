@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SpaceStore } from '../src/workspace/store.js';
-import { EventBus, toWorkEvent, type WorkEvent } from '../src/workspace/events.js';
+import { EventBus, toWorkEvent, type WorkEvent, type WorkEventInput } from '../src/workspace/events.js';
 import { JobQueue, type Job } from '../src/workspace/jobs.js';
 
-const ev = (spaceId: string, version: number, step: WorkEvent['step'], message: string, extra: Partial<WorkEvent> = {}): WorkEvent =>
+const ev = (spaceId: string, version: number, step: WorkEvent['step'], message: string, extra: Partial<WorkEventInput> = {}): WorkEventInput =>
   ({ t: 1, spaceId, version, step, message, ...extra });
 
 const newStore = (): SpaceStore => new SpaceStore(mkdtempSync(join(tmpdir(), 'mz-jobs-')));
@@ -82,6 +82,38 @@ describe('EventBus', () => {
     bus.publish(ev(space.id, 2, 'probe', 'v2'));
     expect(bus.history(space.id, 1).map((e) => e.message)).toEqual(['v1']);
     expect(bus.history(space.id, 2).map((e) => e.message)).toEqual(['v2']);
+  });
+
+  it('seq：每个「项目+版本」内从 1 起单调递增，history 回放也带；换一个 EventBus（模拟重启）后继续往后编号', () => {
+    const store = newStore();
+    const space = store.create('t', [], SETTINGS);
+    store.addVersion(space.id, { summary: '', changedShots: [], costYuan: 0, status: 'done' });
+    store.addVersion(space.id, { summary: '', changedShots: [], costYuan: 0, status: 'running' });
+    const dirOf = (id: string, v: number): string => store.versionDir(id, v);
+    const bus = new EventBus(dirOf);
+    const got: number[] = [];
+    bus.subscribe(space.id, (e) => got.push(e.seq));
+    expect(bus.publish(ev(space.id, 1, 'probe', 'a')).seq).toBe(1);
+    bus.publish(ev(space.id, 1, 'asr', 'b'));
+    expect(bus.publish(ev(space.id, 2, 'probe', 'c')).seq).toBe(1); // 另一个版本重新从 1 起
+    expect(got).toEqual([1, 2, 1]);
+    expect(bus.history(space.id, 1).map((e) => e.seq)).toEqual([1, 2]);
+    const restarted = new EventBus(dirOf);
+    expect(restarted.publish(ev(space.id, 1, 'cuts', 'd')).seq).toBe(3);
+    expect(restarted.history(space.id, 1).map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+
+  it('history：不是对象或缺字段的行（null、数字、数组、缺 step）被跳过并告警', () => {
+    const store = newStore();
+    const space = store.create('t', [], SETTINGS);
+    const { n } = store.addVersion(space.id, { summary: '', changedShots: [], costYuan: 0, status: 'running' });
+    const bus = new EventBus((id, v) => store.versionDir(id, v));
+    bus.publish(ev(space.id, n, 'probe', '好'));
+    appendFileSync(join(store.versionDir(space.id, n), 'events.jsonl'), 'null\n123\n[1]\n{"message":"缺 step"}\n');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(bus.history(space.id, n).map((e) => e.message)).toEqual(['好']);
+    expect(warn).toHaveBeenCalledTimes(4);
+    warn.mockRestore();
   });
 
   it('目录不可写时 publish 不抛错、订阅者仍收到事件', () => {
@@ -216,7 +248,7 @@ describe('JobQueue', () => {
     expect(q.cancel('nope')).toBe(false);
   });
 
-  it('端到端：事件顺序 queued → 流程事件 → failed，并可从 events.jsonl 重播', async () => {
+  it('事件顺序 queued → 流程事件，并可从 events.jsonl 重播（run 为模拟流程）', async () => {
     const store = newStore();
     const s1 = store.create('一', [], SETTINGS);
     const v1 = store.addVersion(s1.id, { summary: '', changedShots: [], costYuan: 0, status: 'running' });

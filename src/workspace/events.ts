@@ -4,6 +4,8 @@ import type { PipelineStep, ProgressEvent } from '../pipeline/run.js';
 
 /** 推给浏览器与落盘的事件；detail 的形状见 src/pipeline/detail.ts */
 export interface WorkEvent {
+  /** 序号：每个项目+版本内从 1 起单调递增（落盘与回放都带），SSE 先补历史再推实时时按它去重 */
+  seq: number;
   /** 毫秒时间戳 */
   t: number;
   spaceId: string;
@@ -13,11 +15,24 @@ export interface WorkEvent {
   detail?: { kind: string; data: unknown };
 }
 
+/** 发布时的事件：seq 由 EventBus 分配 */
+export type WorkEventInput = Omit<WorkEvent, 'seq'>;
+
 const EVENTS_FILE = 'events.jsonl';
 
 /** 流程进度事件 → 工作台事件（补项目、版本与时间；没有明细时不带 detail 字段） */
-export function toWorkEvent(spaceId: string, version: number, e: ProgressEvent, t: number = Date.now()): WorkEvent {
+export function toWorkEvent(spaceId: string, version: number, e: ProgressEvent, t: number = Date.now()): WorkEventInput {
   return { t, spaceId, version, step: e.step, message: e.message, ...(e.detail ? { detail: e.detail } : {}) };
+}
+
+/** 一行 JSON → 事件；不是对象或缺少必要字段（step、message 为字符串）时返回 undefined */
+function parseLine(line: string): WorkEvent | undefined {
+  try {
+    const v = JSON.parse(line) as Partial<WorkEvent> | null;
+    return v && typeof v === 'object' && typeof v.step === 'string' && typeof v.message === 'string' ? (v as WorkEvent) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -26,10 +41,14 @@ export function toWorkEvent(spaceId: string, version: number, e: ProgressEvent, 
  */
 export class EventBus {
   private subscribers = new Map<string, readonly ((e: WorkEvent) => void)[]>();
+  /** 各「项目+版本」最近一次的序号；第一次发布时从已落盘的事件续上，服务重启后序号不回头 */
+  private lastSeq = new Map<string, number>();
 
   constructor(private readonly versionDir: (spaceId: string, version: number) => string) {}
 
-  publish(e: WorkEvent): void {
+  /** 分配序号、落盘并广播；返回带序号的事件 */
+  publish(input: WorkEventInput): WorkEvent {
+    const e: WorkEvent = { ...input, seq: this.nextSeq(input.spaceId, input.version) };
     this.persist(e);
     for (const fn of this.subscribers.get(e.spaceId) ?? []) {
       try {
@@ -38,6 +57,7 @@ export class EventBus {
         console.warn(`事件订阅者出错（已忽略，不影响其他订阅者）：${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    return e;
   }
 
   /** 订阅某个项目的事件；返回退订函数 */
@@ -52,18 +72,33 @@ export class EventBus {
     };
   }
 
-  /** 读回某个版本已落盘的全部事件；没有文件返回空，写到一半的坏行跳过 */
+  /** 读回某个版本已落盘的全部事件（都带 seq）；没有文件返回空，写到一半或格式不对的行跳过并告警 */
   history(spaceId: string, version: number): WorkEvent[] {
     const file = join(this.versionDir(spaceId, version), EVENTS_FILE);
     if (!existsSync(file)) return [];
-    return readFileSync(file, 'utf8').split('\n').flatMap((line) => {
+    const events = readFileSync(file, 'utf8').split('\n').flatMap((line, i) => {
       if (!line.trim()) return [];
-      try {
-        return [JSON.parse(line) as WorkEvent];
-      } catch {
-        return [];
-      }
+      const parsed = parseLine(line);
+      if (!parsed) console.warn(`${file} 第 ${i + 1} 行不是有效事件，已跳过`);
+      return parsed ? [parsed] : [];
     });
+    return events.map((e, i) => (typeof e.seq === 'number' ? e : { ...e, seq: i + 1 }));
+  }
+
+  /** 读不到（目录非法、文件不可读）按 0 起，落盘失败本来就只告警 */
+  private lastPersistedSeq(spaceId: string, version: number): number {
+    try {
+      return this.history(spaceId, version).reduce((max, e) => Math.max(max, e.seq), 0);
+    } catch {
+      return 0;
+    }
+  }
+
+  private nextSeq(spaceId: string, version: number): number {
+    const key = `${spaceId}/${version}`;
+    const last = this.lastSeq.get(key) ?? this.lastPersistedSeq(spaceId, version);
+    this.lastSeq = new Map(this.lastSeq).set(key, last + 1);
+    return last + 1;
   }
 
   /** 落盘失败只告警：写不进磁盘不能把出片流程带崩，浏览器仍能实时收到 */

@@ -6,6 +6,7 @@ import type { AppConfig } from '../config.js';
 import { loadBackgroundRgb } from '../background/prepare.js';
 import { probe, type MediaInfo } from '../media/probe.js';
 import { runBuffer } from '../media/exec.js';
+import { rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
 import { alphaBox, chooseDownsample, colorMatchGains, compositeFrame, foregroundMean, meanRgb, medianBox, type Rgb, type SubjectBox } from './composite.js';
 
 export const RVM_FILE = 'rvm_mobilenetv3_fp32.onnx';
@@ -16,7 +17,7 @@ const SAMPLE_FRAMES = 8;
 const BOX_EVERY = 15;
 const DEFAULT_BLUR = 6;
 
-export interface MatteOptions { input: string; output: string; backgroundPath: string; cfg: AppConfig; blurSigma?: number; colorMatch?: boolean; onProgress?: (done: number, total: number) => void }
+export interface MatteOptions { input: string; output: string; backgroundPath: string; cfg: AppConfig; blurSigma?: number; colorMatch?: boolean; onProgress?: (done: number, total: number) => void; /** 取消信号：逐帧检查，取消时抛 CancelledError 并结束子进程 */ signal?: AbortSignal }
 export interface MatteResult { frames: number; subject: SubjectBox | null; gains: Rgb; fps: number }
 
 export function rvmReady(modelsDir: string): boolean {
@@ -113,6 +114,7 @@ async function sampleForeground(rvm: RvmSession, opts: MatteOptions, w: number, 
   const means: Rgb[] = [];
   try {
     await forEachFrame(p, w * h * 3, async (frame) => {
+      throwIfCancelled(opts.signal);
       rvm.reset();
       const { fgr, pha } = await rvm.infer(frame);
       const m = foregroundMean(fgr, pha, w * h);
@@ -120,6 +122,7 @@ async function sampleForeground(rvm: RvmSession, opts: MatteOptions, w: number, 
     });
     await done;
   } catch (e) {
+    rethrowIfCancelled(e);
     throw new Error(`抠像取样失败：${reasonOf(e)}`);
   } finally {
     killAll(p);
@@ -167,6 +170,7 @@ async function rootCause(err: unknown, enc: Encoder): Promise<string> {
 
 /** 整段抠像换背景：解码 → RVM → 合成 → x264 编码（30fps），音轨从输入直接拷贝 */
 export async function matteVideo(opts: MatteOptions): Promise<MatteResult> {
+  throwIfCancelled(opts.signal);
   const media = await probe(opts.input, opts.cfg);
   const rvm = await RvmSession.create(opts.cfg.modelsDir, media.width, media.height);
   try {
@@ -191,6 +195,7 @@ async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo):
   let frames = 0;
   try {
     await forEachFrame(dec, w * h * 3, async (frame) => {
+      throwIfCancelled(opts.signal);
       const { fgr, pha } = await rvm.infer(frame);
       compositeFrame(fgr, pha, bg, gains, out);
       await enc.write(Buffer.from(out));
@@ -205,6 +210,7 @@ async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo):
     enc.proc.stdin.end();
     await enc.done;
   } catch (e) {
+    rethrowIfCancelled(e);
     const reason = await rootCause(e, enc);
     throw new Error(`抠像换背景失败（已处理 ${frames} 帧）：${reason}`);
   } finally {

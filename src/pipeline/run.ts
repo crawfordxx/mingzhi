@@ -13,6 +13,7 @@ import { resolveBackground, validateBackground, type BackgroundSpec } from '../b
 import { detectCuts, type Cut } from '../cut/llm-cuts.js';
 import { buildEditPlan, cutsToRanges, type EditPlan } from '../cut/plan.js';
 import { renderCut } from '../cut/render-cut.js';
+import { rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
@@ -52,7 +53,7 @@ export interface PipelineArgs {
   qa?: boolean;
   /** 仅供测试注入的自检实现 */
   qaDeps?: QaDeps;
-  /** 取消信号：每一步完成后检查，已取消则抛「已取消」（正在跑的这一步会先跑完） */
+  /** 取消信号：每一步完成后检查，抠像与成片渲染在步骤内部也响应；已取消则抛 CancelledError（消息「已取消」） */
   signal?: AbortSignal;
   onProgress?: (e: ProgressEvent) => void;
 }
@@ -69,11 +70,6 @@ const fmtSec = (s: number): string => {
   const total = Math.round(s);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
-
-/** 已取消则抛错；流程在步骤之间调用 */
-function throwIfCancelled(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) throw new Error('已取消');
-}
 
 /** 花费变化事件：只带 cost 明细（CLI 不打印它，工作台用它刷新「已花 / 上限」） */
 function costEvent(step: PipelineStep, meter: CostMeter): ProgressEvent {
@@ -133,7 +129,7 @@ async function replaceBackground(args: PipelineArgs, cut: string, complete: Comp
   const person = join(args.workDir, 'person.mp4');
   const started = Date.now();
   const res = await matteVideo({
-    input: cut, output: person, backgroundPath: bg.path, cfg: args.cfg,
+    input: cut, output: person, backgroundPath: bg.path, cfg: args.cfg, signal: args.signal,
     onProgress: throttledMatteProgress((e) => args.onProgress?.(e)),
   });
   const secs = Math.max((Date.now() - started) / 1000, 0.001);
@@ -161,6 +157,7 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
     res = await generateStoryboard(llm, captions, durationSec, []);
   } catch (err) {
     rethrowIfBalance(err); // 余额不足降级也没用：后面的付费步骤同样会失败
+    rethrowIfCancelled(err);
     const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }], bgm: DEFAULT_MOOD };
     complete('storyboard', `分镜生成失败，改为全程人像：${err instanceof Error ? err.message : String(err)}`, { storyboard });
     return storyboard;
@@ -207,9 +204,10 @@ async function compose(args: PipelineArgs, a: Analysis, p: Produced, complete: C
   complete('compose', audio.summary, { audio: audio.info, captionStyle: audio.props.captionStyle });
   const raw = join(workDir, 'final.raw.mp4');
   await renderTalk({
-    workDir, output: raw, onProgress: throttledRenderProgress((e) => args.onProgress?.(e)),
+    workDir, output: raw, signal: args.signal, onProgress: throttledRenderProgress((e) => args.onProgress?.(e)),
     props: { person: relative(workDir, p.base), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: p.subject, captions: p.captions, shots: p.storyboard.shots, durationSec, ...audio.props },
   }).catch((err: unknown) => {
+    rethrowIfCancelled(err);
     throw new Error(`成片渲染失败：${err instanceof Error ? err.message : String(err)}`);
   });
   complete('compose', '成片渲染完成');
@@ -252,7 +250,7 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
 /** 卡片自检（可跳过）：返回改写后的制作结果与报告 */
 async function qaCardsStep(args: PipelineArgs, meter: CostMeter, p: Produced, complete: Complete): Promise<{ produced: Produced; cards: CardQaEntry[] }> {
   if (args.qa === false) return { produced: p, cards: [] };
-  const ctx = { llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), qaCards: args.qaDeps?.qaCards, onProgress: (message: string, info?: { shotIndex: number; score: CardScore; passed: boolean }) => args.onProgress?.({ step: 'qa-cards', message, ...(info ? { detail: cardScoreDetail(info.shotIndex, info.score, info.passed) } : {}) }) };
+  const ctx = { llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), signal: args.signal, qaCards: args.qaDeps?.qaCards, onProgress: (message: string, info?: { shotIndex: number; attempt: number; score: CardScore; passed: boolean }) => args.onProgress?.({ step: 'qa-cards', message, ...(info ? { detail: cardScoreDetail(info.shotIndex, info.score, info.passed, info.attempt) } : {}) }) };
   const res = await runQaCards(ctx, p.storyboard, p.captions, complete);
   return { produced: { ...p, storyboard: res.storyboard }, cards: res.report };
 }

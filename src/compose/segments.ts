@@ -7,6 +7,7 @@ import { renderAudioTrack, renderVideoSegment, withBundle } from './render.js';
 import { transformAt } from '../../render/layers/PersonLayer.js';
 import { DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
 import { run } from '../media/exec.js';
+import { throwIfCancelled } from '../cancel.js';
 import { CANVAS, type Shot, type TalkProps } from '../storyboard/schema.js';
 
 export interface FrameRange { start: number; end: number }
@@ -117,6 +118,8 @@ export async function segmentSalt(stamper: Stamper, props: TalkProps, i: number)
 export interface SegmentedOptions {
   workDir: string; cacheDir: string; props: TalkProps; output: string; ffmpeg?: string;
   onProgress?: (done: number, total: number, reused: number) => void;
+  /** 取消信号：每段开始前检查，正在渲染的那一段也会被终止（抛 CancelledError，不留半截缓存） */
+  signal?: AbortSignal;
 }
 export interface SegmentedResult { rendered: number[]; reused: number[] }
 
@@ -140,10 +143,10 @@ async function concatWithAudio(opts: { ffmpeg: string; files: string[]; audio: s
 }
 
 /** 渲染到临时文件再改名，中途取消不会留下半截缓存 */
-async function renderToCache(serveUrl: string, props: TalkProps, range: FrameRange, file: string): Promise<void> {
+async function renderToCache(serveUrl: string, props: TalkProps, range: FrameRange, file: string, signal?: AbortSignal): Promise<void> {
   const tmp = tmpName(file);
   try {
-    await renderVideoSegment({ serveUrl, props, output: tmp, startFrame: range.start, endFrame: range.end });
+    await renderVideoSegment({ serveUrl, props, output: tmp, startFrame: range.start, endFrame: range.end, signal });
     renameSync(tmp, file);
   } finally {
     rmSync(tmp, { force: true });
@@ -153,6 +156,7 @@ async function renderToCache(serveUrl: string, props: TalkProps, range: FrameRan
 /** 按镜头分段渲染画面（命中缓存则复用），音轨整条单独渲染，最后无损拼接；一次打包用于所有分段 */
 export async function renderSegmented(opts: SegmentedOptions): Promise<SegmentedResult> {
   const { workDir, cacheDir, props } = opts;
+  throwIfCancelled(opts.signal);
   const { shots, ...rest } = props;
   if (shots.length === 0) throw new Error('分镜为空，无法分段渲染');
   mkdirSync(cacheDir, { recursive: true });
@@ -167,11 +171,11 @@ export async function renderSegmented(opts: SegmentedOptions): Promise<Segmented
   await withBundle(workDir, async (serveUrl) => {
     for (const s of todo) {
       const reused = cached(s.file);
-      if (!reused) await renderToCache(serveUrl, props, s.range, s.file);
+      if (!reused) await renderToCache(serveUrl, props, s.range, s.file, opts.signal);
       done = [...done, { i: s.i, reused }];
       opts.onProgress?.(done.length, todo.length, done.filter((d) => d.reused).length);
     }
-    await renderAudioTrack({ serveUrl, props, output: audio });
+    await renderAudioTrack({ serveUrl, props, output: audio, signal: opts.signal });
   });
   await concatWithAudio({ ffmpeg: opts.ffmpeg ?? 'ffmpeg', files: todo.map((s) => s.file), audio, listFile: join(workDir, 'segments.txt'), output: opts.output, durationSec: secToFrame(props.durationSec) / CANVAS.fps });
   return { rendered: done.filter((d) => !d.reused).map((d) => d.i), reused: done.filter((d) => d.reused).map((d) => d.i) };

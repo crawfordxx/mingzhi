@@ -13,32 +13,38 @@ export interface ProgressDetail {
 
 type Four = Pick<CardScore, 'layout' | 'hierarchy' | 'motion' | 'brand'>;
 
-/** 识别稿单行最多字数：没有语音段信息或一口气说很久时避免出现巨型行 */
-const MAX_LINE_CHARS = 30;
+/** 识别稿单行最多 token 数（中文约等于字数）：没有语音段信息或一口气说很久时避免出现巨型行 */
+const MAX_LINE_TOKENS = 30;
 const SENTENCE_END = /[。！？!?]$/;
 
 const four = (s: CardScore): Four => ({ layout: s.layout, hierarchy: s.hierarchy, motion: s.motion, brand: s.brand });
 
-/** 逐字稿按语音段切行（再按句末标点与字数上限切开）；data: { lines: { start, end, text }[] } */
+/**
+ * 逐字稿按语音段切行（再按句末标点与 token 数上限切开）。
+ * data: { lines: { from, start, end, text, tokens }[] }：from 是行首 token 的全局下标，tokens 是逐 token 文本，
+ * 前端用 cut.from..cut.to 与 from..from+tokens.length-1 求交集即可精确划掉。
+ */
 export function transcriptDetail(t: Transcript): ProgressDetail {
-  const groups = new Map<number, Token[]>();
-  for (const token of t.tokens) {
+  const groups = new Map<number, number[]>();
+  t.tokens.forEach((token, index) => {
     const seg = t.segments.findIndex((s) => token.start < s.end);
     const key = seg < 0 ? t.segments.length : seg;
-    groups.set(key, [...(groups.get(key) ?? []), token]);
-  }
-  const lines = [...groups.values()].flatMap(splitLines).map((tokens) => ({
-    start: tokens[0].start, end: tokens[tokens.length - 1].end, text: tokens.map((x) => x.text).join(''),
-  }));
+    groups.set(key, [...(groups.get(key) ?? []), index]);
+  });
+  const lines = [...groups.values()].flatMap((indices) => splitLines(indices, t.tokens)).map((indices) => {
+    const tokens = indices.map((i) => t.tokens[i]);
+    return { from: indices[0], start: tokens[0].start, end: tokens[tokens.length - 1].end, text: tokens.map((x) => x.text).join(''), tokens: tokens.map((x) => x.text) };
+  });
   return { kind: 'transcript', data: { lines } };
 }
 
-function splitLines(tokens: Token[]): Token[][] {
-  const lines: Token[][] = [];
-  let current: Token[] = [];
-  for (const token of tokens) {
-    current = [...current, token];
-    if (SENTENCE_END.test(token.text) || current.length >= MAX_LINE_CHARS) {
+/** 一组连续的 token 下标，按句末标点与 MAX_LINE_TOKENS 切行 */
+function splitLines(indices: number[], tokens: Token[]): number[][] {
+  const lines: number[][] = [];
+  let current: number[] = [];
+  for (const i of indices) {
+    current = [...current, i];
+    if (SENTENCE_END.test(tokens[i].text) || current.length >= MAX_LINE_TOKENS) {
       lines.push(current);
       current = [];
     }
@@ -88,9 +94,9 @@ export function shotsDetail(storyboard: Storyboard): ProgressDetail {
   return { kind: 'shot', data: { shots } };
 }
 
-/** 卡片自检的一次打分（边检查边发，分数一张张跳出）；data: { phase: 'score', shotIndex, score, passed } */
-export function cardScoreDetail(shotIndex: number, score: CardScore, passed: boolean): ProgressDetail {
-  return { kind: 'qa', data: { phase: 'score', shotIndex, score: four(score), passed } };
+/** 卡片自检的一次打分（边检查边发，分数一张张跳出）；attempt 从 1 起，1 是首评、更大的是重写后的复评。data: { phase: 'score', shotIndex, attempt, score, passed } */
+export function cardScoreDetail(shotIndex: number, score: CardScore, passed: boolean, attempt = 1): ProgressDetail {
+  return { kind: 'qa', data: { phase: 'score', shotIndex, attempt, score: four(score), passed } };
 }
 
 /** 卡片自检汇总：每张卡片取最后一次分数；data: { phase: 'cards', cards } */
@@ -121,7 +127,8 @@ export function progressDetail(stage: 'matte' | 'compose', pct: number, frames?:
 export function detailOfStep(step: string, patch: ProjectPatch, project: ProjectFile): ProgressDetail | undefined {
   if (step === 'asr' && patch.transcript) return transcriptDetail(patch.transcript);
   if (step === 'cuts' && patch.cuts && project.transcript) return cutsDetail(patch.cuts, project.transcript.tokens);
-  if (step === 'storyboard' && patch.storyboard) return shotsDetail(patch.storyboard);
+  // 素材步骤会重新归一化分镜（合并、降级镜头），所以改写后再发一次，前端以最后一次为准
+  if ((step === 'storyboard' || step === 'broll') && patch.storyboard) return shotsDetail(patch.storyboard);
   if (step === 'qa-cards' && patch.qa && patch.qa.cards.length > 0) return cardsDetail(patch.qa.cards);
   if (step === 'qa-final' && patch.qa && patch.qa.hard.length > 0) return hardDetail(patch.qa.hard);
   return undefined;

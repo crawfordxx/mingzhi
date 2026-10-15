@@ -2,6 +2,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import { z } from 'zod';
 import type { TimedCaption } from '../captions/lines.js';
 import type { CostMeter } from '../cost/meter.js';
+import { rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { renderCardFrames, withBundle } from '../compose/render.js';
@@ -68,8 +69,10 @@ export interface QaCardsOptions {
   ffmpeg: string;
   /** 给后续步骤（封面）预留的花费（元），每次预算检查一并扣除，缺省 0 */
   reserveYuan?: number;
+  /** 取消信号：每张卡片、每次打分前检查，取消时抛 CancelledError */
+  signal?: AbortSignal;
   /** msg 是给人看的进度文案；info 带本次打分的结构化数据，供工作台直播 */
-  onProgress?: (msg: string, info?: { shotIndex: number; score: CardScore; passed: boolean }) => void;
+  onProgress?: (msg: string, info?: { shotIndex: number; attempt: number; score: CardScore; passed: boolean }) => void;
 }
 
 /** 再花一次视觉调用（并为封面留出预留）是否仍在预算内 */
@@ -108,11 +111,12 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
   let card = shot.card as CardSpec;
   try {
     for (;;) {
+      throwIfCancelled(opts.signal);
       if (!canAffordStep(opts)) { skipped = `预算不足，停止检查${reserveNote(opts)}`; break; }
       const version = await evaluate(opts, serveUrl, shot, card);
       versions.push(version);
       scores.push(version.score);
-      opts.onProgress?.(`第 ${index + 1} 镜卡片自检：版式 ${version.score.layout} 层级 ${version.score.hierarchy} 动效 ${version.score.motion} 品牌 ${version.score.brand}`, { shotIndex: index, score: version.score, passed: isPass(version.score) });
+      opts.onProgress?.(`第 ${index + 1} 镜卡片自检：版式 ${version.score.layout} 层级 ${version.score.hierarchy} 动效 ${version.score.motion} 品牌 ${version.score.brand}`, { shotIndex: index, attempt: scores.length, score: version.score, passed: isPass(version.score) });
       if (isPass(version.score) || revised >= MAX_REVISIONS) break;
       if (!canAffordStep(opts)) { skipped = `预算不足，停止重写${reserveNote(opts)}`; break; }
       const base = versions.reduce(better);
@@ -123,6 +127,7 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
     }
   } catch (err) {
     rethrowIfBalance(err);
+    rethrowIfCancelled(err);
     skipped = `自检失败：${err instanceof Error ? err.message : String(err)}`;
   }
   const best = versions.reduce<Version | undefined>((a, b) => (a ? better(a, b) : b), undefined);
@@ -148,6 +153,7 @@ export async function qaCards(opts: QaCardsOptions): Promise<{ storyboard: Story
       // 全部卡片共用一次打包
       await withBundle(opts.workDir, async (serveUrl) => {
         for (const index of targets) {
+          throwIfCancelled(opts.signal);
           if (!canAffordStep(opts)) {
             report.push({ shotIndex: index, scores: [], revised: 0, passed: false, skipped: `预算不足，未检查${reserveNote(opts)}` });
             continue;
@@ -160,6 +166,7 @@ export async function qaCards(opts: QaCardsOptions): Promise<{ storyboard: Story
       });
     } catch (err) {
       rethrowIfBalance(err);
+      rethrowIfCancelled(err);
       // 检查结果已经花了钱：清理失败时保留结果，只在进度里说明
       if (checked) opts.onProgress?.(`卡片自检的打包目录清理失败（检查结果已保留）：${err instanceof Error ? err.message : String(err)}`);
       else return failedBundle(opts, targets, err);

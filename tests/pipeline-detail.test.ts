@@ -19,13 +19,17 @@ const TOKENS: Token[] = [tok('大', 0, 0.2), tok('家', 0.2, 0.4), tok('好', 0.
 describe('进度明细', () => {
   it('transcript：按语音段分行，给出每行的起止与文本', () => {
     const t: Transcript = { durationSec: 3, segments: [{ start: 0, end: 1.3 }, { start: 1.9, end: 2.5 }], tokens: TOKENS };
-    expect(transcriptDetail(t)).toEqual({ kind: 'transcript', data: { lines: [{ start: 0, end: 1.2, text: '大家好嗯' }, { start: 2.0, end: 2.4, text: '今天' }] } });
+    expect(transcriptDetail(t)).toEqual({ kind: 'transcript', data: { lines: [
+      { from: 0, start: 0, end: 1.2, text: '大家好嗯', tokens: ['大', '家', '好', '嗯'] },
+      { from: 4, start: 2.0, end: 2.4, text: '今天', tokens: ['今', '天'] },
+    ] } });
   });
 
   it('transcript：没有语音段信息时整段作为一行；超长行按字数切开', () => {
     const many = Array.from({ length: 70 }, (_, i) => tok('字', i * 0.1, i * 0.1 + 0.1));
     const lines = (transcriptDetail({ durationSec: 7, segments: [], tokens: many }).data as { lines: { text: string }[] }).lines;
     expect(lines.map((l) => l.text.length)).toEqual([30, 30, 10]);
+    expect((transcriptDetail({ durationSec: 7, segments: [], tokens: many }).data as { lines: { from: number }[] }).lines.map((l) => l.from)).toEqual([0, 30, 60]);
   });
 
   it('cut：带上起止时间、被剪文本、类型与原因', () => {
@@ -48,7 +52,7 @@ describe('进度明细', () => {
 
   it('qa：单次打分、卡片汇总（取最后一次分数）与成片硬检查', () => {
     const score = { layout: 8, hierarchy: 9, motion: 8, brand: 9, notes: '' };
-    expect(cardScoreDetail(2, score, true)).toEqual({ kind: 'qa', data: { phase: 'score', shotIndex: 2, score: { layout: 8, hierarchy: 9, motion: 8, brand: 9 }, passed: true } });
+    expect(cardScoreDetail(2, score, true, 2)).toEqual({ kind: 'qa', data: { phase: 'score', shotIndex: 2, attempt: 2, score: { layout: 8, hierarchy: 9, motion: 8, brand: 9 }, passed: true } });
     const report: CardQaEntry[] = [{ shotIndex: 0, scores: [{ ...score, layout: 5 }, score], revised: 1, passed: true }, { shotIndex: 3, scores: [], revised: 0, passed: false, skipped: '预算不足' }];
     expect(cardsDetail(report)).toEqual({ kind: 'qa', data: { phase: 'cards', cards: [
       { shotIndex: 0, score: { layout: 8, hierarchy: 9, motion: 8, brand: 9 }, revised: 1, passed: true },
@@ -72,6 +76,8 @@ describe('进度明细', () => {
     expect(detailOfStep('qa-cards', { qa: { cards: [{ shotIndex: 0, scores: [], revised: 0, passed: false }], hard: [] } }, project)?.kind).toBe('qa');
     expect(detailOfStep('qa-cards', { qa: { cards: [], hard: [] } }, project)).toBeUndefined();
     expect(detailOfStep('qa-final', { qa: { cards: [], hard: [{ id: 'fps', ok: true, detail: '30' }] } }, project)?.kind).toBe('qa');
+    expect(detailOfStep('broll', { storyboard: { shots: [{ start: 0, end: 3, layout: 'full' }] } }, project)?.kind).toBe('shot');
+    expect(detailOfStep('broll', {}, project)).toBeUndefined();
     expect(detailOfStep('plan', {}, project)).toBeUndefined();
   });
 

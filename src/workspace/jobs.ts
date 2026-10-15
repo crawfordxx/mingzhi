@@ -16,6 +16,8 @@ interface Running { job: Job; controller: AbortController }
  * 出片任务队列：同一时间只跑一个任务，其余按序排队；一个任务失败不影响后续任务。
  * 一个项目同时只允许一个任务（排队或运行中），所以取消用 spaceId 定位。
  * 传入 bus 时，排队会发布 queued 事件、失败（含取消）会发布 failed 事件。
+ * 约定：run 在收到取消信号后必须抛错（流程抛 CancelledError），否则不会发 failed 事件。
+ * 排队中被取消的任务不会调用 run；调用方在 cancel() 返回 true 后要自己更新该版本的状态。
  */
 export class JobQueue {
   private waiting: readonly Job[] = [];
@@ -75,6 +77,10 @@ export class JobQueue {
   }
 
   private emit(job: Job, step: 'queued' | 'failed', message: string): void {
-    this.bus?.publish({ t: Date.now(), spaceId: job.spaceId, version: job.version, step, message });
+    try {
+      this.bus?.publish({ t: Date.now(), spaceId: job.spaceId, version: job.version, step, message });
+    } catch (err) {
+      console.warn(`任务事件发布失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
