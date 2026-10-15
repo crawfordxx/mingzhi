@@ -4,7 +4,8 @@ import type { EditOp } from '../src/edit/plan.js';
 import { parseTimeRefs, shotForTime } from '../src/edit/refs.js';
 import { makeState } from './helpers/edit-state.js';
 
-const ALL = ['cut', 'matte', 'captions', 'storyboard', 'broll', 'compose'];
+/** 剪辑节奏类操作：字幕重新对时、分镜平移，不重取素材 */
+const RETIME = ['cut', 'matte', 'captions', 'storyboard', 'compose'];
 const stages = (...ops: EditOp[]): string[] => [...stagesFor(ops)].sort();
 const card = { template: 'title', props: { title: '新标题' } } as const;
 
@@ -67,10 +68,14 @@ describe('stagesFor', () => {
   it('setCoverStyle 只重做封面，不重跑任何阶段', () => {
     expect(stages({ type: 'setCoverStyle', id: 'swiss' })).toEqual([]);
   });
-  it('pace / removeSpan / restoreSpan → 全部阶段', () => {
-    expect(stages({ type: 'pace', direction: 'tighter' })).toEqual([...ALL].sort());
-    expect(stages({ type: 'removeSpan', fromSec: 1, toSec: 2 })).toEqual([...ALL].sort());
-    expect(stages({ type: 'restoreSpan', fromSec: 5, toSec: 7 })).toEqual([...ALL].sort());
+  it('pace / removeSpan / restoreSpan → 重剪阶段，不含 broll', () => {
+    expect(stages({ type: 'pace', direction: 'tighter' })).toEqual([...RETIME].sort());
+    expect(stages({ type: 'removeSpan', fromSec: 1, toSec: 2 })).toEqual([...RETIME].sort());
+    expect(stages({ type: 'restoreSpan', fromSec: 5, toSec: 7 })).toEqual([...RETIME].sort());
+  });
+  it('空操作没有阶段；剪辑类与换图类合并取并集', () => {
+    expect(stages()).toEqual([]);
+    expect(stages({ type: 'pace', direction: 'looser' }, { type: 'regenerateVisual', shotIndex: 2, visual: { source: 'generate', prompt: 'a red apple on desk' } })).toEqual(['broll', ...RETIME].sort());
   });
   it('多个操作取并集', () => {
     expect(stages({ type: 'setBgm', bgm: 'none' }, { type: 'setBackground', spec: { kind: 'prompt', prompt: '海边咖啡馆' } })).toEqual(['compose', 'matte']);
@@ -90,6 +95,31 @@ describe('applyOps', () => {
     expect(next).not.toBe(state);
     expect(state.settings.background).toEqual({ kind: 'preset', id: 'study' });
     expect(state.captions[1].text).toBe('第二句话');
+  });
+
+  it('每种操作单独应用到深冻结的状态都不抛错、不改入参', () => {
+    const visual = { source: 'generate', prompt: 'a red apple on desk' } as const;
+    const every: EditOp[] = [
+      { type: 'setBackground', spec: { kind: 'preset', id: 'cafe' } },
+      { type: 'setCaptionStyle', id: 'wenkai' },
+      { type: 'setCoverStyle', id: 'swiss' },
+      { type: 'setBgm', bgm: 'none' },
+      { type: 'setBgm', bgm: 'tech' },
+      { type: 'replaceCard', shotIndex: 0, card },
+      { type: 'setLayout', shotIndex: 0, layout: 'full' },
+      { type: 'regenerateVisual', shotIndex: 2, visual },
+      { type: 'editCaption', index: 0, text: '改' },
+      { type: 'pace', direction: 'tighter' },
+      { type: 'pace', direction: 'looser' },
+      { type: 'removeSpan', fromSec: 3, toSec: 6 },
+      { type: 'restoreSpan', fromSec: 5, toSec: 7 },
+    ];
+    for (const op of every) {
+      const state = deepFreeze(makeState());
+      expect(() => applyOps(state, [op]), op.type).not.toThrow();
+    }
+    const all = deepFreeze(makeState());
+    expect(() => applyOps(all, every.filter((o) => o.type !== 'setLayout'))).not.toThrow();
   });
 
   it('空操作返回内容相同的状态', () => {
@@ -125,7 +155,8 @@ describe('applyOps', () => {
 
   it('setLayout：变全屏去掉卡片（cta 除外）；无卡片的镜头不能变分屏', () => {
     const next = applyOps(makeState(), [{ type: 'setLayout', shotIndex: 0, layout: 'full' }]);
-    expect(next.storyboard.shots[0]).toEqual({ start: 0, end: 4, layout: 'full' });
+    // 变成无卡片的全屏镜头后，与相邻的全屏镜头合并
+    expect(next.storyboard.shots[0]).toEqual({ start: 0, end: 7, layout: 'full' });
     expect(applyOps(makeState(), [{ type: 'setLayout', shotIndex: 2, layout: 'split' }]).storyboard.shots[2].layout).toBe('split');
     expect(() => applyOps(makeState(), [{ type: 'setLayout', shotIndex: 1, layout: 'split' }])).toThrow('卡片');
   });
@@ -159,6 +190,19 @@ describe('applyOps', () => {
     // 成片 [3,6] = 原片 [4,5] + 原片 [7,9]
     const next = applyOps(makeState(), [{ type: 'removeSpan', fromSec: 3, toSec: 6 }]);
     expect(next.extraCuts).toEqual([{ start: 4, end: 5 }, { start: 7, end: 9 }]);
+  });
+
+  it('removeSpan 恰好落在保留段接缝处时只取接缝另一侧', () => {
+    expect(applyOps(makeState(), [{ type: 'removeSpan', fromSec: 4, toSec: 5 }]).extraCuts).toEqual([{ start: 7, end: 8 }]);
+  });
+
+  it('removeSpan 删到成片不足 1 秒时抛错', () => {
+    expect(() => applyOps(makeState(), [{ type: 'removeSpan', fromSec: 0, toSec: 9.5 }])).toThrow('不足 1 秒');
+    expect(() => applyOps(makeState(), [{ type: 'removeSpan', fromSec: 0, toSec: 5 }, { type: 'removeSpan', fromSec: 5, toSec: 10 }])).toThrow('不足 1 秒');
+  });
+
+  it('editCaption 超过每行宽度上限时抛错', () => {
+    expect(() => applyOps(makeState(), [{ type: 'editCaption', index: 0, text: '这是一句特别特别特别特别长的字幕' }])).toThrow('字幕太长');
   });
 
   it('removeSpan 的范围非法时抛错', () => {

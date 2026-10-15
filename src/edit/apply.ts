@@ -6,8 +6,12 @@ import type { EditPlan as CutPlan, PlanOptions, TimeRange } from '../cut/plan.js
 import type { AudioOptions } from '../pipeline/audio-step.js';
 import { CardSpecSchema, MOODS, type CardSpec, type Shot, type Storyboard, type Visual } from '../storyboard/schema.js';
 import type { SpaceSettings } from '../workspace/store.js';
-import { VISUAL_SOURCES, type EditOp } from './plan.js';
+import { captionTooLong, checkCard } from './check.js';
+import { canonicalize, layoutProblem } from './layout-rules.js';
+import { VISUAL_SOURCES, type EditOp } from './ops.js';
 import { addRange, outputToSource, subtractRange } from './spans.js';
+
+export { remapStoryboard, retimeCaptions } from './retime.js';
 
 /**
  * 一个版本的全部可修改状态。plan（剪辑方案）由 Task 5 用 buildEditPlan 按 cutOptions、extraCuts、restored 重建，
@@ -30,7 +34,7 @@ export interface VersionState {
 }
 
 export type Stage = 'cut' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose';
-const ALL_STAGES: Stage[] = ['cut', 'matte', 'captions', 'storyboard', 'broll', 'compose'];
+const RETIME_STAGES: Stage[] = ['cut', 'matte', 'captions', 'storyboard', 'compose'];
 
 /** 卡片里含尚未取到素材的 visual（没有现成的 image/video）时，需要重跑 broll */
 function needsBroll(card: CardSpec): boolean {
@@ -44,9 +48,10 @@ function stagesOf(op: EditOp): Stage[] {
     case 'setCoverStyle': return [];
     case 'regenerateVisual': return ['broll', 'compose'];
     case 'replaceCard': return needsBroll(op.card) ? ['broll', 'compose'] : ['compose'];
+    // 不重做字幕文字与分镜内容：字幕重新对时、分镜平移（retimeCaptions / remapStoryboard），卡片与 B-roll 保留
     case 'pace':
     case 'removeSpan':
-    case 'restoreSpan': return ALL_STAGES;
+    case 'restoreSpan': return RETIME_STAGES;
     default: return ['compose'];
   }
 }
@@ -59,6 +64,8 @@ export function stagesFor(ops: EditOp[]): Set<Stage> {
 /** pace 每次的调整量与上下限 */
 const PACE_STEP = { pad: 0.04, mergeGap: 0.1 };
 const PACE_RANGE = { pad: [0.04, 0.3], mergeGap: [0.1, 0.8] } as const;
+/** 删除后成片至少留这么长 */
+const MIN_OUTPUT_SEC = 1;
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const clamp = (v: number, [lo, hi]: readonly [number, number]): number => Math.min(hi, Math.max(lo, v));
 
@@ -81,24 +88,34 @@ function withShot(state: VersionState, i: number, next: Shot): VersionState {
   return { ...state, storyboard: { ...state.storyboard, shots: state.storyboard.shots.map((s, j) => (j === i ? next : s)) } };
 }
 
+/** 改完的分镜若比改前多触犯版式规则，整个操作作废 */
+function guardLayout(before: VersionState, after: VersionState): VersionState {
+  const problem = layoutProblem(before.storyboard, after.storyboard);
+  if (problem) throw new Error(problem);
+  return after;
+}
+
 function replaceCard(state: VersionState, i: number, card: CardSpec): VersionState {
   const parsed = CardSpecSchema.safeParse(card);
   if (!parsed.success) throw new Error(`新卡片不符合模板要求：${parsed.error.issues[0].path.join('.') || card.template}`);
+  const bad = checkCard(parsed.data);
+  if (bad) throw new Error(bad);
   const shot = shotAt(state, i);
   // 带卡片的镜头必须是分屏（cta 例外，固定全屏）
   const layout = parsed.data.template === 'cta' ? 'full' : 'split';
-  return withShot(state, i, { ...shot, card: parsed.data, layout });
+  return guardLayout(state, withShot(state, i, { ...shot, card: parsed.data, layout }));
 }
 
 function setLayout(state: VersionState, i: number, layout: 'split' | 'full'): VersionState {
   const shot = shotAt(state, i);
   if (layout === 'split') {
     if (!shot.card) throw new Error(`第 ${i} 个镜头没有卡片，不能改成分屏`);
-    return withShot(state, i, { ...shot, layout });
+    if (shot.card.template === 'cta') throw new Error('cta 卡片只能全屏');
+    return guardLayout(state, withShot(state, i, { ...shot, layout }));
   }
   // 全屏镜头只有 cta 能显示卡片，其余卡片一并去掉
   const { card, ...rest } = shot;
-  return withShot(state, i, card?.template === 'cta' ? { ...shot, layout } : { ...rest, layout });
+  return guardLayout(state, withShot(state, i, card?.template === 'cta' ? { ...shot, layout } : { ...rest, layout }));
 }
 
 function regenerateVisual(state: VersionState, i: number, visual: Visual): VersionState {
@@ -111,6 +128,8 @@ function regenerateVisual(state: VersionState, i: number, visual: Visual): Versi
 
 function editCaption(state: VersionState, index: number, text: string): VersionState {
   if (index >= state.captions.length) throw new Error(`没有第 ${index} 句字幕（共 ${state.captions.length} 句）`);
+  const tooLong = captionTooLong(text);
+  if (tooLong) throw new Error(tooLong);
   return { ...state, captions: state.captions.map((c, j) => (j === index ? { ...c, text } : c)) };
 }
 
@@ -120,14 +139,18 @@ function setBgm(state: VersionState, bgm: string): VersionState {
   return { ...state, bgm: { bgm } };
 }
 
+/** 当前剪辑方案再扣掉 extraCuts 之后剩下的成片秒数（此前版本的 extraCuts 已体现在 plan.keep 里，不会重复扣） */
+function remainingSec(state: VersionState): number {
+  const kept = state.plan.keep.flatMap((k) => state.extraCuts.reduce(subtractRange, [k]));
+  return kept.reduce((sum, r) => sum + r.end - r.start, 0);
+}
+
 function removeSpan(state: VersionState, from: number, to: number): VersionState {
   if (!(to > from) || from >= state.plan.outputDurationSec) throw new Error(`删除的时间范围不在成片内（成片 ${state.plan.outputDurationSec} 秒）`);
   const pieces = outputToSource(state.plan.keep, from, to);
-  return {
-    ...state,
-    extraCuts: pieces.reduce(addRange, state.extraCuts),
-    restored: pieces.reduce(subtractRange, state.restored),
-  };
+  const next = { ...state, extraCuts: pieces.reduce(addRange, state.extraCuts), restored: pieces.reduce(subtractRange, state.restored) };
+  if (remainingSec(next) < MIN_OUTPUT_SEC) throw new Error(`删除后成片不足 ${MIN_OUTPUT_SEC} 秒`);
+  return next;
 }
 
 function restoreSpan(state: VersionState, from: number, to: number): VersionState {
@@ -136,7 +159,8 @@ function restoreSpan(state: VersionState, from: number, to: number): VersionStat
   return { ...state, extraCuts: subtractRange(state.extraCuts, span), restored: addRange(state.restored, span) };
 }
 
-function applyOne(state: VersionState, op: EditOp): VersionState {
+/** 应用单个操作；操作与状态对不上或违反版式规则时抛中文错误 */
+export function applyOp(state: VersionState, op: EditOp): VersionState {
   switch (op.type) {
     case 'setBackground': return { ...state, settings: { ...state.settings, background: op.spec } };
     case 'setCaptionStyle': return { ...state, settings: { ...state.settings, captionStyle: op.id as CaptionStyleId } };
@@ -155,7 +179,11 @@ function applyOne(state: VersionState, op: EditOp): VersionState {
 /**
  * 把操作依次应用到版本状态，返回新状态（纯函数，不改入参）。
  * removeSpan 的时间始终按应用前的 state.plan 换算，同一批里多个 removeSpan 互不影响；操作与状态对不上时抛中文错误。
+ * 来自模型或 HTTP 请求体的操作必须先过 validateOps（逐条丢弃非法的），再交给这里。
+ * pace / removeSpan / restoreSpan 之后 plan、captions、storyboard 仍是旧时间轴，由运行器重建 plan 后用 retimeCaptions、remapStoryboard 平移。
  */
 export function applyOps(state: VersionState, ops: EditOp[]): VersionState {
-  return ops.reduce(applyOne, state);
+  const next = ops.reduce(applyOp, state);
+  // 版式整理（合并相邻的空镜头、hook 重新编号、对齐帧）放在整批结束后，批内的镜头序号始终指向应用前的镜头
+  return ops.some((o) => o.type === 'replaceCard' || o.type === 'setLayout') ? { ...next, storyboard: canonicalize(next.storyboard).storyboard } : next;
 }

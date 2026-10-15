@@ -5,11 +5,12 @@ import { COVER_STYLES } from '../cover/styles.js';
 import type { TimeRange } from '../cut/plan.js';
 import type { CardSpec } from '../storyboard/schema.js';
 import type { VersionState } from './apply.js';
-import { parseTimeRefs, shotForTime } from './refs.js';
+import { parseTimeRefs, shotForTime, type TimeRef } from './refs.js';
 
 export interface ShotSummary { index: number; start: number; end: number; layout: 'split' | 'full'; template?: string; title?: string }
 export interface CaptionSummary { index: number; start: number; end: number; text: string }
-export interface ResolvedRef { sec: number; label?: string; shotIndex: number; captionIndex: number }
+/** 超出成片时长的引用：不解析到镜头（shotIndex 为 -1），上下文里标注后忽略 */
+export interface ResolvedRef { sec: number; label?: string; shotIndex: number; captionIndex?: number; outOfRange?: boolean }
 interface Named { id: string; name: string }
 
 /** 传给修改模型的当前版本上下文 */
@@ -49,6 +50,12 @@ function gapsOf(keep: TimeRange[], sourceDurationSec: number): TimeRange[] {
     .map((g) => ({ start: round(g.start), end: round(g.end) }));
 }
 
+function resolveRef(r: TimeRef, state: VersionState): ResolvedRef {
+  if (r.sec >= state.plan.outputDurationSec) return { ...r, shotIndex: -1, outOfRange: true };
+  const captionIndex = state.captions.findIndex((c) => r.sec >= c.start && r.sec < c.end);
+  return { ...r, shotIndex: shotForTime(state.storyboard.shots, r.sec), ...(captionIndex >= 0 ? { captionIndex } : {}) };
+}
+
 const describeBackground = (bg: VersionState['settings']['background']): string => {
   if (!bg) return '默认';
   return bg.kind === 'preset' ? `预设 ${bg.id}` : bg.kind === 'prompt' ? `一句话「${bg.prompt}」` : '自带图片';
@@ -61,11 +68,7 @@ export function buildEditContext(state: VersionState, message: string, tracks: T
     shots: shots.map((s, index) => ({ index, start: round(s.start), end: round(s.end), layout: s.layout, template: s.card?.template, title: cardTitle(s.card) })),
     captions: state.captions.map((c, index) => ({ index, start: round(c.start), end: round(c.end), text: c.text })),
     settings: { background: describeBackground(state.settings.background), captionStyle: state.settings.captionStyle, coverStyle: state.coverStyle, bgm: state.bgm.bgm },
-    refs: parseTimeRefs(message).map((r) => ({
-      ...r,
-      shotIndex: shotForTime(shots, r.sec),
-      captionIndex: state.captions.findIndex((c) => r.sec >= c.start && r.sec < c.end),
-    })),
+    refs: parseTimeRefs(message).map((r) => resolveRef(r, state)),
     presets: PRESETS.map((p) => ({ id: p.id, name: p.name })),
     captionStyles: Object.entries(CAPTION_STYLES).map(([id, s]) => ({ id, name: s.name })),
     coverStyles: Object.entries(COVER_STYLES).map(([id, s]) => ({ id, name: s.name })),
@@ -78,11 +81,17 @@ export function buildEditContext(state: VersionState, message: string, tracks: T
 
 const list = (items: Named[]): string => items.map((i) => `${i.id}（${i.name}）`).join('、');
 
+function describeRef(r: ResolvedRef): string {
+  const head = `@${r.sec} 秒${r.label ? `（${r.label}）` : ''}`;
+  if (r.outOfRange) return `${head} 超出成片时长，已忽略`;
+  return `${head} → 镜头 #${r.shotIndex}${r.captionIndex === undefined ? '' : `，字幕 #${r.captionIndex}`}`;
+}
+
 /** 上下文转成给模型看的文本 */
 export function formatContext(ctx: EditContext): string {
   const shots = ctx.shots.map((s) => `#${s.index} [${s.start}-${s.end}] ${s.layout} ${s.template ?? '无卡片'}${s.title ? `「${s.title}」` : ''}`).join('\n');
   const captions = ctx.captions.map((c) => `#${c.index} [${c.start}-${c.end}] ${c.text}`).join('\n');
-  const refs = ctx.refs.length === 0 ? '无' : ctx.refs.map((r) => `@${r.sec} 秒${r.label ? `（${r.label}）` : ''} → 镜头 #${r.shotIndex}，字幕 #${r.captionIndex}`).join('；');
+  const refs = ctx.refs.length === 0 ? '无' : ctx.refs.map(describeRef).join('；');
   const gaps = ctx.cutGaps.length === 0 ? '无' : ctx.cutGaps.map((g) => `${g.start}-${g.end}`).join('、');
   const s = ctx.settings;
   return [

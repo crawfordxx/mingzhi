@@ -1,92 +1,22 @@
 import { z } from 'zod';
-import { CAPTION_STYLES } from '../captions/styles.js';
-import { COVER_STYLES } from '../cover/styles.js';
+import type { Track } from '../assets/catalog.js';
+import { loadTracks } from '../assets/catalog.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { CATALOG } from '../storyboard/catalog.js';
-import { CardSpecSchema, MOODS, VisualSchema, type TemplateId } from '../storyboard/schema.js';
-import { formatContext, type EditContext } from './context.js';
+import type { VersionState } from './apply.js';
+import { buildEditContext, formatContext } from './context.js';
+import type { EditOp } from './ops.js';
+import { validateOps } from './validate.js';
+
+export { EditOpSchema, type EditOp } from './ops.js';
+export { validateOps } from './validate.js';
+export type { EditContext } from './context.js';
 
 export const EDIT_MODEL = 'google/gemini-3.5-flash';
-
-const keys = <T extends object>(o: T): [keyof T & string, ...(keyof T & string)[]] => Object.keys(o) as [keyof T & string, ...(keyof T & string)[]];
-const index = z.number().int().min(0);
-const sec = z.number().finite().min(0);
-
-/** 背景只允许预设或一句话描述：模型不能凭空指定本机文件路径 */
-const BackgroundPick = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('preset'), id: z.string().min(1) }),
-  z.object({ kind: z.literal('prompt'), prompt: z.string().trim().min(2).max(300) }),
-]);
-
-export const EditOpSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('setBackground'), spec: BackgroundPick }),
-  z.object({ type: z.literal('setCaptionStyle'), id: z.enum(keys(CAPTION_STYLES)) }),
-  z.object({ type: z.literal('setCoverStyle'), id: z.enum(keys(COVER_STYLES)) }),
-  /** bgm：'none' 不要配乐、'auto' 自动选曲、情绪（chill/tech/upbeat）或曲目 id */
-  z.object({ type: z.literal('setBgm'), bgm: z.string().trim().min(1) }),
-  z.object({ type: z.literal('replaceCard'), shotIndex: index, card: CardSpecSchema }),
-  z.object({ type: z.literal('setLayout'), shotIndex: index, layout: z.enum(['split', 'full']) }),
-  z.object({ type: z.literal('regenerateVisual'), shotIndex: index, visual: VisualSchema }),
-  z.object({ type: z.literal('editCaption'), index, text: z.string().trim().min(1).max(30) }),
-  z.object({ type: z.literal('pace'), direction: z.enum(['tighter', 'looser']) }),
-  /** 成片时间（用户在预览里看到的时间） */
-  z.object({ type: z.literal('removeSpan'), fromSec: sec, toSec: sec }),
-  /** 原片时间（上下文里「已剪掉的片段」给出的时间） */
-  z.object({ type: z.literal('restoreSpan'), fromSec: sec, toSec: sec }),
-]);
-export type EditOp = z.infer<typeof EditOpSchema>;
 
 export interface EditOption { label: string; ops: EditOp[] }
 /** 模型的修改方案：回复 + 直接执行的操作 + 可点选的备选方案 */
 export interface EditPlan { reply: string; ops: EditOp[]; options?: EditOption[] }
-
-export type { EditContext } from './context.js';
-
-/** 各模板的 visual 允许哪些来源（与卡片 schema 一致）；不在表里的模板不支持素材需求 */
-export const VISUAL_SOURCES: Partial<Record<TemplateId, readonly string[]>> = {
-  hook: ['generate', 'video'],
-  photo: ['screenshot', 'generate'],
-  browser: ['screenshot'],
-};
-
-/** 操作与当前版本对不上（序号越界、预设不存在等）时返回中文原因，合法返回 null */
-export function checkOp(op: EditOp, ctx: EditContext): string | null {
-  switch (op.type) {
-    case 'setBackground': {
-      const { spec } = op;
-      return spec.kind === 'preset' && !ctx.presets.some((p) => p.id === spec.id) ? `没有预设背景「${spec.id}」` : null;
-    }
-    case 'setBgm':
-      return ['auto', 'none', ...MOODS, ...ctx.tracks.map((t) => t.id)].includes(op.bgm) ? null : `没有配乐「${op.bgm}」`;
-    case 'replaceCard':
-      return shotMissing(op.shotIndex, ctx);
-    case 'setLayout': {
-      const missing = shotMissing(op.shotIndex, ctx);
-      return missing ?? (op.layout === 'split' && !ctx.shots[op.shotIndex].template ? '该镜头没有卡片，不能改成分屏' : null);
-    }
-    case 'regenerateVisual':
-      return checkVisual(op, ctx);
-    case 'editCaption':
-      return op.index < ctx.captions.length ? null : `没有第 ${op.index} 句字幕`;
-    case 'removeSpan':
-      return op.toSec > op.fromSec && op.fromSec < ctx.outputDurationSec ? null : '时间范围不在成片内';
-    case 'restoreSpan':
-      return op.toSec > op.fromSec && op.fromSec < ctx.sourceDurationSec ? null : '时间范围不在原片内';
-    default:
-      return null;
-  }
-}
-
-const shotMissing = (i: number, ctx: EditContext): string | null => (i < ctx.shots.length ? null : `没有第 ${i} 个镜头`);
-
-function checkVisual(op: Extract<EditOp, { type: 'regenerateVisual' }>, ctx: EditContext): string | null {
-  const missing = shotMissing(op.shotIndex, ctx);
-  if (missing) return missing;
-  const template = ctx.shots[op.shotIndex].template as TemplateId | undefined;
-  const allowed = template ? VISUAL_SOURCES[template] : undefined;
-  if (!allowed) return '该镜头的卡片不支持素材';
-  return allowed.includes(op.visual.source) ? null : `「${template}」卡片不支持来源「${op.visual.source}」`;
-}
 
 const catalogText = CATALOG.map((c) => `- ${c.id}：${c.use}\n  props：${c.props}`).join('\n');
 
@@ -113,8 +43,9 @@ const SYSTEM_PROMPT = `你是口播短视频的修改助手。用户在工作台
 规则：
 1. 镜头序号、字幕序号都从 0 起，以上下文里列出的为准；用户说 @mm:ss 时，用「引用解析」里给出的镜头序号。
 2. 背景预设、字幕样式、封面风格、配乐只能用上下文列出的 id。
-3. 卡片文字要精炼，严格遵守各字段长度上限；数字、专名不要编造。
-4. 不确定的需求宁可给 options，不要瞎猜。
+3. 卡片不要写 image、video 文件名（你不知道有哪些文件）；需要图片或视频就用 visual 描述，photo 卡必须带 visual。卡片文字要精炼，严格遵守各字段长度上限；数字、专名不要编造。
+4. 版式规则：cta 只能是最后一个镜头且只能全屏，hook 只能放在前 15 秒内且最多 3 张，带卡片的镜头最长 8 秒；违反的操作会被丢弃。
+5. 不确定的需求宁可给 options，不要瞎猜。
 
 模板目录：
 ${catalogText}`;
@@ -122,26 +53,13 @@ ${catalogText}`;
 const TopSchema = z.object({ reply: z.string().trim().min(1), ops: z.array(z.unknown()).default([]), options: z.unknown().optional() });
 const OptionSchema = z.object({ label: z.string().trim().min(1).max(30), ops: z.array(z.unknown()) });
 
-interface Checked { ops: EditOp[]; dropped: string[] }
-
-/** 逐条校验：先过 zod，再对照当前版本；不合格的丢弃并记下原因 */
-function checkOps(raw: unknown[], ctx: EditContext): Checked {
-  return raw.reduce<Checked>((acc, item) => {
-    const name = String((item as { type?: unknown } | null)?.type ?? '未知');
-    const parsed = EditOpSchema.safeParse(item);
-    if (!parsed.success) return { ...acc, dropped: [...acc.dropped, `「${name}」参数不合法（${parsed.error.issues[0].path.join('.') || 'type'}）`] };
-    const problem = checkOp(parsed.data, ctx);
-    return problem ? { ...acc, dropped: [...acc.dropped, `「${name}」${problem}`] } : { ...acc, ops: [...acc.ops, parsed.data] };
-  }, { ops: [], dropped: [] });
-}
-
-function checkOptions(raw: unknown, ctx: EditContext): { options: EditOption[]; dropped: string[] } {
+function checkOptions(raw: unknown, state: VersionState, tracks: Track[]): { options: EditOption[]; dropped: string[] } {
   if (raw === undefined || raw === null) return { options: [], dropped: [] };
   if (!Array.isArray(raw)) return { options: [], dropped: ['选项格式不对'] };
   return raw.reduce<{ options: EditOption[]; dropped: string[] }>((acc, item) => {
     const parsed = OptionSchema.safeParse(item);
     if (!parsed.success) return { ...acc, dropped: [...acc.dropped, '一个选项格式不对'] };
-    const { ops, dropped } = checkOps(parsed.data.ops, ctx);
+    const { ops, dropped } = validateOps(parsed.data.ops, state, tracks);
     const label = parsed.data.label;
     const note = dropped.map((d) => `选项「${label}」的${d}`);
     return ops.length === 0
@@ -150,13 +68,14 @@ function checkOptions(raw: unknown, ctx: EditContext): { options: EditOption[]; 
   }, { options: [], dropped: [] });
 }
 
-/** 让模型根据用户的一句话和当前版本上下文给出修改方案；非法操作逐条丢弃并在回复末尾说明，整体不可用时抛中文错误 */
-export async function planEdit(client: LlmClient, message: string, context: EditContext): Promise<EditPlan> {
+/** 让模型根据用户的一句话和当前版本给出修改方案；非法操作（含版式规则不允许的）逐条丢弃并在回复末尾说明，整体不可用时抛中文错误 */
+export async function planEdit(client: LlmClient, message: string, state: VersionState, tracks: Track[] = loadTracks()): Promise<EditPlan> {
+  const context = buildEditContext(state, message, tracks);
   const raw = await client.chatJson({ model: EDIT_MODEL, system: SYSTEM_PROMPT, user: `${formatContext(context)}\n\n用户的话：${message}`, reasoningEffort: 'low', label: '修改' });
   const top = TopSchema.safeParse(raw);
   if (!top.success) throw new Error('模型返回的修改方案格式不对（缺少 reply 或 ops 不是数组），请换个说法再试一次');
-  const direct = checkOps(top.data.ops, context);
-  const picked = checkOptions(top.data.options, context);
+  const direct = validateOps(top.data.ops, state, tracks);
+  const picked = checkOptions(top.data.options, state, tracks);
   const dropped = [...direct.dropped, ...picked.dropped];
   const note = dropped.length > 0 ? `\n\n（有 ${dropped.length} 处无法执行，已忽略：${dropped.join('；')}）` : '';
   return {
