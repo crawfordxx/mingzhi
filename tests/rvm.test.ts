@@ -4,10 +4,12 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
-import { run } from '../src/media/exec.js';
+import { run, runBuffer } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import { presetPath } from '../src/background/presets.js';
 import { matteVideo, rvmReady } from '../src/matting/rvm.js';
+import { compositeCut } from '../src/matting/composite-matte.js';
+import { renderCut } from '../src/cut/render-cut.js';
 import { hasRvm } from './helpers/models.js';
 
 describe('rvmReady', () => {
@@ -91,4 +93,45 @@ describe.skipIf(!hasRvm())('matteVideo（需要 RVM 模型）', () => {
     writeFileSync(input, 'not a video');
     await expect(matteVideo({ input, output: join(dir, 'out.mp4'), backgroundPath: presetPath('cafe'), cfg })).rejects.toThrow(/[\u4e00-\u9fa5]/);
   }, 20000);
+});
+
+describe.skipIf(!hasRvm())('前景 + 遮罩输出与只合成换背景（需要 RVM 模型）', () => {
+  /** 取第 n 帧的 rgb24 / gray 原始像素 */
+  const frameAt = (cfg: ReturnType<typeof loadConfig>, file: string, n: number, pixFmt: 'rgb24' | 'gray'): Promise<Buffer> =>
+    runBuffer(cfg.ffmpeg, ['-v', 'error', '-i', file, '-vf', `select=eq(n\\,${n})`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', pixFmt, '-']);
+
+  it('只出前景与遮罩（不需要背景）；compositeCut 不建推理会话，同一背景下与抠像直接合成的结果一致', async () => {
+    const cfg = loadConfig({});
+    const dir = mkdtempSync(join(tmpdir(), 'mz-matte-'));
+    const input = join(dir, 'in.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-i', join(import.meta.dirname, 'fixtures', 'talk.mp4'), '-t', '2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', input]);
+    const [matte, fgr, person] = ['matte.mp4', 'fgr.mp4', 'person.mp4'].map((f) => join(dir, f));
+    const res = await matteVideo({ input, cfg, matteOutput: matte, fgrOutput: fgr });
+    await matteVideo({ input, output: person, backgroundPath: presetPath('cafe'), cfg });
+    for (const file of [matte, fgr]) {
+      const m = await probe(file, cfg);
+      expect([m.width, m.height, m.fps]).toEqual([540, 960, 30]);
+    }
+    expect((await frameAt(cfg, matte, 30, 'gray')).length).toBe(540 * 960);
+    // 样片是纯色底（没有人）：这里只验证通路与一致性，真人样片的数值对比见报告「修复轮 1」
+    expect(res.fgMean === null || res.fgMean.length === 3).toBe(true);
+    await expect(matteVideo({ input, output: person, cfg })).rejects.toThrow('需要背景图');
+
+    const cut = join(dir, 'cut.mp4');
+    const keep = [{ start: 0, end: 2 }];
+    await renderCut(input, keep, cut, cfg);
+    const spy = vi.spyOn(ort.InferenceSession, 'create');
+    try {
+      const same = join(dir, 'same.mp4');
+      await compositeCut({ cut, fgr, matte, keep, backgroundPath: presetPath('cafe'), output: same, fgMean: res.fgMean, cfg });
+      expect(spy).not.toHaveBeenCalled();
+      const info = await probe(same, cfg);
+      expect([info.width, info.height, info.fps, info.hasAudio]).toEqual([540, 960, 30, true]);
+      const [a, b] = await Promise.all([frameAt(cfg, person, 30, 'rgb24'), frameAt(cfg, same, 30, 'rgb24')]);
+      const meanDiff = a.reduce((sum, v, i) => sum + Math.abs(v - b[i]), 0) / a.length;
+      expect(meanDiff).toBeLessThan(3);
+    } finally {
+      spy.mockRestore();
+    }
+  }, 120_000);
 });

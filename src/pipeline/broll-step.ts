@@ -1,6 +1,7 @@
 import type { AppConfig } from '../config.js';
 import type { CostMeter } from '../cost/meter.js';
 import { fulfillVisuals, makeDeps, type BrollAsset, type BrollDeps, type FulfillOptions } from '../broll/fulfill.js';
+import { rethrowIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import { KexiangTaskClient, type TaskClient } from '../llm/kexiang-task.js';
 import { normalizeStoryboard } from '../storyboard/normalize.js';
@@ -22,6 +23,10 @@ export interface BrollContext {
   meter?: CostMeter;
   /** 给后续步骤（封面）预留的花费，预算检查时一并扣除，缺省 0 */
   reserveYuan?: number;
+  /** 取消信号：转给逐条取素材的循环 */
+  signal?: AbortSignal;
+  /** 排到最后取素材的镜头（见 FulfillOptions.deferShots） */
+  deferShots?: number[];
   onProgress?: (e: ProgressEvent) => void;
 }
 type Complete = (step: 'broll', message: string, patch?: ProjectPatch) => ProjectFile;
@@ -118,6 +123,7 @@ async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: St
   try {
     const res = await fulfillVisuals(storyboard, resolveDeps(ctx, broll), {
       workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter, reserveYuan: ctx.reserveYuan,
+      signal: ctx.signal, ...(ctx.deferShots ? { deferShots: ctx.deferShots } : {}),
       ...progressHooks(ctx, visualsOf(storyboard).length),
     });
     complete('broll', brollSummary(res.assets, res.failures.length, res.costYuan),
@@ -125,6 +131,7 @@ async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: St
     return res.storyboard;
   } catch (err) {
     rethrowIfBalance(err);
+    rethrowIfCancelled(err);
     const fallback = withoutBroll(storyboard, durationSec);
     complete('broll', `素材获取失败，已去掉待取素材的需求（图片卡改为全屏人像）：${err instanceof Error ? err.message : String(err)}`, { storyboard: fallback });
     return fallback;

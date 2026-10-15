@@ -10,3 +10,6 @@ docs/handoff.md
 .superpowers/
 work/
 *.local.mp4
+
+# 工作台前端构建产物
+web/dist/

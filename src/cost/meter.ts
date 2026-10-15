@@ -21,7 +21,7 @@ const MAX_PRICE: Price = Object.values(FALLBACK_PRICES).reduce((a, b) => (b.inpu
 
 const EPSILON = 1e-9;
 /** 对话花费四舍五入到 0.0001 元，去掉浮点误差（0.0105 + 0.126 不再是 0.13650000000000001） */
-const roundYuan = (v: number): number => Math.round(v * 10_000) / 10_000;
+export const roundYuan = (v: number): number => Math.round(v * 10_000) / 10_000;
 
 /** 按实际用量累计花费；entries 只读，每次记账追加一条 */
 export class CostMeter {

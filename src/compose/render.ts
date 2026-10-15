@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundle } from '@remotion/bundler';
-import { renderMedia, renderStill, selectComposition } from '@remotion/renderer';
+import { makeCancelSignal, renderMedia, renderStill, selectComposition, type CancelSignal } from '@remotion/renderer';
+import { CancelledError, throwIfCancelled } from '../cancel.js';
 import { CANVAS, type CardSpec, type TalkProps } from '../storyboard/schema.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { CoverProps } from '../cover/styles.js';
@@ -38,18 +39,52 @@ export async function withBundle<T>(workDir: string, fn: (serveUrl: string) => P
   }
 }
 
-export interface RenderOptions { workDir: string; props: TalkProps; output: string; concurrency?: number; onProgress?: (ratio: number) => void }
+/**
+ * 把 AbortSignal 接到 Remotion 的 cancelSignal：取消时渲染进程被终止，这里统一抛 CancelledError。
+ * 没有 signal 时不做任何事（cancelSignal 为 undefined）。
+ */
+export async function withCancelSignal<T>(signal: AbortSignal | undefined, fn: (cancelSignal: CancelSignal | undefined) => Promise<T>): Promise<T> {
+  throwIfCancelled(signal);
+  if (!signal) return fn(undefined);
+  const { cancelSignal, cancel } = makeCancelSignal();
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    return await fn(cancelSignal);
+  } catch (err) {
+    if (signal.aborted) throw new CancelledError();
+    throw err;
+  } finally {
+    signal.removeEventListener('abort', cancel);
+  }
+}
 
+export interface RenderOptions {
+  workDir: string;
+  props: TalkProps;
+  output: string;
+  concurrency?: number;
+  onProgress?: (ratio: number) => void;
+  signal?: AbortSignal;
+}
+
+/** 整条渲染先写带随机后缀的临时文件，成功后改名；取消或失败时不覆盖已有的好文件 */
 export async function renderTalk(opts: RenderOptions): Promise<void> {
-  await withBundle(opts.workDir, async (serveUrl) => {
-    const inputProps = opts.props;
-    const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
-    await renderMedia({
-      composition, serveUrl, inputProps, codec: 'h264', crf: 18, outputLocation: opts.output,
-      concurrency: opts.concurrency ?? defaultConcurrency(),
-      onProgress: ({ progress }) => opts.onProgress?.(progress),
-    });
-  });
+  throwIfCancelled(opts.signal);
+  const tmp = `${opts.output}.${randomUUID().slice(0, 8)}.tmp.mp4`;
+  try {
+    await withBundle(opts.workDir, (serveUrl) => withCancelSignal(opts.signal, async (cancelSignal) => {
+      const inputProps = opts.props;
+      const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+      await renderMedia({
+        composition, serveUrl, inputProps, codec: 'h264', crf: 18, outputLocation: tmp,
+        concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
+        onProgress: ({ progress }) => opts.onProgress?.(progress),
+      });
+    }));
+    renameSync(tmp, opts.output);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
   opts.onProgress?.(1);
 }
 
@@ -112,5 +147,30 @@ export async function renderCoverStills(workDir: string, stills: { id: 'Cover34'
       const composition = await selectComposition({ serveUrl, id: still.id, inputProps: still.props });
       await renderStill({ composition, serveUrl, inputProps: still.props, output: still.output, frame: 0, imageFormat: 'png' });
     }
+  });
+}
+
+export interface SegmentRenderOptions { serveUrl: string; props: TalkProps; output: string; concurrency?: number; signal?: AbortSignal }
+
+/** 渲染一段无声画面（含首尾帧，frameRange 为闭区间）；复用外部打包，供分段缓存使用 */
+export async function renderVideoSegment(opts: SegmentRenderOptions & { startFrame: number; endFrame: number }): Promise<void> {
+  const { serveUrl, props: inputProps } = opts;
+  await withCancelSignal(opts.signal, async (cancelSignal) => {
+    const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+    await renderMedia({
+      composition, serveUrl, inputProps, codec: 'h264', crf: 18, muted: true, outputLocation: opts.output,
+      frameRange: [opts.startFrame, opts.endFrame - 1], concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
+    });
+  });
+}
+
+/** 整条音轨单独渲染成 aac（m4a），与画面分开，拼接处不会爆音 */
+export async function renderAudioTrack(opts: SegmentRenderOptions): Promise<void> {
+  const { serveUrl, props: inputProps } = opts;
+  await withCancelSignal(opts.signal, async (cancelSignal) => {
+    const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+    await renderMedia({
+      composition, serveUrl, inputProps, codec: 'aac', outputLocation: opts.output, concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
+    });
   });
 }

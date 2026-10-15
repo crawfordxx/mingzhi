@@ -2,11 +2,12 @@ import type { AppConfig } from '../config.js';
 import type { TimedCaption } from '../captions/lines.js';
 import { FULL_CAPTION_Y } from '../captions/styles.js';
 import type { CostMeter } from '../cost/meter.js';
+import { rethrowIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { hardChecks as realHardChecks, type HardCheck } from '../qa/hard.js';
 import { defaultPalette } from '../qa/palette.js';
-import { qaCards as realQaCards, type CardQaEntry } from '../qa/visual.js';
+import { qaCards as realQaCards, type CardQaEntry, type QaCardsOptions } from '../qa/visual.js';
 import { CANVAS, type Storyboard } from '../storyboard/schema.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
 
@@ -44,18 +45,26 @@ export function captionCentersOf(storyboard: Storyboard): number[] {
 }
 
 export interface QaCardsContext {
-  llm: LlmClient; workDir: string; meter: CostMeter; ffmpeg: string; qaCards?: typeof realQaCards; onProgress?: (msg: string) => void;
+  llm: LlmClient; workDir: string; meter: CostMeter; ffmpeg: string; qaCards?: typeof realQaCards; onProgress?: QaCardsOptions['onProgress'];
   /** 给封面预留的花费（元），封面开启时传 COVER_YUAN，关闭传 0 */
   reserveYuan?: number;
+  /** 取消信号：转给逐张卡片的检查循环 */
+  signal?: AbortSignal;
+  /** 只检查这些镜头序号的卡片；缺省全部 */
+  only?: number[];
 }
 
 /** 卡片自检：不达标的卡片重写；返回（可能被改写的）分镜并落盘。自检本身出错（余额不足除外）只记一条进度，沿用原分镜 */
 export async function runQaCards(ctx: QaCardsContext, storyboard: Storyboard, captions: TimedCaption[], complete: Complete<'qa-cards'>): Promise<{ storyboard: Storyboard; report: CardQaEntry[] }> {
   let res: { storyboard: Storyboard; report: CardQaEntry[] };
   try {
-    res = await (ctx.qaCards ?? realQaCards)({ client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, ffmpeg: ctx.ffmpeg, reserveYuan: ctx.reserveYuan, onProgress: ctx.onProgress });
+    res = await (ctx.qaCards ?? realQaCards)({
+      client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, ffmpeg: ctx.ffmpeg, reserveYuan: ctx.reserveYuan,
+      signal: ctx.signal, onProgress: ctx.onProgress, ...(ctx.only ? { only: ctx.only } : {}),
+    });
   } catch (err) {
     rethrowIfBalance(err);
+    rethrowIfCancelled(err);
     complete('qa-cards', `卡片自检失败，已跳过（成片不受影响）：${err instanceof Error ? err.message : String(err)}`);
     return { storyboard, report: [] };
   }
@@ -74,6 +83,7 @@ export async function runQaFinal(ctx: QaFinalContext, video: string, storyboard:
     hard = await (ctx.hardChecks ?? realHardChecks)(video, { captionCenters: captionCentersOf(storyboard) }, defaultPalette(), ctx.cfg);
     message = hardSummary(hard);
   } catch (err) {
+    rethrowIfCancelled(err);
     message = `成片检查失败，已跳过（成片不受影响）：${err instanceof Error ? err.message : String(err)}`;
   }
   complete('qa-final', message, { qa: { cards, hard } });

@@ -29,6 +29,8 @@ export interface EstimateOptions { durationSec: number; bgPrompt: boolean; broll
 
 /** 这三步有意不查预算（没有它们出不了片），预估里单独核对它们是否已超上限 */
 const REQUIRED_LABELS: readonly string[] = ['剪口误', '字幕校对', '分镜'];
+/** 一次对话规划（修改方案）的预估花费：上下文约 6 千 token，按内置最贵价留余量 */
+export const EDIT_PLAN_YUAN = 0.05;
 
 const round2 = (v: number): number => Math.round(v * 100) / 100;
 const item = (label: string, low: number, high: number): EstimateItem => ({ label, low: round2(low), yuan: round2(high) });
@@ -52,13 +54,18 @@ export function estimateCost(opts: EstimateOptions): Estimate {
   return { low: round2(items.reduce((s, i) => s + i.low, 0)), high: round2(items.reduce((s, i) => s + i.yuan, 0)), items };
 }
 
+/** 必需步骤（剪口误、字幕校对、分镜）的预估花费：剩余额度不够它们就不该开始出片 */
+export function requiredYuan(est: Estimate): number {
+  return round2(est.items.filter((i) => REQUIRED_LABELS.includes(i.label)).reduce((s, i) => s + i.yuan, 0));
+}
+
 const yuan = (v: number): string => `¥${v.toFixed(2)}`;
 const range = (low: number, high: number): string => (low === high ? yuan(high) : `${yuan(low)}–${yuan(high)}`);
 
 /** 预估的多行文字：总额区间、预算与各项明细；最高值超出预算时附降级提示 */
 export function formatEstimate(est: Estimate, budgetYuan: number): string {
   const lines = [`预估花费 ${range(est.low, est.high)}（上限 ${yuan(budgetYuan)}）`, ...est.items.map((i) => `  · ${i.label} ${range(i.low, i.yuan)}`)];
-  const required = round2(est.items.filter((i) => REQUIRED_LABELS.includes(i.label)).reduce((s, i) => s + i.yuan, 0));
+  const required = requiredYuan(est);
   if (required > budgetYuan) lines.push(`必需步骤（剪口误、字幕校对、分镜）约 ${yuan(required)} 已超上限 ${yuan(budgetYuan)}，仍会花费`);
   if (est.high > budgetYuan) lines.push(`预估最高 ${yuan(est.high)}，超过上限 ${yuan(budgetYuan)}：将自动降级（不用 Seedance，必要时少生图）`);
   return lines.join('\n');

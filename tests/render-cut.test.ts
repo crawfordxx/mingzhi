@@ -11,7 +11,7 @@ import { probe } from '../src/media/probe.js';
 describe('buildCutFilter', () => {
   it('每段 fps=30 归一化、宽高取偶后 trim、atrim + 20ms 淡入淡出，最后 concat', () => {
     const f = buildCutFilter([{ start: 0, end: 1 }, { start: 2.5, end: 3 }]);
-    expect(f).toContain('[0:v]fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,trim=start=0:end=1,setpts=PTS-STARTPTS[v0]');
+    expect(f).toContain('[0:v]fps=30:start_time=0,scale=trunc(iw/2)*2:trunc(ih/2)*2,trim=start=0:end=1,setpts=PTS-STARTPTS[v0]');
     expect(f).toContain('[0:a]apad,atrim=start=2.5:end=3,asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.02,afade=t=out:st=0.48:d=0.02[a1]');
     expect(f.endsWith('[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]')).toBe(true);
   });

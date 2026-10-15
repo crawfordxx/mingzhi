@@ -5,6 +5,7 @@ import type { AppConfig } from '../config.js';
 import { EST_TASK_YUAN } from '../cost/constants.js';
 import { SEARCH_YUAN } from '../cost/estimate.js';
 import type { CostMeter } from '../cost/meter.js';
+import { rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
 import { normalizeStoryboard } from '../storyboard/normalize.js';
@@ -39,6 +40,10 @@ export interface FulfillOptions {
   onAsset?: (a: BrollAsset | { key: string; failed: string }) => void;
   /** 视频任务的状态变化 */
   onStatus?: (status: string) => void;
+  /** 取消信号：每个素材开始前检查，取消时抛 CancelledError */
+  signal?: AbortSignal;
+  /** 这些镜头的素材需求排到最后处理（工作台修改版本：先让没改动的卡片用上已付费的缓存，视频名额不被新卡片抢走） */
+  deferShots?: number[];
 }
 /** failures[].shotIndex 指输入分镜（传入 fulfillVisuals 的 storyboard）的镜头下标；归一化可能合并或丢弃镜头，返回的 storyboard 下标可能不同 */
 export interface FulfillResult { storyboard: Storyboard; assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number }
@@ -106,6 +111,7 @@ async function produce<T extends { cost?: number } | boolean | void>(out: string
     return { result };
   } catch (err) {
     rethrowIfBalance(err); // 余额不足：不逐项重试，整条流程停下来让用户充值
+    rethrowIfCancelled(err); // 取消同理：不能记成这一项失败
     return message(err);
   } finally {
     rmSync(tmp, { force: true });
@@ -138,6 +144,7 @@ async function tryScreenshot(env: Env, key: string, need: { url?: string; query?
     urls = need.url ? [need.url] : (await env.deps.search(need.query ?? '')).slice(0, SEARCH_TRIES);
   } catch (err) {
     rethrowIfBalance(err);
+    rethrowIfCancelled(err);
     return { reason: `搜索失败：${message(err)}` };
   }
   if (urls.length === 0) return { reason: '没有找到可截图的网址' };
@@ -244,7 +251,10 @@ export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, op
   let assets: BrollAsset[] = [];
   let failures: FulfillResult['failures'] = [];
   let videoRequests = 0;
-  for (const need of visualsOf(storyboard)) {
+  const deferred = (n: VisualNeed): boolean => opts.deferShots?.includes(n.shotIndex) ?? false;
+  const needs = visualsOf(storyboard);
+  for (const need of [...needs.filter((n) => !deferred(n)), ...needs.filter(deferred)]) {
+    throwIfCancelled(opts.signal);
     const key = visualKey(need.visual);
     const cached = findCached(env, key, need.visual.source, videoRequests);
     if (!cached) opts.onStart?.(need);

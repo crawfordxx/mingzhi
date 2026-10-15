@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CancelledError } from '../src/cancel.js';
 import { loadConfig } from '../src/config.js';
 import { run, runBuffer } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
@@ -29,6 +30,22 @@ describe('renderTalk（真实 Remotion 渲染，首次运行会下载 Chrome Hea
     expect(Math.abs(info.durationSec - 2)).toBeLessThan(0.1);
     expect(ratios[ratios.length - 1]).toBe(1);
   }, 300_000);
+
+  it('渲染中途取消：signal 触发后尽快抛 CancelledError（不是普通渲染失败）', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-compose-cancel-'));
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=10', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', join(workDir, 'person.mp4')]);
+    const controller = new AbortController();
+    const started = Date.now();
+    // 占位的「上一次的好文件」：取消后必须原样保留，且不留临时文件
+    writeFileSync(join(workDir, 'final.mp4'), 'previous-good');
+    await expect(renderTalk({ workDir, output: join(workDir, 'final.mp4'), signal: controller.signal,
+      onProgress: (r) => { if (r > 0) controller.abort(); },
+      props: { person: 'person.mp4', personWidth: 360, personHeight: 640, subject: null, durationSec: 10, captions: [], shots: [{ start: 0, end: 10, layout: 'full' }] } })).rejects.toBeInstanceOf(CancelledError);
+    expect(Date.now() - started).toBeLessThan(60_000);
+    expect(readFileSync(join(workDir, 'final.mp4'), 'utf8')).toBe('previous-good');
+    expect(readdirSync(workDir).filter((f) => f.includes('.tmp.'))).toEqual([]);
+  }, 120_000);
 
   it('背景乐 + 音效：人像无声时输出仍有非静音音轨，时长约 2 秒', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'mz-audio-data-'));

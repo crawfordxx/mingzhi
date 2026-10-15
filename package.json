@@ -8,12 +8,17 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "vitest run --exclude \"tests/{compose,templates,caption-band,cover}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts tests/cover.test.ts --no-file-parallelism",
-    "typecheck": "tsc --noEmit",
+    "test": "vitest run --exclude \"tests/{compose,templates,caption-band,cover,segments,runner-e2e}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts tests/cover.test.ts tests/segments.test.ts tests/runner-e2e.test.ts --no-file-parallelism",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "fetch-models": "node scripts/fetch-models.mjs",
     "fetch-assets": "node scripts/fetch-assets.mjs",
     "make-fixture": "bash scripts/make-fixture.sh",
-    "mingzhi": "tsx src/cli.ts"
+    "mingzhi": "tsx src/cli.ts",
+    "serve": "tsx src/server/index.ts",
+    "build:web": "vite build web",
+    "dev:web": "vite web",
+    "e2e": "pnpm build:web && tsx tests/e2e/workbench.e2e.ts",
+    "test:web": "vitest run --root web"
   },
   "dependencies": {
     "@remotion/bundler": "4.0.531",
@@ -27,10 +32,17 @@
     "zod": "3.23.8"
   },
   "devDependencies": {
+    "@fontsource/ibm-plex-mono": "5.1.0",
+    "@fontsource/ibm-plex-serif": "5.1.0",
     "@types/node": "22.10.2",
     "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "motion": "11.18.2",
+    "playwright": "1.48.2",
     "tsx": "4.19.2",
     "typescript": "5.6.3",
+    "vite": "5.4.21",
     "vitest": "2.1.8"
   }
 }

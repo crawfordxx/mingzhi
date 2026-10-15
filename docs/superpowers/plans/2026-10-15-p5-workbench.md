@@ -26,7 +26,8 @@
 - key 存储：系统钥匙串优先（macOS `security` 命令；Windows 用 DPAPI 的 PowerShell `ConvertFrom-SecureString`），退回 `<dataDir>/key`（600 权限）；首次填入即校验（调一次 `GET /api/v1/models`）；注册链接 `https://kexiangai.com`（不带邀请码）
 - 默认不收集任何数据；服务只监听 127.0.0.1
 - G1 视觉 token（照抄 SPEC-v4-ego.md）：背景 `#fff/#f7f7f7/#f5f5f5/#eee/#e0e0e0`，文字 `#000000e6/#000000b3/#0000008f/#0000003d`，品牌蓝阶 `#d6dff5 #adc0eb #85a0e0 #5c81d6 #3361cc #294ea3`，阴影与圆角按 SPEC；标题内斜体衬线点缀用 IBM Plex Serif Italic ExtraLight（仅数字/拉丁/括号小注），中文点缀用 Noto Serif SC；主 CTA 黑胶囊、次 CTA `#eee` 胶囊；`@时间` 浅蓝胶囊；招牌油画 `docs/design/assets/art/*.png`（上线前压缩为 webp ≤ 400KB）
-- 品质标准：Awwwards / Webby / FWA 获奖水准；交付前用浏览器截图自检 5 维（版式/层级/动效/一致性/细节）每维 ≥ 8.5
+- 品质标准：Awwwards / Webby / FWA 获奖水准；交付前用浏览器截图自检 5 维（版式/层级/动效/一致性/细节）每维 ≥ 8.5，不达标反复改到达标
+- 设计参考（前端任务必须逐个查阅并在报告里写明借鉴了什么）：motion.dev React 示例与 scroll-animations、prompt-motion.com、unsection.com（模块）、bentogrids.com（便当网格）、60fps.design（微交互）、jiro.build（设计提示词）、navbar.gallery、footer.design、cta.gallery、styles.refero.design；动效用 motion（React），需要 3D 时用 three.js；做图用 GPT Image 2，人物与场景用 Midjourney，视频用 Seedance
 - 代码注释、报错、界面文案、commit 用中文；commit `<type>: <描述>`，无署名行；文件 < 400 行；函数 < 50 行；不可变数据
 
 ---
@@ -74,9 +75,23 @@
 - `refs.ts`：`export function parseTimeRefs(text: string): { sec: number; label?: string }[]`（识别 `@01:05`、`@1:05 对比条卡`）、`export function shotForTime(shots: Shot[], sec: number): number`
 - `plan.ts`：`export const EDIT_MODEL = 'google/gemini-3.5-flash'`；`EditOpSchema` 判别联合：`setBackground{spec}`、`setCaptionStyle{id}`、`setCoverStyle{id}`（只重做封面）、`setBgm{mood|trackId|'none'}`、`replaceCard{shotIndex, card}`、`setLayout{shotIndex, layout}`、`regenerateVisual{shotIndex, visual}`、`editCaption{index, text}`、`pace{direction:'tighter'|'looser'}`（调剪辑方案的 pad/mergeGap）、`removeSpan{fromSec,toSec}`、`restoreSpan{fromSec,toSec}`；`EditPlan = { reply: string; ops: EditOp[]; options?: { label: string; ops: EditOp[] }[] }`；`export async function planEdit(client, message, context: EditContext): Promise<EditPlan>`（上下文含：分镜摘要（镜头号、时间、模板、标题）、字幕、当前设置、引用解析结果、可用预设与样式列表）
 - `apply.ts`：`export function stagesFor(ops: EditOp[]): Set<'cut' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose'>`（例如 setBackground → matte+compose；replaceCard → compose；regenerateVisual → broll+compose；pace/removeSpan → cut+matte+captions+storyboard+broll+compose）；`export function applyOps(state: VersionState, ops: EditOp[]): VersionState`（纯函数，不可变）
+- `apply.ts` 定义并导出 `VersionState`（字段见 Task 5），`applyOps` 对它操作
 - 测试：每种操作的 stagesFor；applyOps 不修改入参；假模型返回非法操作时丢弃并在回复里说明；@时间解析
 
-### Task 5: 本机 HTTP 服务
+### Task 5: 版本运行器（只重跑受影响的步骤）
+
+**Files:** Create `src/workspace/runner.ts`；Modify `src/pipeline/run.ts`（把分析、制作、成片等阶段导出为可单独调用的函数，`runPipeline` 行为不变）、`src/matting/*`（抠像时额外输出遮罩视频）、`src/pipeline/run.ts` 的 compose 改用 Task 2 的 `renderSegmented`（`cacheDir` 由调用方给；缺省为 `workDir/segments`）；Test `tests/runner.test.ts`
+
+**Interfaces:**
+- Consumes：Task 1 `SpaceStore`（`baseDir`、`versionDir`、`addVersion`、`updateVersion`）；Task 2 `renderSegmented`；Task 3 `WorkEvent` 与 `AbortSignal`；Task 4 `EditOp`、`stagesFor`、`applyOps`、`VersionState`
+- `export interface VersionState { settings: SpaceSettings; plan: EditPlan /* 剪辑方案 */; captions: TimedCaption[]; storyboard: Storyboard; coverStyle: CoverStyleId; bgm: AudioOptions }`（Task 4 定义并导出，本任务使用）
+- `export async function runFirstVersion(ctx: RunnerCtx, spaceId: string): Promise<VersionMeta>`：跑完整流程；与版本无关的产物（探测、识别、剪口误、cut.mp4、抠像遮罩 `matte.mp4`）写 `base/`，其余写 `v1/`；结束写 `v1/state.json`（`VersionState`）
+- `export async function runNextVersion(ctx: RunnerCtx, spaceId: string, parent: number, ops: EditOp[], summary: string): Promise<VersionMeta>`：读父版本 `state.json` → `applyOps` → 按 `stagesFor` 只跑需要的阶段，其余从父版本复用（复制或引用文件）；分段渲染缓存放 `base/segments/`，所有版本共用，未改动的镜头直接复用；`changedShots` = 本次实际重渲的镜头序号
+- 换背景：抠像时把 alpha 遮罩存成灰度视频 `base/matte.mp4`；之后换背景只做合成（ffmpeg），不重新推理
+- 封面：只有 `setCoverStyle` 或首个版本才生成；其余版本复用父版本封面
+- 测试（用假 LLM / 假渲染注入）：v1 → `setCaptionStyle` 只跑 compose 且复用全部抠像产物；`replaceCard` 只重渲 1 段；`setBackground` 不调用抠像推理；`removeSpan` 重跑剪切到成片；父版本目录不被修改
+
+### Task 6: 本机 HTTP 服务
 
 **Files:** Create `src/server/index.ts`、`src/server/routes.ts`、`src/server/media.ts`、`src/server/upload.ts`；Modify `package.json`（脚本 `"serve": "tsx src/server/index.ts"`）；Test `tests/server.test.ts`
 
@@ -86,6 +101,7 @@
 - `GET /api/spaces`、`POST /api/spaces`（创建空项目）、`GET /api/spaces/:id`、`PATCH /api/spaces/:id`
 - `POST /api/spaces/:id/inputs`（流式上传，`x-filename` 头；支持多段）
 - `GET /api/spaces/:id/estimate`、`POST /api/spaces/:id/start`（开始 v1）、`POST /api/spaces/:id/messages`（对话修改 → 返回 EditPlan；`POST /api/spaces/:id/apply` 执行某个选项或全部 ops → 新版本）
+- 执行：`start` 调 Task 5 `runFirstVersion`，`apply` 调 `runNextVersion`，都经 Task 3 `JobQueue` 排队
 - `POST /api/spaces/:id/versions/:n/revert`（以该版本为基础复制出新版本）
 - `GET /api/spaces/:id/events?version=n`（SSE；先补发历史再推实时）
 - `GET /media/:id/:n/final.mp4` 等（Range；只允许项目目录内的白名单文件名）
@@ -94,7 +110,7 @@
 - 只监听 `127.0.0.1`；端口默认 4321，被占用时顺延
 - 测试：起服务（随机端口）走一遍创建 → 上传（小样片）→ estimate → status；媒体 Range 返回 206；路径穿越（`../`）返回 404；SSE 收到补发事件
 
-### Task 6: 前端外壳与设置卡（G1）
+### Task 7: 前端外壳与设置卡（G1）
 
 **Files:** Create `web/`（`index.html`、`vite.config.ts`、`src/main.tsx`、`src/App.tsx`、`src/theme.css`（token）、`src/components/{SpacesRail,ChatFlow,PreviewStage,Composer,SetupCard,AnnouncementBar}.tsx`、`src/api.ts`）；Modify 根 `package.json`（`build:web`、`dev:web`）、`tsconfig.json`（web 单独 tsconfig）
 
@@ -103,7 +119,7 @@
 - 首次无 key：设置卡上方先出 key 卡（输入框 + 「去可想 AI 注册」链接 + 校验状态）
 - 验收：Playwright 截图 1440×900 与 G1 原稿并排对比，5 维自评每维 ≥ 8.5，记录在报告里
 
-### Task 7: 剪辑直播、版本与对话修改
+### Task 8: 剪辑直播、版本与对话修改
 
 **Files:** Create `web/src/components/{LiveTerminal,VersionCard,VersionSwitcher,CompareView,InlineOptions,TimeRefChip,ProgressRail}.tsx`、`web/src/live.ts`（SSE 客户端与重播）
 
@@ -114,7 +130,7 @@
 - 导出：顶部黑胶囊，完成后 toast 显示文件位置
 - 端到端：Playwright 走「上传样片 → 开始 → 等完成 → 发一条修改 → 出 v2 → 对比」，用假 LLM 模式（服务支持 `MINGZHI_FAKE_LLM=1` 环境变量，仅测试用，返回固定分镜/计划，不调用网络）
 
-### Task 8: 1–N 段口播按语义重排
+### Task 9: 1–N 段口播按语义重排
 
 **Files:** Modify `src/pipeline/run.ts`（多输入：逐段识别 → 模型给出段落顺序 → 按顺序拼接 cut 结果）；Create `src/pipeline/multi.ts`；Test `tests/multi.test.ts`
 

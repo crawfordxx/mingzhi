@@ -8,6 +8,7 @@ import type { TimedCaption } from '../captions/lines.js';
 import { CAPTION_STYLES, type CaptionStyleId } from '../captions/styles.js';
 import { COVER_STYLES, DEFAULT_COVER_STYLE, type CoverStyleId } from '../cover/styles.js';
 import { coverTitle, makeCovers, type MakeCoversOptions, type MakeCoversResult } from '../cover/generate.js';
+import { rethrowIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
@@ -32,10 +33,13 @@ type Complete = (step: 'loudness' | 'cover', message: string, patch?: ProjectPat
 
 const lufs = (n: number): string => n.toFixed(1);
 
-/** 响度统一：raw → output；成功后才有最终文件，随后删除 raw。失败直接抛错（raw 保留，output 不产生）；开始前先清掉上次遗留的 output */
-export async function runLoudness(cfg: AppConfig, raw: string, output: string, complete: Complete): Promise<void> {
+/** 响度统一：raw → output；成功后才有最终文件，随后删除 raw。失败直接抛错（raw 保留，output 不产生）；开始前先清掉上次遗留的 output。normalize 仅供测试注入 */
+export async function runLoudness(
+  cfg: AppConfig, raw: string, output: string, complete: Complete, normalize: typeof normalizeLoudness = normalizeLoudness,
+): Promise<void> {
   await rm(output, { force: true });
-  const res = await normalizeLoudness(raw, output, cfg).catch((err: unknown) => {
+  const res = await normalize(raw, output, cfg).catch((err: unknown) => {
+    rethrowIfCancelled(err);
     throw new Error(`响度统一失败（渲染结果保留在 ${raw}）：${err instanceof Error ? err.message : String(err)}`);
   });
   await rm(raw, { force: true });
@@ -102,6 +106,7 @@ export async function runCover(ctx: CoverContext, cover: CoverOptions | undefine
     });
   } catch (err) {
     rethrowIfBalance(err);
+    rethrowIfCancelled(err);
     complete('cover', `封面生成失败，已跳过（成片不受影响）：${errText(err)}`);
   }
 }

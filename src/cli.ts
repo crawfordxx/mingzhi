@@ -14,7 +14,7 @@ import { parseFinishArgs } from './pipeline/finish-step.js';
 import { KexiangTaskClient } from './llm/kexiang-task.js';
 import { probe } from './media/probe.js';
 import { qaSummary } from './pipeline/qa-step.js';
-import { runPipeline } from './pipeline/run.js';
+import { runPipeline, type ProgressEvent } from './pipeline/run.js';
 
 const USAGE = '用法：pnpm mingzhi edit <口播视频> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] [--no-broll] [--max-videos N] [--budget 元] [--bgm auto|none|曲目id] [--caption-style 样式id] [--cover-style 风格id] [--no-cover] [--no-qa] [--yes]';
 
@@ -39,7 +39,11 @@ async function main(): Promise<void> {
     return;
   }
   const started = Date.now();
-  const res = await runPipeline({ input, workDir, output, cfg, llm, background, task, broll, meter, qa: !values['no-qa'], ...finish, onProgress: (e) => console.log(`[${e.step}] ${e.message}`) }).catch((err: unknown) => {
+  const onProgress = (e: ProgressEvent): void => {
+    if (e.detail?.kind !== 'cost') console.log(`[${e.step}] ${e.message}`);
+  };
+  const args = { input, workDir, output, cfg, llm, background, task, broll, meter, qa: !values['no-qa'], ...finish, onProgress };
+  const res = await runPipeline(args).catch((err: unknown) => {
     console.error(`已花费 ¥${meter.total.toFixed(2)}`);
     if (err instanceof InsufficientBalanceError) console.error(`请先到 ${RECHARGE_URL} 充值，再重新运行（重跑会重新付费：只有 B-roll 素材与封面底图有缓存，其余 AI 步骤会重新调用）`);
     throw err;
