@@ -5,7 +5,9 @@
  */
 import { AnimatePresence, motion } from 'motion/react';
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { refText, type TimeRef } from '../lib/shots';
+import type { ShotState } from '../api';
+import { cardName, refSecond, refText, shotIndexAt, type TimeRef } from '../lib/shots';
+import { useClock, type Clock } from '../usePlayback';
 import type { Conversation, Flying } from '../useConversation';
 import { Ico, It, SPRING, Tap } from '../ui';
 import { InsertRef, TimeRefChip } from './TimeRefChip';
@@ -30,12 +32,24 @@ function Flyer({ f, target, onLand }: { f: Flying; target: RefObject<HTMLDivElem
 interface Props {
   ready: boolean;
   convo: Conversation;
-  /** 预览暂停时可插入的引用 */
-  pausedRef?: TimeRef;
+  /** 播放时钟与当前版本的分镜：暂停时据此给出可插入的引用 */
+  clock: Clock;
+  shots?: ShotState[];
+  /** 重播剪辑过程时不给插入 */
+  locked: boolean;
   onExport: () => void;
 }
 
-export function Composer({ ready, convo, pausedRef, onExport }: Props) {
+/** 暂停（且有成片）时的「@时间 卡片名」；只订阅「暂停时的播放头」，播放中不会重渲 */
+function usePausedRef(clock: Clock, shots: ShotState[] | undefined, off: boolean): TimeRef | undefined {
+  const sec = useClock(clock, (s) => (!s.playing && s.duration > 0 ? s.t : -1));
+  if (off || sec < 0 || !shots) return undefined;
+  const shot = shots[shotIndexAt(shots, sec)];
+  return { sec: refSecond(sec, shot), label: cardName(shot) };
+}
+
+export function Composer({ ready, convo, clock, shots, locked, onExport }: Props) {
+  const pausedRef = usePausedRef(clock, shots, !ready || locked);
   const [focus, setFocus] = useState(false);
   const tags = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);

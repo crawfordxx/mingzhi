@@ -4,7 +4,7 @@
  * → 发一条修改 → 点内联选项 → 出 v2 → 对比同步播放 → 导出。
  * 服务以 MINGZHI_FAKE_LLM=1 启动：模型与生图是假的，识别、剪切、渲染、响度、成片检查是真的。样片是合成的（没有真人）。
  */
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { ROOT, startHarness, type Harness } from './harness.js';
@@ -30,6 +30,9 @@ async function step(page: Page, name: string, fn: () => Promise<void>): Promise<
 }
 
 async function firstVersion(page: Page): Promise<void> {
+  await step(page, '公告条显示假模式标识', async () => {
+    await page.locator('.bar-mock', { hasText: '假模式' }).waitFor();
+  });
   await step(page, '上传样片', async () => {
     await page.setInputFiles('.drop input[type=file]', FIXTURE);
     await page.locator('.in-row .in-ok').waitFor({ timeout: 60_000 });
@@ -37,11 +40,13 @@ async function firstVersion(page: Page): Promise<void> {
   });
   await step(page, '开始出片', async () => {
     await page.locator('button:has-text("开始出片")').click();
-    await page.locator('.live .term').waitFor();
+    await page.locator('.live .win').waitFor();
+    await page.locator('.frame .tw.term').waitFor();
   });
-  await step(page, '剪辑直播：转录与划掉的词', async () => {
-    await page.locator('.term-body .tx').first().waitFor({ timeout: 90_000 });
-    await page.locator('.term-body .cutw').first().waitFor({ state: 'attached', timeout: 30_000 });
+  await step(page, '剪辑直播：转录与划掉的词、画框里的终端', async () => {
+    await page.locator('.tx-list .tx').first().waitFor({ timeout: 90_000 });
+    await page.locator('.tx-list .cutw').first().waitFor({ state: 'attached', timeout: 30_000 });
+    await page.locator('.frame .term-body .ln', { hasText: '识别' }).waitFor();
   });
   await step(page, '剪辑直播：分镜逐张出现、自检分跳出', async () => {
     await page.locator('.strip .tile:not(.ghost)').first().waitFor({ timeout: RUN_TIMEOUT });
@@ -54,14 +59,16 @@ async function firstVersion(page: Page): Promise<void> {
 }
 
 async function replayAndRef(page: Page, h: Harness): Promise<void> {
-  await step(page, '重播剪辑过程（≤ 20 秒）', async () => {
-    const t0 = Date.now();
+  await step(page, '重播剪辑过程（含首尾停顿 ≤ 20 秒）', async () => {
     await page.getByRole('button', { name: '重播剪辑过程' }).click();
     await page.getByRole('button', { name: /重播中/ }).waitFor();
-    await page.getByRole('button', { name: '重播剪辑过程' }).waitFor({ timeout: 26_000 });
-    assert(Date.now() - t0 < 25_000, '重播超过 20 秒');
+    const t0 = Date.now();
+    await page.getByRole('button', { name: '重播剪辑过程' }).waitFor({ timeout: 21_000 });
+    const ms = Date.now() - t0;
+    assert(ms <= 20_500, `重播用了 ${(ms / 1000).toFixed(1)} 秒，超过 20 秒`);
   });
-  if (h.h264) {
+  if (!h.h264) console.log('－ 跳过：成片可播放（没有系统 Chrome，Chromium 不能解码 H.264）');
+  else {
     await step(page, '成片可播放', async () => {
       await page.waitForFunction(() => (document.querySelector('.vid.real video') as HTMLVideoElement | null)?.duration! > 3, undefined, { timeout: 20_000 });
     });
@@ -95,12 +102,17 @@ async function compareAndExport(page: Page, h: Harness): Promise<void> {
     await page.locator('.sw').click();
     await page.locator('.stagewin.pair .player').nth(1).waitFor();
     await page.locator('.diff').waitFor();
-    if (!h.h264) return;
+    if (!h.h264) { console.log('  （跳过同步断言：没有系统 Chrome）'); return; }
     await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLVideoElement>('.pair video')).every((v) => v.readyState >= 1), undefined, { timeout: 20_000 });
     const bar = page.locator('.pair .pbar').first();
     const box = await bar.boundingBox();
     assert(box, '找不到进度条');
-    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2);
+    // 拖动：按下 → 移到 20% → 移到 50% → 松开
+    await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.35, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
     await page.waitForTimeout(400);
     const times = await page.$$eval('.pair video', (vs) => vs.map((v) => (v as HTMLVideoElement).currentTime));
     assert(times.length === 2 && Math.abs(times[0] - times[1]) < 0.2 && times[0] > 1, `两个画面没有跟随：${times.join(' / ')}`);
@@ -108,7 +120,8 @@ async function compareAndExport(page: Page, h: Harness): Promise<void> {
   await step(page, '导出', async () => {
     await page.locator('.pane-h .btn-k', { hasText: '导出' }).click();
     await page.locator('.toast', { hasText: '已导出' }).waitFor({ timeout: 30_000 });
-    assert(existsSync(join(h.exportDir)), '导出目录不存在');
+    const files = readdirSync(h.exportDir);
+    assert(files.some((f) => f.endsWith('.mp4')) && files.some((f) => f.endsWith('.png')), `导出目录里没有成片和封面：${files.join('、')}`);
   });
 }
 

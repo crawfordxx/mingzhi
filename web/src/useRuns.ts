@@ -14,38 +14,59 @@ export const activeVersion = (space?: Space): number | undefined =>
 
 const vkey = (id: string, n: number) => `${id}:${n}`;
 
-/** 每个版本的事件：活动版本走实时订阅，已结束的版本按需补历史 */
+/** 导出目录显示时把用户主目录缩成 ~（macOS /Users/x、Linux /home/x、Windows C:\\Users\\x） */
+export const shortDir = (dir: string): string => dir.replace(/^(\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/, '~');
+
+/** 活动版本的实时订阅；断线时 offline 为 true，重新连上时补一次项目状态 */
+function useActiveStream(id: string | undefined, active: number | undefined, refresh: (id: string) => Promise<void>,
+  put: (k: string, fn: (list: WorkEvent[]) => WorkEvent[]) => void) {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    if (!id || !active) { setOffline(false); return undefined; }
+    const k = vkey(id, active);
+    put(k, () => []);
+    let wasOff = false;
+    const close = api.events(id, active, (e) => {
+      put(k, (list) => [...list, e]);
+      if (isTerminal(e)) { void refresh(id); window.setTimeout(() => void refresh(id), 900); }
+    }, (online) => {
+      setOffline(!online);
+      if (online && wasOff) void refresh(id);
+      wasOff = !online;
+    });
+    return () => { close(); setOffline(false); };
+  }, [id, active, refresh, put]);
+  return offline;
+}
+
+/** 每个版本的事件：活动版本走实时订阅，已结束的版本一条一条补历史 */
 function useVersionEvents(space: Space | undefined, refresh: (id: string) => Promise<void>) {
   const [events, setEvents] = useState<Record<string, WorkEvent[]>>({});
   const requested = useRef(new Set<string>());
+  const current = useRef<string>();
   const id = space?.id;
+  current.current = id;
   const active = activeVersion(space);
+  const put = useCallback((k: string, fn: (list: WorkEvent[]) => WorkEvent[]) => setEvents((m) => ({ ...m, [k]: fn(m[k] ?? []) })), []);
+  useEffect(() => { if (id && active) requested.current.add(vkey(id, active)); }, [id, active]);
+  const offline = useActiveStream(id, active, refresh, put);
 
-  useEffect(() => {
-    if (!id || !active) return undefined;
-    const k = vkey(id, active);
-    requested.current.add(k);
-    setEvents((m) => ({ ...m, [k]: [] }));
-    const close = api.events(id, active, (e) => {
-      setEvents((m) => ({ ...m, [k]: [...(m[k] ?? []), e] }));
-      if (isTerminal(e)) { void refresh(id); window.setTimeout(() => void refresh(id), 900); }
-    });
-    return close;
-  }, [id, active, refresh]);
-
-  // 已结束的版本：补一次历史（剪辑直播的完成态、重播、版本卡的耗时都要用）
+  // 已结束的版本：补一次历史（剪辑直播的完成态、重播、版本卡的耗时都要用）；切走了就跳过，下次回来再补
   useEffect(() => {
     if (!space) return;
     space.versions.filter((v) => v.status !== 'running' && v.n !== active).forEach((v) => {
       const k = vkey(space.id, v.n);
       if (requested.current.has(k)) return;
       requested.current.add(k);
-      void loadHistory(space.id, v.n).then((list) => setEvents((m) => ({ ...m, [k]: list })));
+      void loadHistory(space.id, v.n, () => current.current === space.id).then((list) => {
+        if (list) put(k, () => list);
+        else requested.current.delete(k);
+      });
     });
-  }, [space, active]);
+  }, [space, active, put]);
 
   const of = useCallback((n: number): WorkEvent[] => (id ? events[vkey(id, n)] ?? [] : []), [events, id]);
-  return of;
+  return { of, offline };
 }
 
 /** 版本状态（分镜、字幕）按需取并缓存 */
@@ -89,7 +110,7 @@ export function useRuns({ space, putSpace, notify }: Deps) {
   const refresh = useCallback(async (id: string) => {
     try { putSpace(await api.getSpace(id)); } catch (err) { notify(`刷新项目失败：${errText(err)}`); }
   }, [putSpace, notify]);
-  const eventsOf = useVersionEvents(space, refresh);
+  const { of: eventsOf, offline } = useVersionEvents(space, refresh);
   const stateOf = useVersionStates(space);
   const { view, setView } = useViewVersion(space);
   const [compare, setCompare] = useState(false);
@@ -106,7 +127,7 @@ export function useRuns({ space, putSpace, notify }: Deps) {
     try {
       const out = await api.exportVersion(space.id, n);
       const name = out.files[0]?.split(/[\\/]/).pop() ?? '';
-      notify(`已导出 ${out.files.length} 个文件到「${out.dir.replace(/^\/Users\/[^/]+/, '~')}」 · ${name}`);
+      notify(`已导出 ${out.files.length} 个文件到「${shortDir(out.dir)}」 · ${name}`);
     } catch (err) {
       notify(`导出失败：${errText(err)}`);
     } finally {
@@ -126,8 +147,8 @@ export function useRuns({ space, putSpace, notify }: Deps) {
 
   return useMemo(() => ({
     eventsOf, stateOf, view, viewMeta, setView, compare: compare && canCompare, setCompare, canCompare, compareWith,
-    active: activeVersion(space), exporting, exportVersion, revert, cancel, refresh,
-  }), [eventsOf, stateOf, view, viewMeta, setView, compare, canCompare, compareWith, space, exporting, exportVersion, revert, cancel, refresh]);
+    active: activeVersion(space), offline, exporting, exportVersion, revert, cancel, refresh,
+  }), [offline, eventsOf, stateOf, view, viewMeta, setView, compare, canCompare, compareWith, space, exporting, exportVersion, revert, cancel, refresh]);
 }
 
 export type Runs = ReturnType<typeof useRuns>;

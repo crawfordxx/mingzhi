@@ -10,12 +10,16 @@ export const ART = ['/art/01-studio.webp', '/art/02-garden.webp', '/art/03-cinem
 /** 项目没有成片缩略图前，按 id 稳定地分到一幅油画 */
 export const artFor = (id: string): string => ART[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % ART.length];
 
-const shortName = (title: string): string => {
-  const ep = title.match(/第\s*(\d+)\s*期/);
+const DEFAULT_TITLE = '未命名项目';
+
+/** 栏里的短名：「第 N 期」→ 第N期；没改过标题的项目用第一段口播的文件名（去扩展名）；过长由 CSS 截断加省略号 */
+export function railName(space: Pick<Space, 'title' | 'inputs'>): string {
+  const ep = space.title.match(/第\s*(\d+)\s*期/);
   if (ep) return `第${ep[1]}期`;
-  const t = title.replace(/\s/g, '');
-  return t.length > 4 ? `${t.slice(0, 3)}…` : t;
-};
+  if (space.title !== DEFAULT_TITLE) return space.title.trim();
+  const first = space.inputs[0];
+  return first ? first.replace(/\.[^.]+$/, '') : '新的一期';
+}
 
 function metaOf(space: Space): string {
   const last = space.versions.at(-1);
@@ -43,11 +47,11 @@ export function SpacesRail({ spaces, currentId, onSelect, onNew }: Props) {
                 {on && <motion.span layoutId="space-ring" className="th-ring" transition={SPRING} />}
                 <motion.span className="th" style={{ backgroundImage: `url('${artFor(s.id)}')` }} whileHover={{ y: -1 }} transition={SPRING} />
               </span>
-              <span className="nm">{shortName(s.title)}</span>
+              <span className="nm" title={railName(s)}>{railName(s)}</span>
               <AnimatePresence>
                 {hover === s.id && (
                   <motion.span className="fly" role="tooltip" initial={{ opacity: 0, x: -6, scale: 0.98 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: -4 }} transition={{ duration: 0.16 }}>
-                    {s.title}<small>{metaOf(s)}</small>
+                    {s.title === DEFAULT_TITLE ? railName(s) : s.title}<small>{metaOf(s)}</small>
                   </motion.span>
                 )}
               </AnimatePresence>

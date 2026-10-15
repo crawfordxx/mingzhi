@@ -5,7 +5,6 @@
 import { useEffect, type RefObject } from 'react';
 import type { Options, Space, VersionMeta, VersionState } from '../api';
 import type { ShotInfo } from '../lib/liveModel';
-import { cliLine } from '../lib/cli';
 import { splitMessage } from '../lib/shots';
 import type { AiTurn, Turn } from '../lib/turns';
 import type { Replay } from '../live';
@@ -49,7 +48,7 @@ function AiReply({ turn, busy, onPick }: { turn: AiTurn; busy: boolean; onPick: 
       {turn.pending ? <p className="say typing" aria-label="明知正在想"><i /><i /><i /></p>
         : turn.reply ? <p className="say">{turn.reply}</p> : null}
       {turn.error && <p className="say err">{turn.error}</p>}
-      {!!turn.options?.length && <InlineOptions options={turn.options} picked={turn.picked} applying={turn.applying} applied={turn.applied} disabled={busy} onPick={onPick} />}
+      {!!turn.options?.length && <InlineOptions options={turn.options} picked={turn.picked} applying={turn.applying} applied={turn.applied} disabled={busy} unsure={turn.unsure} onPick={onPick} />}
       {!turn.options?.length && (turn.applying || turn.applied !== undefined) && <p className="picked">{turn.applying ? '正在排队出新版本…' : <>已执行 · 出 <span className="it l">v{turn.applied}</span></>}</p>}
       {!!turn.dropped?.length && <p className="picked warn">有 {turn.dropped.length} 处没法执行，已忽略：{turn.dropped.join('；')}</p>}
     </>
@@ -62,7 +61,8 @@ interface Props {
 }
 
 export function Thread({ space, options, runs, convo, replay, stream, onSeek }: Props) {
-  const v1 = space.versions.find((v) => v.n === 1);
+  // v1 排队时还没建版本，直播卡也先出来（显示排队中）
+  const v1 = space.versions.find((v) => v.n === 1) ?? (space.job?.version === 1 ? true : undefined);
   const items = itemsOf(space, convo.turns);
   const done = space.versions.filter((v) => v.status === 'done');
   const latest = done.at(-1)?.n;
@@ -71,7 +71,9 @@ export function Thread({ space, options, runs, convo, replay, stream, onSeek }: 
   const tail = `${items.length}:${convo.turns.at(-1)?.kind === 'ai' ? String((convo.turns.at(-1) as AiTurn).pending) : ''}:${runs.active ?? ''}`;
   useEffect(() => {
     const el = stream.current;
-    if (el) window.setTimeout(() => el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }), 60);
+    if (!el) return undefined;
+    const id = window.setTimeout(() => el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }), 60);
+    return () => window.clearTimeout(id);
   }, [tail, stream]);
 
   const versionItem = (meta: VersionMeta) => (meta.status === 'done'
@@ -86,7 +88,7 @@ export function Thread({ space, options, runs, convo, replay, stream, onSeek }: 
       {v1 && (
         <Msg root={stream} id="live">
           <Who>明知 · 剪辑直播</Who>
-          <LiveCard events={runs.eventsOf(1)} title={space.inputs[0] ?? space.title} command={cliLine(space)} backdrop={backdrop}
+          <LiveCard events={runs.eventsOf(1)} title={space.inputs[0] ?? space.title} backdrop={backdrop}
             live={runs.active === 1} replay={replay} onSeek={(sec) => onSeek(1, sec)} onCancel={() => void runs.cancel()} />
         </Msg>
       )}

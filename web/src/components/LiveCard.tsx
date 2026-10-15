@@ -9,7 +9,7 @@ import { fmtDuration, yuan } from '../lib/media';
 import { cutCounts, qaAverage, reduceLive, type LiveView } from '../lib/liveModel';
 import type { Replay } from '../live';
 import { Ico, It, Lights, Num, SOFT, Tap } from '../ui';
-import { LiveTerminal } from './LiveTerminal';
+import { LiveTranscript } from './LiveTranscript';
 import { Strip } from './ShotStrip';
 
 const DIMS: [keyof NonNullable<ReturnType<typeof qaAverage>>, string][] = [['layout', '版式'], ['hierarchy', '层级'], ['motion', '动效节奏'], ['brand', '品牌一致性']];
@@ -38,7 +38,7 @@ function Summary({ view }: { view: LiveView }) {
     <div className="live-sum">
       删除 <span className="hl"><Num value={c.filler} format={(x) => `${Math.round(x)} 处语气词`} /></span>
       <span className="dot">·</span><span className="hl"><Num value={c.slip} format={(x) => `${Math.round(x)} 处口误`} /></span>
-      <span className="dot">·</span>剪成 {view.shots.length} 段
+      <span className="dot">·</span>{view.shots.length ? `分成 ${view.shots.length} 个镜头` : view.status === 'done' ? '没有分镜' : '分镜生成中'}
       {view.cost && <><span className="dot">·</span>花费 <Num className="cost" value={view.cost.total} format={yuan} /></>}
     </div>
   );
@@ -47,7 +47,6 @@ function Summary({ view }: { view: LiveView }) {
 interface Props {
   events: WorkEvent[];
   title: string;
-  command: string;
   backdrop?: string;
   /** 实时进行中（有新事件就有动画） */
   live: boolean;
@@ -56,7 +55,7 @@ interface Props {
   onCancel?: () => void;
 }
 
-export function LiveCard({ events, title, command, backdrop, live, replay, onSeek, onCancel }: Props) {
+export function LiveCard({ events, title, backdrop, live, replay, onSeek, onCancel }: Props) {
   const replaying = replay.shown !== undefined;
   const view = reduceLive(replay.shown ?? events);
   const animate = live || replaying;
@@ -80,10 +79,10 @@ export function LiveCard({ events, title, command, backdrop, live, replay, onSee
           <Summary view={view} />
           <Strip shots={view.shots} backdrop={backdrop} animate={animate} onSeek={finished ? onSeek : undefined} />
           <Scores view={view} />
+          <LiveTranscript view={view} animate={animate} />
           <AnimatePresence>{view.status === 'failed' && <motion.p className="live-err" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>没剪完：{view.error}</motion.p>}</AnimatePresence>
         </div>
       </div>
-      <LiveTerminal view={view} title="剪辑直播" command={command} animate={animate} />
     </div>
   );
 }

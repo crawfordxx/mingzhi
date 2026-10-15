@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isFakeMode } from './fake.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { musicReady, fontsReady } from '../assets/catalog.js';
@@ -43,6 +44,8 @@ async function status(app: AppCtx): Promise<Record<string, unknown>> {
     modelsReady: modelsReady(cfg.modelsDir) && rvmReady(cfg.modelsDir),
     assetsReady: fontsReady(cfg) && musicReady(cfg),
     ffmpegReady: await ffmpegReady(app),
+    // 假模型模式（MINGZHI_FAKE_LLM=1，仅测试用）：界面公告条据此显示标识
+    ...(isFakeMode() ? { fake: true } : {}),
   };
 }
 

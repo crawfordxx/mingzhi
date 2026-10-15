@@ -10,6 +10,8 @@ import { SPRING } from '../ui';
 export interface RailMark { sec: number; label: string }
 
 interface Props {
+  /** 读屏用的名字（对比时带上版本号） */
+  label?: string;
   t: number;
   duration: number;
   marks?: RailMark[];
@@ -21,7 +23,7 @@ interface Props {
 
 const pctOf = (sec: number, duration: number) => `${duration > 0 ? Math.min(100, Math.max(0, (sec / duration) * 100)) : 0}%`;
 
-export function ProgressRail({ t, duration, marks = [], nameAt, onSeek, onScrub }: Props) {
+export function ProgressRail({ label = '播放进度', t, duration, marks = [], nameAt, onSeek, onScrub }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number>();
   const [drag, setDrag] = useState(false);
@@ -37,11 +39,12 @@ export function ProgressRail({ t, duration, marks = [], nameAt, onSeek, onScrub 
   const move = (e: PointerEvent<HTMLDivElement>) => { const s = secAt(e.clientX); setHover(s); if (drag) onSeek(s); };
   const up = () => { if (drag) { setDrag(false); onScrub?.(false); } };
   const key = (e: KeyboardEvent) => {
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); onSeek(t + (e.key === 'ArrowLeft' ? -1 : 1)); }
+    const to = { ArrowLeft: t - 1, ArrowRight: t + 1, Home: 0, End: duration }[e.key];
+    if (to !== undefined) { e.preventDefault(); onSeek(to); }
   };
   const tip = drag ? t : hover;
   return (
-    <div ref={ref} className={`pbar${drag ? ' drag' : ''}`} role="slider" tabIndex={duration ? 0 : -1} aria-label="播放进度"
+    <div ref={ref} className={`pbar${drag ? ' drag' : ''}`} role="slider" tabIndex={duration ? 0 : -1} aria-label={label}
       aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(t)} aria-valuetext={mmss(t)}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerLeave={() => setHover(undefined)} onKeyDown={key}>
       <span className="pbar-f" style={{ width: pctOf(t, duration) }} />

@@ -82,7 +82,7 @@ export function ChatFlow({ wb, space, options, composer, runs, convo, replay, on
             )}
             {showKey && !started && <Msg root={stream} delay={0.06}><KeyCard onVerified={wb.keyVerified} /></Msg>}
             <Msg root={stream} delay={started ? 0 : 0.12}><SetupCard wb={wb} space={space} options={options} /></Msg>
-            {space.versions.length > 0 && <Thread space={space} options={options} runs={runs} convo={convo} replay={replay} stream={stream} onSeek={onSeek} />}
+            {(space.versions.length > 0 || !!space.job) && <Thread space={space} options={options} runs={runs} convo={convo} replay={replay} stream={stream} onSeek={onSeek} />}
           </motion.div>
         </AnimatePresence>
       </div>

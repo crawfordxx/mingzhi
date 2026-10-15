@@ -1,17 +1,17 @@
 /** 工作台外壳：公告条 / Spaces 栏 / 对话流 / 大预览 */
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { spentOf, type Space } from './api';
 import { AnnouncementBar } from './components/AnnouncementBar';
 import { ChatFlow } from './components/ChatFlow';
 import { Composer } from './components/Composer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { PreviewStage } from './components/PreviewStage';
 import { SpacesRail } from './components/SpacesRail';
 import { reduceLive } from './lib/liveModel';
-import { cardName, refSecond, shotIndexAt, type TimeRef } from './lib/shots';
-import { useReplay } from './live';
+import { useReplay, type Replay } from './live';
 import { useConversation } from './useConversation';
-import { usePlayback } from './usePlayback';
+import { useClock, usePlayback, type Clock } from './usePlayback';
 import { useRuns } from './useRuns';
 import { useWorkbench } from './useWorkbench';
 import { It, SPRING } from './ui';
@@ -46,6 +46,27 @@ function useSpaceToggle(toggle: () => void, enabled: boolean) {
 /** 公告条的「本项目已花」：已入账的 + 正在出的版本此刻的花费（跟着直播跳） */
 const liveSpent = (space: Space | undefined, running: number): number => spentOf(space) + running;
 
+/** 换项目：停掉重播、暂停、播放头回到开头；切版本或开关对比：先暂停（新挂上的视频本来就是暂停的） */
+function usePlaybackResets(clock: Clock, replay: Replay, spaceId: string | undefined, view: number | undefined, compare: boolean) {
+  const { stop } = replay;
+  useEffect(() => { stop(); clock.pause(); clock.seek(0); }, [spaceId, stop, clock]);
+  useEffect(() => { clock.pause(); }, [view, compare, clock]);
+}
+
+const Boot = ({ error }: { error?: string }) => (
+  <div className="boot" role="status">
+    {error ? <><b>工作台没能启动</b><span>{error}</span></> : <><span className="spin" /><span>正在连接本机服务 <It l>(127.0.0.1)</It></span></>}
+  </div>
+);
+
+const Toast = ({ text }: { text?: string }) => (
+  <AnimatePresence>
+    {text && (
+      <motion.div className="toast" role="status" initial={{ opacity: 0, y: 12, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }} exit={{ opacity: 0, y: 8, x: '-50%' }} transition={SPRING}>{text}</motion.div>
+    )}
+  </AnimatePresence>
+);
+
 export function App() {
   const wb = useWorkbench();
   useBlockFileDrop();
@@ -54,48 +75,30 @@ export function App() {
   const clock = usePlayback();
   const replay = useReplay(runs.eventsOf(1));
   const convo = useConversation({ space, base: runs.view, busy: runs.active !== undefined, notify: wb.notify, refresh: runs.refresh });
-  const totalSec = wb.estimate?.durationSec ?? 0;
   const runningCost = runs.active ? reduceLive(runs.eventsOf(runs.active)).cost?.total ?? 0 : 0;
   const ready = !!space?.versions.some((v) => v.status === 'done');
-  useSpaceToggle(clock.toggle, ready && clock.ready && replay.shown === undefined);
-  // 换项目：停掉重播，播放头回到开头
-  const { stop: stopReplay } = replay;
-  const { pause, seek } = clock;
-  useEffect(() => { stopReplay(); pause(); seek(0); }, [space?.id, stopReplay, pause, seek]);
-
-  // 暂停（且有成片）时，输入框左下给出可插入的「@时间 卡片名」
-  const shots = runs.view ? runs.stateOf(runs.view)?.storyboard.shots ?? [] : [];
-  const pausedRef: TimeRef | undefined = useMemo(() => (ready && clock.ready && !clock.playing && replay.shown === undefined
-    ? { sec: refSecond(clock.t, shots[shotIndexAt(shots, clock.t)]), label: cardName(shots[shotIndexAt(shots, clock.t)]) } : undefined), [ready, clock.ready, clock.playing, clock.t, shots, replay.shown]);
+  const hasVideo = useClock(clock, (st) => st.duration > 0);
+  useSpaceToggle(clock.toggle, ready && hasVideo && replay.shown === undefined);
+  usePlaybackResets(clock, replay, space?.id, runs.view, runs.compare);
+  const shots = runs.view ? runs.stateOf(runs.view)?.storyboard.shots : undefined;
   const seekTo = useCallback((n: number, sec: number) => { if (runs.view !== n && n === 1) runs.setView(1); clock.seek(sec); }, [runs, clock]);
-
   return (
     <MotionConfig reducedMotion="user">
       <div className="app">
-        <AnnouncementBar spent={liveSpent(space, runningCost)} />
+        <AnnouncementBar spent={liveSpent(space, runningCost)} fake={!!wb.status?.fake} />
         <div className="main">
           <SpacesRail spaces={wb.spaces} currentId={space?.id} onSelect={wb.selectSpace} onNew={wb.newSpace} />
           {space && options ? (
-            <>
+            <ErrorBoundary key={space.id}>
               <ChatFlow wb={wb} space={space} options={options} runs={runs} convo={convo} replay={replay} onSeek={seekTo} runningCost={runningCost}
-                composer={<Composer ready={ready} convo={convo} pausedRef={pausedRef} onExport={() => runs.view && void runs.exportVersion(runs.view)} />} />
-              <PreviewStage space={space} options={options} estimate={wb.estimate} totalSec={totalSec} runs={runs} clock={clock} replay={replay}
+                composer={<Composer ready={ready} convo={convo} clock={clock} shots={shots} locked={replay.shown !== undefined} onExport={() => runs.view && void runs.exportVersion(runs.view)} />} />
+              <PreviewStage space={space} options={options} estimate={wb.estimate} totalSec={wb.estimate?.durationSec ?? 0} runs={runs} clock={clock} replay={replay}
                 onRef={convo.addRef} notify={wb.notify} />
-            </>
-          ) : (
-            <div className="boot" role="status">
-              {wb.loadError ? <><b>工作台没能启动</b><span>{wb.loadError}</span></> : <><span className="spin" /><span>正在连接本机服务 <It l>(127.0.0.1)</It></span></>}
-            </div>
-          )}
+            </ErrorBoundary>
+          ) : <Boot error={wb.loadError} />}
         </div>
       </div>
-      <AnimatePresence>
-        {wb.toast && (
-          <motion.div className="toast" role="status" initial={{ opacity: 0, y: 12, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }} exit={{ opacity: 0, y: 8, x: '-50%' }} transition={SPRING}>
-            {wb.toast}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Toast text={wb.toast} />
     </MotionConfig>
   );
 }

@@ -13,13 +13,15 @@ interface Props {
   applied?: number;
   /** 另一个任务在跑时不能点 */
   disabled?: boolean;
+  /** 刷新前提交状态不明：锁住，不允许再点 */
+  unsure?: boolean;
   onPick: (index: number) => void;
 }
 
 const LETTER = 'ABCDEFGH';
 
-export function InlineOptions({ options, picked, applying, applied, disabled, onPick }: Props) {
-  const locked = applying || applied !== undefined;
+export function InlineOptions({ options, picked, applying, applied, disabled, unsure, onPick }: Props) {
+  const locked = applying || applied !== undefined || !!unsure;
   return (
     <div className="iopts">
       <div className="iopts-row" role="group" aria-label="可选方案">

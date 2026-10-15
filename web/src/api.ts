@@ -68,7 +68,7 @@ export interface VersionState {
 export interface ExportResult { dir: string; files: string[] }
 export type EventSink = (e: WorkEvent) => void
 
-export interface Status { version: string; keyConfigured: boolean; modelsReady: boolean; assetsReady: boolean; ffmpegReady: boolean }
+export interface Status { version: string; keyConfigured: boolean; modelsReady: boolean; assetsReady: boolean; ffmpegReady: boolean; /** 服务以假模型模式启动（仅测试） */ fake?: boolean }
 export type KeySource = 'env' | 'keychain' | 'file';
 export interface KeyInfo { configured: boolean; source?: KeySource; masked?: string }
 
@@ -114,8 +114,8 @@ export interface Api {
   cancel(id: string): Promise<void>;
   exportVersion(id: string, n: number): Promise<ExportResult>;
   versionState(id: string, n: number): Promise<VersionState>;
-  /** 订阅某个版本的事件：先补历史再推实时；返回取消订阅 */
-  events(id: string, version: number, sink: EventSink): () => void;
+  /** 订阅某个版本的事件：先补历史再推实时；断线自动重连（onStatus 报告在线与否）；返回取消订阅 */
+  events(id: string, version: number, sink: EventSink, onStatus?: (online: boolean) => void): () => void;
 }
 
 export class ApiError extends Error {
@@ -206,23 +206,43 @@ export function createHttpApi(): Api {
     cancel: (id) => json(`/api/spaces/${enc(id)}/cancel`, { method: 'POST' }),
     exportVersion: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/export`, { method: 'POST' }, PLAN_TIMEOUT_MS),
     versionState: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/state`),
-    events: (id, version, sink) => openEvents(`/api/spaces/${enc(id)}/events?version=${version}`, sink),
+    events: (id, version, sink, onStatus) => openEvents(`/api/spaces/${enc(id)}/events?version=${version}`, sink, onStatus),
   };
 }
 
-/** SSE：EventSource 自动重连并带 Last-Event-ID；这里再按 seq 去重一次 */
-function openEvents(url: string, sink: EventSink): () => void {
-  const source = new EventSource(url);
+const RETRY_BASE_MS = 1_000;
+const RETRY_MAX_MS = 30_000;
+
+/**
+ * SSE：EventSource 自己会断线重连（带 Last-Event-ID）；但服务端回了非 200 等情况它会彻底放弃，
+ * 这时按 1、2、4…30 秒指数退避重新连，并用 lastEventId 查询参数只补之后的事件。再按 seq 去重一次。
+ * onStatus(false) 表示断开（界面提示「直播断开，正在重连」），连上后 onStatus(true)。
+ */
+function openEvents(url: string, sink: EventSink, onStatus?: (online: boolean) => void): () => void {
   let last = 0;
-  source.onmessage = (msg) => {
-    try {
-      const e = JSON.parse(msg.data as string) as WorkEvent;
-      if (e.seq > last) { last = e.seq; sink(e); }
-    } catch {
-      /* 坏行忽略 */
-    }
+  let retry = 0;
+  let timer = 0;
+  let source: EventSource | undefined;
+  const connect = () => {
+    source = new EventSource(last ? `${url}&lastEventId=${last}` : url);
+    source.onopen = () => { retry = 0; onStatus?.(true); };
+    source.onmessage = (msg) => {
+      try {
+        const e = JSON.parse(msg.data as string) as WorkEvent;
+        if (e.seq > last) { last = e.seq; sink(e); }
+      } catch {
+        /* 坏行忽略 */
+      }
+    };
+    source.onerror = () => {
+      onStatus?.(false);
+      if (source?.readyState !== EventSource.CLOSED) return; // 浏览器还在自己重连
+      timer = window.setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** retry));
+      retry += 1;
+    };
   };
-  return () => source.close();
+  connect();
+  return () => { window.clearTimeout(timer); source?.close(); };
 }
 
 /** 成片与封面（服务端只放行这三个文件） */
@@ -233,10 +253,10 @@ function createLazyMockApi(params: URLSearchParams): Api {
   let loaded: Promise<Api> | undefined;
   const load = () => (loaded ??= import('./mock').then((m) => m.createMockApi(params)));
   // events 是同步返回「取消订阅」的，单独包一层：加载完再订阅，期间取消则不订阅
-  const events: Api['events'] = (id, version, sink) => {
+  const events: Api['events'] = (id, version, sink, onStatus) => {
     let close: (() => void) | undefined;
     let dead = false;
-    void load().then((m) => { if (!dead) close = m.events(id, version, sink); });
+    void load().then((m) => { if (!dead) close = m.events(id, version, sink, onStatus); });
     return () => { dead = true; close?.(); };
   };
   return new Proxy({} as Api, {

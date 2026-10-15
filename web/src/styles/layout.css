@@ -19,7 +19,7 @@
 .th-wrap { position: relative; display: block; width: 42px; height: 42px; }
 .th { position: absolute; inset: 0; border-radius: var(--r-13); background-size: cover; background-position: center; box-shadow: var(--shadow-1); }
 .th-ring { position: absolute; inset: -4px; border-radius: 17px; box-shadow: 0 0 0 2px var(--glow-border); }
-.space .nm { font: 500 12px/1 var(--sans); color: var(--text-3); transition: color 0.15s; white-space: nowrap; }
+.space .nm { font: 500 12px/1.2 var(--sans); color: var(--text-3); transition: color 0.15s; white-space: nowrap; max-width: 56px; overflow: hidden; text-overflow: ellipsis; }
 .space.on .nm, .space:hover .nm { color: var(--text-1); }
 .fly { position: absolute; left: 56px; top: 2px; white-space: nowrap; background: #fff; border-radius: var(--r-13); box-shadow: var(--shadow-3); padding: 10px 12px; font: 500 14px/1.3 var(--sans); pointer-events: none; text-align: left; z-index: 50; color: var(--text-1); }
 .fly small { display: block; font: 400 12px/1.4 var(--sans); color: var(--text-3); margin-top: 3px; }

@@ -9,7 +9,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Estimate, Options, Space, VersionMeta } from '../api';
 import { reduceLive, type QaScore } from '../lib/liveModel';
 import type { TimeRef } from '../lib/shots';
-import { PLAYER_CHROME, stageLayout } from '../lib/stageLayout';
+import { cliLine } from '../lib/cli';
+import { PLAYER_CHROME, stageLayout, type StageLayout } from '../lib/stageLayout';
 import type { Replay } from '../live';
 import type { Clock } from '../usePlayback';
 import type { Runs } from '../useRuns';
@@ -17,7 +18,8 @@ import { Ico, It, SOFT, Tap } from '../ui';
 import { CompareView } from './CompareView';
 import { PlayerWindow } from './PlayerWindow';
 import { artFor } from './SpacesRail';
-import { StageTerminal, type StageLive } from './StageTerminal';
+import { LiveTerminal } from './LiveTerminal';
+import { StageTerminal } from './StageTerminal';
 import { VersionPlayer } from './VersionPlayer';
 import { VersionSwitcher } from './VersionSwitcher';
 
@@ -62,41 +64,63 @@ interface Props {
   runs: Runs; clock: Clock; replay: Replay; onRef: (r: TimeRef, from: { x: number; y: number }) => void; notify: (m: string) => void;
 }
 
-export function PreviewStage({ space, options, estimate, totalSec, runs, clock, replay, onRef, notify }: Props) {
+/** 顶栏：标题 + 版本切换 / 对比 + 导出 */
+function PaneHead({ space, runs, replay, notify }: Pick<Props, 'space' | 'runs' | 'replay' | 'notify'>) {
+  const meta = runs.viewMeta;
+  const [h2, aside] = heading(space, meta, replay.shown !== undefined, meta ? runs.stateOf(meta.n)?.storyboard.shots.length : undefined);
+  const hasDone = space.versions.some((v) => v.status === 'done');
+  return (
+    <div className="pane-h">
+      <h2>{h2}<It l>{aside}</It></h2>
+      <div className="ctrls">
+        {runs.offline && <span className="net-off" role="status"><i />直播断开，正在重连…</span>}
+        {hasDone ? (
+          <VersionSwitcher versions={space.versions} view={runs.view} active={runs.active} onView={runs.setView}
+            compare={runs.compare} canCompare={runs.canCompare} onCompare={runs.setCompare} onBusy={notify} />
+        ) : (
+          <div className="seg" title="出片后可在这里切换版本"><button type="button" aria-disabled="true">{runs.active && <span className="pulse" />}v1</button></div>
+        )}
+        <Tap className="btn btn-k" disabled={!meta || runs.exporting !== undefined} onClick={() => meta && void runs.exportVersion(meta.n)}
+          title={meta ? `导出 v${meta.n}：成片与两张封面` : '出片后可导出'}>{runs.exporting !== undefined ? <span className="spin" /> : Ico.down}导出</Tap>
+      </div>
+    </div>
+  );
+}
+
+/** 画框里的终端：出片中或重播时是剪辑直播终端，出片前是设置命令 */
+function FrameTerminal({ space, options, estimate, totalSec, runs, replay, place }: Pick<Props, 'space' | 'options' | 'estimate' | 'totalSec' | 'runs' | 'replay'> & { place: StageLayout['term'] }) {
+  const n = replay.shown ? 1 : runs.active;
+  if (n !== undefined) {
+    const view = reduceLive(replay.shown ?? runs.eventsOf(n));
+    const summary = space.versions.find((v) => v.n === n)?.summary;
+    return (
+      <LiveTerminal key={`live-${n}`} view={view} title={n === 1 ? '剪辑直播' : `v${n}`} place={place} animate
+        command={n === 1 ? cliLine(space) : undefined} comment={n === 1 ? undefined : `v${n} · ${summary ?? '对话修改'}`} />
+    );
+  }
+  if (runs.viewMeta) return null;
+  return <StageTerminal key="setup" space={space} options={options} estimate={estimate} totalSec={totalSec} place={place} />;
+}
+
+/** 重播时画面跟着分镜进度跳到最新一张卡 */
+function useReplayFollow(replay: Replay, clock: Clock) {
+  const lastStart = replay.shown ? reduceLive(replay.shown).shots.at(-1)?.start : undefined;
+  useEffect(() => { if (lastStart !== undefined) clock.seek(lastStart + 0.05); }, [lastStart, clock]);
+}
+
+export function PreviewStage(props: Props) {
+  const { space, options, totalSec, runs, clock, replay, onRef } = props;
   const { ref, size } = useFrameSize();
   const lay = size ? stageLayout(size.w, size.h) : undefined;
   const done = space.versions.filter((v) => v.status === 'done');
   const meta = runs.viewMeta;
   const state = meta ? runs.stateOf(meta.n) : undefined;
-  const replaying = replay.shown !== undefined;
-  const [h2, aside] = heading(space, meta, replaying, state?.storyboard.shots.length);
   const scoreOf = useScores(runs, done);
-  const activeMeta = space.versions.find((v) => v.n === runs.active);
-  const live: StageLive | undefined = runs.active ? { view: reduceLive(runs.eventsOf(runs.active)), n: runs.active, summary: activeMeta?.summary } : undefined;
   const left = done.find((v) => v.n === runs.compareWith);
-
-  // 重播时画面跟着分镜进度跳到最新一张卡
-  const replayShots = replay.shown ? reduceLive(replay.shown).shots : [];
-  const lastStart = replayShots.at(-1)?.start;
-  const seek = useRef(clock.seek);
-  seek.current = clock.seek;
-  useEffect(() => { if (lastStart !== undefined) seek.current(lastStart + 0.05); }, [lastStart]);
-
+  useReplayFollow(replay, clock);
   return (
     <section className="pane" aria-label="预览">
-      <div className="pane-h">
-        <h2>{h2}<It l>{aside}</It></h2>
-        <div className="ctrls">
-          {done.length ? (
-            <VersionSwitcher versions={space.versions} view={runs.view} active={runs.active} onView={runs.setView}
-              compare={runs.compare} canCompare={runs.canCompare} onCompare={runs.setCompare} onBusy={notify} />
-          ) : (
-            <div className="seg" title="出片后可在这里切换版本"><button type="button" aria-disabled="true">{runs.active && <span className="pulse" />}v1</button></div>
-          )}
-          <Tap className="btn btn-k" disabled={!meta || runs.exporting !== undefined} onClick={() => meta && void runs.exportVersion(meta.n)}
-            title={meta ? `导出 v${meta.n}：成片与两张封面` : '出片后可导出'}>{runs.exporting !== undefined ? <span className="spin" /> : Ico.down}导出</Tap>
-        </div>
-      </div>
+      <PaneHead {...props} />
       <motion.div ref={ref} className="frame" style={{ backgroundImage: `url('${artFor(space.id)}')` }}
         initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} transition={{ ...SOFT, delay: 0.05 }}>
         {size && lay && (meta ? (runs.compare && left ? (
@@ -104,16 +128,12 @@ export function PreviewStage({ space, options, estimate, totalSec, runs, clock, 
         ) : (
           <div className="stagewin">
             <VersionPlayer key="one" spaceId={space.id} meta={meta} state={state} clock={clock} h={lay.h} scoreOf={scoreOf(meta.n)}
-              locked={replaying} onRef={onRef} style={{ left: lay.left, top: lay.top }} />
+              locked={replay.shown !== undefined} onRef={onRef} style={{ left: lay.left, top: lay.top }} />
           </div>
         )) : (
           <div className="stagewin"><PlayerWindow space={space} options={options} lay={lay} totalSec={totalSec} /></div>
         ))}
-        <AnimatePresence>
-          {lay && !runs.compare && (!meta || live) && (
-            <StageTerminal key={live ? `live-${live.n}` : 'setup'} space={space} options={options} estimate={estimate} totalSec={totalSec} place={lay.term} live={live} />
-          )}
-        </AnimatePresence>
+        <AnimatePresence>{lay && !runs.compare && <FrameTerminal {...props} place={lay.term} />}</AnimatePresence>
       </motion.div>
     </section>
   );

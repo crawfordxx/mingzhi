@@ -7,7 +7,7 @@
 .btn.sm { padding: 6px 11px; font-size: 13px; }
 .btn.sm svg { width: 13px; height: 13px; }
 .btn .spin { width: 12px; height: 12px; border-width: 1.6px; }
-.live-top { padding: 2px 22px 66px; }
+.live-top { padding: 2px 22px 20px; }
 .big { font: 700 46px/1 var(--sans); letter-spacing: -0.02em; color: var(--text-1); display: flex; align-items: baseline; gap: 12px; }
 .big .arr { font: 200 34px/1 var(--serif-i); font-style: italic; color: var(--text-3); }
 .big .out { font-family: var(--serif-i); font-style: italic; font-weight: 200; font-size: 52px; color: var(--brand-6); letter-spacing: -0.01em; transition: color 0.4s; }
@@ -40,11 +40,31 @@
 .sc .tr { height: 3px; border-radius: 2px; background: var(--bg-4); margin-top: 8px; overflow: hidden; }
 .sc .tr i { display: block; height: 100%; background: var(--accent); transform-origin: 0 50%; border-radius: 2px; }
 
-/* 深色终端 */
-.term { position: relative; margin: -58px 0 0 26px; background: var(--term); border-radius: var(--r-18); box-shadow: var(--shadow-win); overflow: hidden; color: var(--term-1); }
-.term .titlebar { height: 32px; background: var(--term-bar); }
-.term .titlebar .tt { color: var(--term-2); font: 400 12px/1 var(--mono); }
-.term-body { padding: 12px 16px 14px; font: 400 12.5px/1.7 var(--mono); height: 236px; overflow-y: auto; scrollbar-width: none; position: relative; }
+/* 直播卡里的转录：浅色列表，被剪的词先红色划掉、再收拢 */
+.tx-wrap { margin-top: 16px; border-top: 1px solid #0000000f; padding-top: 12px; }
+.tx-h { display: flex; justify-content: space-between; font: 500 12px/1 var(--sans); color: var(--text-3); margin-bottom: 8px; }
+.tx-key { display: inline-flex; align-items: center; gap: 6px; }
+.tx-key i { width: 14px; height: 0; border-top: 1.5px solid var(--negative); }
+.tx-list { list-style: none; max-height: 132px; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 2px;
+  -webkit-mask-image: linear-gradient(transparent, #000 14px); mask-image: linear-gradient(transparent, #000 14px); padding-top: 6px; }
+.tx-list::-webkit-scrollbar { display: none; }
+.tx-list .tx { flex: none; font: 400 14px/1.75 var(--sans); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 1.75em; padding-left: 14px; position: relative; }
+.tx-list .tx::before { content: ''; position: absolute; left: 2px; top: 0.85em; width: 5px; height: 1px; background: var(--text-4); }
+/* 逐行打字（Platen 打字机）：新行从左到右按字揭开 */
+.typed { animation: type 0.42s steps(28, end) both; }
+@keyframes type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.cutw { display: inline-block; vertical-align: bottom; overflow: hidden; white-space: nowrap; max-width: 12em; color: var(--negative);
+  text-decoration: line-through; text-decoration-thickness: 1.5px; animation: cutin 0.3s ease both, cutgone 0.55s cubic-bezier(0.22, 1, 0.36, 1) var(--d, 0.8s) forwards; }
+@keyframes cutin { from { color: inherit; text-decoration-color: transparent; } }
+@keyframes cutgone { to { max-width: 0; opacity: 0; } }
+.tx.gone { animation: type 0.42s steps(28, end) both, linegone 0.5s cubic-bezier(0.22, 1, 0.36, 1) calc(var(--d) + 0.3s) forwards; }
+@keyframes linegone { to { max-height: 0; opacity: 0; } }
+.still .typed, .still .cutw { animation: none; }
+.still .cutw { max-width: 0; opacity: 0; }
+.still .tx.gone { display: none; }
+
+/* 画框里的剪辑直播终端（深色） */
+.tw.term .term-body { padding: 10px 14px 12px; font: 400 12px/1.75 var(--mono); min-height: 72px; max-height: 178px; overflow-y: auto; scrollbar-width: none; }
 .term-body::-webkit-scrollbar { display: none; }
 .term-body .ln { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .term-body .p, .term-body .ok { color: var(--brand-2); }
@@ -53,23 +73,15 @@
 .term-body .sp { color: #febc2e; }
 .term-body .neg { color: #ff8a80; }
 .term-body .pct { color: var(--term-1); margin-left: 6px; }
-.term-body .tx { padding-left: 18px; color: var(--term-1); font-family: var(--sans); font-size: 13px; }
-.term .tw-bar, .tw .tw-bar { display: inline-block; width: 110px; height: 6px; border-radius: 3px; background: #ffffff1f; vertical-align: 1px; margin: 0 2px 0 8px; overflow: hidden; }
-.term .tw-bar i, .tw .tw-bar i { display: block; height: 100%; background: var(--brand-3); border-radius: 3px; transition: width 0.4s ease; }
-/* 逐行打字（Platen 打字机）：新行从左到右按字揭开 */
-.term-body .typed { animation: type 0.42s steps(28, end) both; }
-@keyframes type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-/* 被剪的词：先标红划掉，再收拢消失 */
-.cutw { display: inline-block; vertical-align: bottom; overflow: hidden; white-space: nowrap; max-width: 12em; color: var(--negative);
-  text-decoration: line-through; text-decoration-thickness: 1.5px; animation: cutin 0.3s ease both, cutgone 0.55s cubic-bezier(0.22, 1, 0.36, 1) var(--d, 0.8s) forwards; }
-@keyframes cutin { from { color: var(--term-1); text-decoration-color: transparent; } }
-@keyframes cutgone { to { max-width: 0; opacity: 0; } }
-.term-body .tx.gone { animation: type 0.42s steps(28, end) both, linegone 0.5s cubic-bezier(0.22, 1, 0.36, 1) calc(var(--d) + 0.3s) forwards; }
-@keyframes linegone { to { max-height: 0; opacity: 0; } }
-.term-body .tx { max-height: 1.7em; }
-.term.still .typed, .term.still .cutw { animation: none; }
-.term.still .tx.gone { display: none; }
-.term.still .cutw { max-width: 0; opacity: 0; }
+.tw .tw-bar { display: inline-block; width: 92px; height: 6px; border-radius: 3px; background: #ffffff1f; vertical-align: 1px; margin: 0 2px 0 8px; overflow: hidden; }
+.tw .tw-bar i { display: block; height: 100%; background: var(--brand-3); border-radius: 3px; }
+
+/* 减弱动效：不打字、不扫光，被剪的词直接收起 */
+@media (prefers-reduced-motion: reduce) {
+  .typed, .tx.gone, .tile.ghost, .tile-shim, .track i::after, .say.typing i, .net-off i { animation: none !important; }
+  .cutw { animation: none !important; max-width: 0; opacity: 0; }
+  .tx.gone { display: none; }
+}
 
 /* ---------- 版本卡 ---------- */
 .ver { display: grid; grid-template-columns: 62px 1fr; gap: 16px; padding: 14px 16px 14px 14px; align-items: center; transition: box-shadow 0.25s; }
