@@ -1,5 +1,6 @@
 import React from 'react';
 import type { CardSpec, TemplateId } from '../../src/storyboard/schema.js';
+import type { TemplateProps } from './parts.js';
 import { BigNumber } from './BigNumber.js';
 import { Browser } from './Browser.js';
 import { Chips } from './Chips.js';
@@ -13,11 +14,13 @@ import { Terminal } from './Terminal.js';
 import { Title } from './Title.js';
 import { Toggles } from './Toggles.js';
 
-/** 模板组件：props 为该模板的数据，local 为镜头内的秒数（从 0 开始） */
-export type TemplateComponent = React.FC<{ props: any; local: number }>;
+/** 每个模板 id 对应接收该模板 props 的组件（编译期保证 12 个都登记） */
+type Registry = { [K in TemplateId]: React.FC<TemplateProps<K>> };
+/** 任意模板的组件（运行时按 card.template 取出后使用） */
+type AnyTemplate = React.FC<TemplateProps<TemplateId>>;
 
 /** 模板注册表 */
-export const TEMPLATES: Record<TemplateId, TemplateComponent> = {
+export const TEMPLATES: Registry = {
   hook: Hook,
   title: Title,
   bigNumber: BigNumber,
@@ -33,17 +36,17 @@ export const TEMPLATES: Record<TemplateId, TemplateComponent> = {
 };
 
 /** 铺满卡片区、不随卡片进出场移动的底（例如钩子卡的黑底与配图），避免相邻镜头之间底色闪烁 */
-const BACKDROPS: Partial<Record<TemplateId, TemplateComponent>> = { hook: HookBackdrop, photo: PhotoBackdrop };
+const BACKDROPS: Partial<Registry> = { hook: HookBackdrop, photo: PhotoBackdrop };
 
-/** 按模板 id 渲染卡片内容；未登记的模板直接抛错 */
-export function renderCard(card: CardSpec, local: number): React.ReactNode {
-  const Component = TEMPLATES[card.template];
+/** 按模板 id 渲染卡片内容；local 为镜头内秒数，dur 为镜头时长；未登记的模板（未经校验的数据）直接抛错 */
+export function renderCard(card: CardSpec, local: number, dur: number): React.ReactNode {
+  const Component = TEMPLATES[card.template] as AnyTemplate | undefined;
   if (!Component) throw new Error('未登记的模板：' + card.template);
-  return React.createElement(Component, { props: card.props, local });
+  return React.createElement(Component, { props: card.props, local, dur });
 }
 
 /** 模板的固定底；没有则返回 null（用卡片区米色底） */
-export function renderBackdrop(card: CardSpec, local: number): React.ReactNode {
-  const Component = BACKDROPS[card.template];
-  return Component ? React.createElement(Component, { props: card.props, local }) : null;
+export function renderBackdrop(card: CardSpec, local: number, dur: number): React.ReactNode {
+  const Component = BACKDROPS[card.template] as AnyTemplate | undefined;
+  return Component ? React.createElement(Component, { props: card.props, local, dur }) : null;
 }

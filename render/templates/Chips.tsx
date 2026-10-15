@@ -1,7 +1,7 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
-import { CONTENT_W, CardFrame, Reveal, SafeArea, fitFontSize, springAt, type PropsOf, type TemplateProps } from './parts.js';
+import { CONTENT_W, CardFrame, Reveal, SafeArea, clampLines, fitFontSize, fitScale, lineCount, springAt, textEm, type PropsOf, type TemplateProps } from './parts.js';
 
 type Mark = 'yes' | 'no' | 'maybe';
 type Group = PropsOf<'chips'>['groups'][number];
@@ -10,12 +10,45 @@ const PAD_X = 44;
 const LABEL_W = 190;
 const PILLS_W = CONTENT_W - PAD_X * 2 - LABEL_W - 20;
 const PILL_H = 66;
+const PILL_GAP = 14;
+const ICON_GAP = 10;
+const PILL_PAD = 50;
+const ROW_PAD_Y = 28;
+const CARD_PAD_Y = 12;
+const LABEL_LH = 1.3;
 const STAGGER = 0.12;
 const MARKS: Record<Mark, { bg: string; fg: string }> = {
   yes: { bg: '#E3F3E8', fg: THEME.badge['收益'] },
   no: { bg: '#FBE5E4', fg: THEME.red },
   maybe: { bg: '#EEEDEA', fg: '#8C877E' },
 };
+
+const pillPx = (text: string): number => fitFontSize(text, PILLS_W - 90, 32, 20);
+const labelPx = (label: string): number => fitFontSize(label, LABEL_W, 32, 20, 2);
+/** 胶囊宽度估算：文字 + 图标 + 间距 + 左右内边距 */
+const pillWidth = (text: string): number => {
+  const px = pillPx(text);
+  return textEm(text) * px + Math.round(px * 0.95) + ICON_GAP + PILL_PAD;
+};
+
+/** 按胶囊宽度排进 PILLS_W，估算折成几行 */
+function pillRows(texts: string[]): number {
+  return texts.reduce((acc, t) => {
+    const w = pillWidth(t);
+    return acc.used > 0 && acc.used + PILL_GAP + w > PILLS_W ? { rows: acc.rows + 1, used: w } : { rows: acc.rows, used: acc.used + (acc.used > 0 ? PILL_GAP : 0) + w };
+  }, { rows: 1, used: 0 }).rows;
+}
+
+/** 整张卡的估算高度（px），超出安全区时整体缩小 */
+export function estimateChipsHeight(groups: Group[]): number {
+  const rowsH = groups.reduce((h, g) => {
+    const rows = pillRows(g.items.map((it) => it.text));
+    const pills = rows * PILL_H + (rows - 1) * PILL_GAP;
+    const label = lineCount(g.label, LABEL_W, labelPx(g.label)) * labelPx(g.label) * LABEL_LH;
+    return h + Math.max(pills, label) + ROW_PAD_Y * 2;
+  }, 0);
+  return CARD_PAD_Y * 2 + rowsH + (groups.length - 1) * 2;
+}
 
 /** 勾、叉、问号图标（SVG，不依赖字体字形） */
 const MarkIcon: React.FC<{ mark: Mark; size: number; color: string }> = ({ mark, size, color }) => {
@@ -30,11 +63,11 @@ const MarkIcon: React.FC<{ mark: Mark; size: number; color: string }> = ({ mark,
 
 /** 胶囊：依次弹入（带一点过冲） */
 const Pill: React.FC<{ text: string; mark: Mark; p: number }> = ({ text, mark, p }) => {
-  const px = fitFontSize(text, PILLS_W - 90, 32, 20);
+  const px = pillPx(text);
   const c = MARKS[mark];
   return (
     <Reveal p={p} dy={10} from={0.6}>
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, height: PILL_H, padding: '0 28px 0 22px', borderRadius: PILL_H / 2,
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: ICON_GAP, height: PILL_H, padding: '0 28px 0 22px', borderRadius: PILL_H / 2,
         background: c.bg, color: c.fg, fontSize: px, fontWeight: 700, whiteSpace: 'nowrap' }}>
         <MarkIcon mark={mark} size={Math.round(px * 0.95)} color={c.fg} />
         <span>{text}</span>
@@ -44,9 +77,9 @@ const Pill: React.FC<{ text: string; mark: Mark; p: number }> = ({ text, mark, p
 };
 
 const Row: React.FC<{ group: Group; first: number; divider: boolean; local: number; fps: number }> = ({ group, first, divider, local, fps }) => (
-  <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '28px 0', borderTop: divider ? '2px solid #EFEDE9' : 'none' }}>
-    <div style={{ width: LABEL_W, flex: 'none', fontSize: fitFontSize(group.label, LABEL_W, 32, 20, 2), fontWeight: 600, color: THEME.sub, lineHeight: 1.3 }}>{group.label}</div>
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+  <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: `${ROW_PAD_Y}px 0`, borderTop: divider ? '2px solid #EFEDE9' : 'none' }}>
+    <div style={{ width: LABEL_W, flex: 'none', fontSize: labelPx(group.label), fontWeight: 600, color: THEME.sub, lineHeight: LABEL_LH, ...clampLines(2) }}>{group.label}</div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: PILL_GAP }}>
       {group.items.map((it, i) => <Pill key={i} text={it.text} mark={it.mark} p={springAt(local, 0.15 + (first + i) * STAGGER, fps, { damping: 12, mass: 0.6 })} />)}
     </div>
   </div>
@@ -57,8 +90,8 @@ export const Chips: React.FC<TemplateProps<'chips'>> = ({ props, local }) => {
   const { fps } = useVideoConfig();
   const firsts = props.groups.map((_, gi) => props.groups.slice(0, gi).reduce((n, g) => n + g.items.length, 0));
   return (
-    <SafeArea>
-      <CardFrame padding={`12px ${PAD_X}px`}>
+    <SafeArea scale={fitScale(estimateChipsHeight(props.groups))}>
+      <CardFrame padding={`${CARD_PAD_Y}px ${PAD_X}px`}>
         {props.groups.map((g, gi) => <Row key={gi} group={g} first={firsts[gi]} divider={gi > 0} local={local} fps={fps} />)}
       </CardFrame>
     </SafeArea>

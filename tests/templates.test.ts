@@ -12,6 +12,12 @@ import { balanceLines, tokenize } from '../render/templates/headline.js';
 import { countUp } from '../render/templates/BigNumber.js';
 import { bottleLabel } from '../render/templates/CompareBars.js';
 import { TYPE_START, typedChars } from '../render/templates/Terminal.js';
+import { SAFE_H, fitScale } from '../render/templates/parts.js';
+import { estimateChipsHeight } from '../render/templates/Chips.js';
+import { STRIKE_END, strikeStarts } from '../render/templates/StrikeList.js';
+import { clickTimes } from '../render/templates/Toggles.js';
+import { ctaColor } from '../render/templates/Cta.js';
+import { CardLayer } from '../render/layers/CardLayer.js';
 
 export const SAMPLES: CardSpec[] = [
   { template: 'hook', props: { index: 1, total: 3, kicker: '这 3 句话都出自 GitHub 近 3.5 万星的《高性价比人生指南》', headline: '吃抗氧化补剂的人死亡率反而略高', highlight: ['略高'], stat: { value: '78 项试验', label: '近 30 万人' } } },
@@ -38,12 +44,14 @@ describe('模板文字与数值工具', () => {
   it('字宽估算：中文 1em、英文约 0.55em', () => {
     expect(textEm('中文')).toBe(2);
     expect(textEm('ab')).toBeCloseTo(1.1);
+    expect(textEm('AB12')).toBeCloseTo(2.6);
   });
   it('fitFontSize：放得下用基准字号，放不下按行宽缩小，不低于下限', () => {
     expect(fitFontSize('短标题', 960, 72, 40)).toBe(72);
-    expect(fitFontSize('一'.repeat(30), 960, 72, 20)).toBe(32);
+    // 单行（nowrap）留 6% 余量
+    expect(fitFontSize('一'.repeat(30), 960, 72, 20)).toBe(30);
     expect(fitFontSize('一'.repeat(60), 960, 72, 40)).toBe(40);
-    expect(fitFontSize('一'.repeat(30), 960, 72, 20, 2)).toBe(32);
+    expect(fitFontSize('一'.repeat(30), 960, 72, 20, 2)).toBe(30);
     expect(fitFontSize('一'.repeat(30), 960, 72, 40, 2)).toBe(61);
   });
   it('标题均衡断行，高亮子串不被拆开，行首不放标点', () => {
@@ -60,6 +68,8 @@ describe('模板文字与数值工具', () => {
     expect(countUp('20,995', 1)).toBe('20,995');
     expect(countUp('4.74', 0)).toBe('0.00');
     expect(countUp('¥1.00', 0.3)).toBe('¥1.00');
+    expect(countUp('007', 1)).toBe('007');
+    expect(countUp('1,000', 1)).toBe('1,000');
   });
   it('瓶身标签取名称括号里的词', () => {
     expect(bottleLabel('甜饮料（含糖）')).toBe('含糖');
@@ -98,5 +108,47 @@ describe('终端逐字打出', () => {
     expect(typedChars(lines, TYPE_START + 3 / 28 + 0.1)).toEqual([3, 0]);
     expect(typedChars(lines, TYPE_START + 3 / 28 + 0.2 + 1 / 28 + 0.001)).toEqual([3, 1]);
     expect(typedChars(lines, 99)).toEqual([3, 2]);
+  });
+});
+
+describe('按镜头时长收拢节奏与版面估算', () => {
+  it('标签卡：字段上限的输入缩放后不超出安全区', () => {
+    const item = (mark: 'yes' | 'no' | 'maybe') => ({ text: '十二个字的标签文本测试用', mark });
+    const groups = [0, 1].map(() => ({ label: '十二个字的组名文本测试用', items: (['yes', 'no', 'maybe', 'yes', 'no'] as const).map(item) }));
+    const est = estimateChipsHeight(groups);
+    expect(est).toBeGreaterThan(SAFE_H);
+    expect(est * fitScale(est)).toBeLessThanOrEqual(SAFE_H);
+    const small = estimateChipsHeight([{ label: '帮别人', items: [item('yes'), item('yes')] }]);
+    expect(fitScale(small)).toBe(1);
+  });
+  it('终端：3 秒镜头 6×40 字在出场前 0.4 秒打完；长镜头保持每秒 28 字', () => {
+    const lines = Array.from({ length: 6 }, () => 'a'.repeat(40));
+    expect(typedChars(lines, 3 - 0.65, 3)).toEqual(lines.map(() => 40));
+    expect(typedChars(['一二三'], TYPE_START + 2 / 28 + 0.001, 60)).toEqual([2]);
+  });
+  it('划掉清单：2 秒 5 项，最后一道划线在出场前 0.3 秒划完；长镜头间隔不变', () => {
+    const starts = strikeStarts(5, 2);
+    expect(starts[4] + STRIKE_END).toBeLessThanOrEqual(2 - 0.25 - 0.3 + 1e-9);
+    expect(starts[1] - starts[0]).toBeGreaterThan(0);
+    const relaxed = strikeStarts(3, 10);
+    expect(relaxed[1] - relaxed[0]).toBeCloseTo(0.42);
+  });
+  it('开关：短镜头压缩点击间隔，最后一次点击在出场前完成', () => {
+    const t = clickTimes(4, 2.5);
+    expect(t[3] + 0.3).toBeLessThanOrEqual(2.5 - 0.25 - 0.3 + 1e-9);
+    expect(clickTimes(2, 10)).toEqual([0.6, 1.1]);
+  });
+  it('CTA 按文字取色，未知文字按序号取备用色', () => {
+    expect(ctaColor('关注', 2)).toBe('#F2334B');
+    expect(ctaColor('点赞', 0)).toBe('#FF7A2F');
+    expect(ctaColor('收藏', 0)).toBe('#F5A623');
+    expect(ctaColor('转发', 0)).toMatch(/^#[0-9A-F]{6}$/i);
+    expect(ctaColor('转发', 0)).not.toBe(ctaColor('评论', 1));
+  });
+  it('CardLayer：全屏镜头只叠加 cta', () => {
+    const cta: CardSpec = { template: 'cta', props: { actions: ['关注'] } };
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'full' }], sec: 1 })).toBeNull();
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'full', card: SAMPLES[1] }], sec: 1 })).toBeNull();
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'full', card: cta }], sec: 1 })).not.toBeNull();
   });
 });

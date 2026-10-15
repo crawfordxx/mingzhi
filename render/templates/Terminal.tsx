@@ -1,12 +1,17 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
-import { CONTENT_W, Reveal, SafeArea, lineCount, springAt, type TemplateProps } from './parts.js';
+import { CONTENT_W, EXIT_SEC, Reveal, SafeArea, springAt, type TemplateProps } from './parts.js';
 
 /** 打字从镜头第几秒开始、每秒几个字、行与行之间停多久 */
 export const TYPE_START = 0.25;
 const CHARS_PER_SEC = 28;
 const LINE_PAUSE = 0.2;
+/** 全部打完至少要在出场前多久（秒），另留一点浮点余量 */
+const DONE_BEFORE_EXIT = 0.4;
+const SLACK = 0.02;
+/** 时间再紧也至少留这么久给打字（秒） */
+const MIN_TYPE_SEC = 0.3;
 
 const WIN_H = 640;
 const PAD_X = 40;
@@ -25,17 +30,29 @@ const MONO_CJK = `${THEME.mono}, ${THEME.font}`;
 
 const chars = (s: string): string[] => [...s];
 
-/** 每行在 local 秒时已经打出的字数（按码点计） */
-export function typedChars(lines: string[], local: number): number[] {
-  const starts = lines.reduce<number[]>((acc, line, i) => (i === 0 ? [TYPE_START] : [...acc, acc[i - 1] + chars(lines[i - 1]).length / CHARS_PER_SEC + LINE_PAUSE]), []);
-  return lines.map((line, i) => Math.min(chars(line).length, Math.max(0, Math.floor((local - starts[i]) * CHARS_PER_SEC + 1e-6))));
+/** 打字速度：默认每秒 28 字；镜头短时加快，保证在出场前 DONE_BEFORE_EXIT 秒打完 */
+export function typingRate(lines: string[], dur: number): number {
+  const total = lines.reduce((n, l) => n + chars(l).length, 0);
+  const available = dur - EXIT_SEC - DONE_BEFORE_EXIT - SLACK - TYPE_START - LINE_PAUSE * (lines.length - 1);
+  return Math.max(CHARS_PER_SEC, total / Math.max(MIN_TYPE_SEC, available));
 }
+
+/** 每行在 local 秒时已经打出的字数（按码点计）；dur 为镜头时长 */
+export function typedChars(lines: string[], local: number, dur = Infinity): number[] {
+  const rate = typingRate(lines, dur);
+  const starts = lines.reduce<number[]>((acc, line, i) => (i === 0 ? [TYPE_START] : [...acc, acc[i - 1] + chars(lines[i - 1]).length / rate + LINE_PAUSE]), []);
+  return lines.map((line, i) => Math.min(chars(line).length, Math.max(0, Math.floor((local - starts[i]) * rate + 1e-6))));
+}
+
+/** 等宽字体下的宽度估算：ASCII 约 0.6em，其余 1em */
+const monoEm = (text: string): number => chars(text).reduce((n, ch) => n + (ch.charCodeAt(0) < 128 ? 0.6 : 1), 0);
+const monoLines = (text: string, widthPx: number, px: number): number => Math.max(1, Math.ceil((monoEm(text) * px) / widthPx));
 
 /** 内容估算高度不超过窗口时的最大字号 */
 function bodyPx(lines: string[]): number {
   const avail = WIN_H - HEADER_H - 40;
   for (let px = MAX_PX; px > MIN_PX; px--) {
-    const rows = lines.reduce((n, l, i) => n + lineCount((i === 0 ? PROMPT : '') + l, BODY_W, px), 0);
+    const rows = lines.reduce((n, l, i) => n + monoLines((i === 0 ? PROMPT : '') + l, BODY_W, px), 0);
     if (rows * px * LINE_HEIGHT + (lines.length - 1) * px * LINE_GAP_EM + px * (PROMPT_GAP_EM - LINE_GAP_EM) <= avail) return px;
   }
   return MIN_PX;
@@ -56,9 +73,9 @@ const Header: React.FC<{ title: string }> = ({ title }) => (
 );
 
 /** 终端卡：深色窗口里逐字打出 lines，第一行是用户输入（带 > 提示符） */
-export const Terminal: React.FC<TemplateProps<'terminal'>> = ({ props, local }) => {
+export const Terminal: React.FC<TemplateProps<'terminal'>> = ({ props, local, dur }) => {
   const { fps } = useVideoConfig();
-  const typed = typedChars(props.lines, local);
+  const typed = typedChars(props.lines, local, dur);
   const px = bodyPx(props.lines);
   const caretAt = typed.reduce((last, n, i) => (n > 0 ? i : last), 0);
   const typing = typed.some((n, i) => n > 0 && n < chars(props.lines[i]).length);

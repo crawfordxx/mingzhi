@@ -5,14 +5,20 @@ import { THEME } from '../theme.js';
 import { Cursor, cursorAt, type Click } from './cursor.js';
 import { Reveal, easeAt, fitFontSize, springAt, type TemplateProps } from './parts.js';
 
-/** 胶囊行顶边在画布上的 y（全屏镜头的上方，避开平台状态栏） */
-export const CTA_TOP = 180;
+/** 胶囊行顶边在画布上的 y（全屏镜头的上方，避开平台状态栏；胶囊中心约 280，与参考片一致） */
+export const CTA_TOP = 230;
 const PILL_W = 280;
 const PILL_H = 100;
 const GAP = 60;
 const CHECK_PX = 34;
-/** 依次为关注红、点赞橙、收藏金 */
-const COLORS = ['#F2334B', '#FF7A2F', '#F5A623'];
+/** 按动作文字取色：关注红、点赞橙、收藏金 */
+const ACTION_COLORS: Record<string, string> = { 关注: '#F2334B', 点赞: '#FF7A2F', 收藏: '#F5A623' };
+/** 其他动作按序号取备用色 */
+const FALLBACK_COLORS = ['#2F6FE0', '#7B4FD6', '#2F9E58'];
+
+export function ctaColor(action: string, index: number): string {
+  return ACTION_COLORS[action] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
+}
 /** 第一次点击时间与间隔（秒） */
 const FIRST_CLICK = 0.5;
 const CLICK_GAP = 0.5;
@@ -55,7 +61,7 @@ export const Cta: React.FC<TemplateProps<'cta'>> = ({ props, local }) => {
         return (
           <Reveal key={i} p={springAt(local, 0.05 + i * 0.08, fps, { damping: 12, mass: 0.6 })} dy={-16} from={0.7}
             style={{ position: 'absolute', left: left0 + i * (PILL_W + GAP), top: CTA_TOP }}>
-            <Pill text={a} color={COLORS[i % COLORS.length]} flip={easeAt(local, clicks[i].t, FLIP_SEC)} press={press} />
+            <Pill text={a} color={ctaColor(a, i)} flip={easeAt(local, clicks[i].t, FLIP_SEC)} press={press} />
           </Reveal>
         );
       })}

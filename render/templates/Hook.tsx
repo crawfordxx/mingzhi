@@ -2,11 +2,13 @@ import React from 'react';
 import { AbsoluteFill, Img, staticFile, useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
 import { balanceLines, tokenize, type Token } from './headline.js';
-import { CONTENT_W, Reveal, SafeArea, fitFontSize, maxFontSize, springAt, textEm, type TemplateProps } from './parts.js';
+import { CONTENT_W, Reveal, SafeArea, clampLines, fitFontSize, maxFontSize, springAt, textEm, type TemplateProps } from './parts.js';
 
 const HEADLINE_PX = 76;
 const HEADLINE_MIN_PX = 50;
 const LINE_HEIGHT = 1.2;
+/** 断行时每行按 94% 行宽排，弥补字宽估算误差 */
+const LINE_MARGIN = 0.94;
 const INDEX_PILL_W = 132;
 const LIME_SOFT = 'rgba(212, 242, 60, 0.12)';
 
@@ -43,10 +45,10 @@ const TopRow: React.FC<{ kicker?: string; index: number; total: number; p: numbe
   );
 };
 
-/** 一行标题：遮罩内从下方滑上来 */
+/** 一行标题：遮罩（只裁下边）内从下方滑上来；估算失准时这一行自动折行，不会被裁掉 */
 const HeadlineLine: React.FC<{ tokens: Token[]; px: number; p: number }> = ({ tokens, px, p }) => (
-  <div style={{ overflow: 'hidden', paddingBottom: px * 0.08 }}>
-    <div style={{ transform: `translateY(${(1 - p) * 110}%)`, whiteSpace: 'nowrap' }}>
+  <div style={{ clipPath: 'inset(-50% -50% 0 -50%)', paddingBottom: px * 0.08 }}>
+    <div style={{ transform: `translateY(${(1 - p) * 110}%)`, overflowWrap: 'anywhere' }}>
       {tokens.map((t, i) => <span key={i} style={t.hot ? { color: THEME.hookLime } : undefined}>{t.text}</span>)}
     </div>
   </div>
@@ -57,7 +59,7 @@ const headlinePx = (text: string): number => Math.max(HEADLINE_MIN_PX, Math.min(
 
 const Headline: React.FC<{ text: string; highlight: string[]; local: number; fps: number }> = ({ text, highlight, local, fps }) => {
   const px = headlinePx(text);
-  const lines = balanceLines(tokenize(text, highlight), CONTENT_W / px);
+  const lines = balanceLines(tokenize(text, highlight), (CONTENT_W * LINE_MARGIN) / px);
   return (
     <div style={{ marginTop: 40, fontSize: px, fontWeight: 800, lineHeight: LINE_HEIGHT, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
       {lines.map((l, i) => <HeadlineLine key={i} tokens={l} px={px} p={springAt(local, 0.12 + i * 0.1, fps, { damping: 22, mass: 0.8 })} />)}
@@ -65,17 +67,20 @@ const Headline: React.FC<{ text: string; highlight: string[]; local: number; fps
   );
 };
 
-/** 数据小胶囊：value · label */
+const STAT_PAD_X = 26;
+
+/** 数据小胶囊：value · label；最宽不超过内容区，放不下一行时折成两行 */
 const Stat: React.FC<{ value: string; label: string; p: number }> = ({ value, label, p }) => {
-  const text = `${value} · ${label}`;
-  const px = fitFontSize(text, CONTENT_W - 60, 30, 20);
+  const px = fitFontSize(`${value} · ${label}`, CONTENT_W - STAT_PAD_X * 2 - 4, 30, 20, 2);
   return (
     <Reveal p={p} dy={20} style={{ marginTop: 36, display: 'flex' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 26px', borderRadius: 30, border: '2px solid rgba(212, 242, 60, 0.55)',
-        background: LIME_SOFT, color: THEME.hookLime, fontSize: px, fontWeight: 600, whiteSpace: 'nowrap' }}>
-        <span style={{ fontWeight: 800 }}>{value}</span>
-        <span style={{ opacity: 0.6 }}>·</span>
-        <span>{label}</span>
+      <div style={{ maxWidth: CONTENT_W, boxSizing: 'border-box', padding: `10px ${STAT_PAD_X}px`, borderRadius: 30, border: '2px solid rgba(212, 242, 60, 0.55)',
+        background: LIME_SOFT, color: THEME.hookLime, fontSize: px, fontWeight: 600, lineHeight: 1.35 }}>
+        <span style={clampLines(2)}>
+          <span style={{ fontWeight: 800 }}>{value}</span>
+          <span style={{ opacity: 0.6, margin: '0 0.45em' }}>·</span>
+          {label}
+        </span>
       </div>
     </Reveal>
   );

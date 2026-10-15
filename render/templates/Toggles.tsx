@@ -2,7 +2,7 @@ import React from 'react';
 import { interpolate, useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
 import { Cursor, cursorAt, type Click } from './cursor.js';
-import { CONTENT_W, CardFrame, Reveal, SafeArea, clampLines, fitFontSize, springAt, type TemplateProps } from './parts.js';
+import { CONTENT_W, CardFrame, EXIT_SEC, Reveal, SafeArea, clampLines, fitFontSize, springAt, type TemplateProps } from './parts.js';
 
 const PAD_X = 44;
 const INNER_W = CONTENT_W - PAD_X * 2;
@@ -16,6 +16,16 @@ const DIVIDER = '2px solid #EFEDE9';
 /** 第一个开关在镜头第几秒被点开，之后每个间隔多久 */
 const FIRST_CLICK = 0.6;
 const CLICK_GAP = 0.5;
+/** 开关拨动动画约多久、最后一次拨完至少在出场前多久（秒） */
+const SWITCH_SEC = 0.3;
+const DONE_BEFORE_EXIT = 0.3;
+
+/** k 次点击的时间：默认间隔 CLICK_GAP；镜头短时压缩间隔，让最后一次拨动在出场前完成 */
+export function clickTimes(k: number, dur: number): number[] {
+  const room = dur - EXIT_SEC - DONE_BEFORE_EXIT - SWITCH_SEC - FIRST_CLICK;
+  const gap = k > 1 ? Math.max(0, Math.min(CLICK_GAP, room / (k - 1))) : 0;
+  return Array.from({ length: k }, (_, j) => FIRST_CLICK + j * gap);
+}
 /** 光标从第一个开关右下方多远处滑进来 */
 const CURSOR_FROM = { x: 150, y: 170 };
 
@@ -32,15 +42,16 @@ const Switch: React.FC<{ p: number }> = ({ p }) => {
 };
 
 /** 每个 on 行的点击：光标尖端落在开关右半边 */
-function clicksFor(rows: { on: boolean }[]): (Click & { row: number })[] {
+function clicksFor(rows: { on: boolean }[], dur: number): (Click & { row: number })[] {
   const onRows = rows.map((r, i) => (r.on ? i : -1)).filter((i) => i >= 0);
-  return onRows.map((row, j) => ({ row, x: INNER_W - TRACK_W * 0.3, y: row * ROW_H + ROW_H / 2 + 8, t: FIRST_CLICK + j * CLICK_GAP }));
+  const times = clickTimes(onRows.length, dur);
+  return onRows.map((row, j) => ({ row, x: INNER_W - TRACK_W * 0.3, y: row * ROW_H + ROW_H / 2 + 8, t: times[j] }));
 }
 
 /** 开关设置卡：小字标题 + 每行 label 与开关；on 的开关被光标依次点开；底部红色注释 */
-export const Toggles: React.FC<TemplateProps<'toggles'>> = ({ props, local }) => {
+export const Toggles: React.FC<TemplateProps<'toggles'>> = ({ props, local, dur }) => {
   const { fps } = useVideoConfig();
-  const clicks = clicksFor(props.rows);
+  const clicks = clicksFor(props.rows, dur);
   const clickOf = new Map(clicks.map((c) => [c.row, c.t]));
   const cursor = clicks.length ? cursorAt(local, { x: clicks[0].x + CURSOR_FROM.x, y: clicks[0].y + CURSOR_FROM.y }, clicks) : null;
   return (

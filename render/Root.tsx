@@ -11,6 +11,7 @@ export const Root: React.FC = () => (
     <Composition id="Talk" component={Talk} width={CANVAS.width} height={CANVAS.height} fps={CANVAS.fps} durationInFrames={CANVAS.fps}
       defaultProps={EMPTY} calculateMetadata={({ props }: { props: TalkProps }) => ({ durationInFrames: Math.max(1, Math.round(props.durationSec * CANVAS.fps)) })} />
     <Composition id="CardStill" component={CardStill} width={CANVAS.width} height={CANVAS.seam} fps={CANVAS.fps} durationInFrames={CANVAS.fps * 2}
-      defaultProps={{ card: { template: 'title', props: { title: '示例' } } as CardSpec }} />
+      defaultProps={{ card: { template: 'title', props: { title: '示例' } } as CardSpec } as { card: CardSpec; dur?: number }}
+      calculateMetadata={({ props }: { props: { card: CardSpec; dur?: number } }) => ({ durationInFrames: Math.max(1, Math.round((props.dur ?? 2) * CANVAS.fps)) })} />
   </>
 );

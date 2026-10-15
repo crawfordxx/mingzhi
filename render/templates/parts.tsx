@@ -5,17 +5,25 @@ import { THEME } from '../theme.js';
 
 /** 某个模板的 props 类型 */
 export type PropsOf<T extends TemplateId> = Extract<CardSpec, { template: T }>['props'];
-export type TemplateProps<T extends TemplateId> = { props: PropsOf<T>; local: number };
+/** local：镜头内秒数（从 0 开始）；dur：镜头总时长（秒），用来在出场前收拢动画 */
+export type TemplateProps<T extends TemplateId> = { props: PropsOf<T>; local: number; dur: number };
+
+/** 卡片出场：镜头最后 EXIT_SEC 秒淡出（CardLayer 与各模板的节奏收拢共用） */
+export const EXIT_SEC = 0.25;
 
 /** 卡片区安全区：左右边距 60；上方避开平台状态栏，下方避开压在分界线上的字幕 */
 export const SAFE = { side: 60, top: 120, bottom: 850 } as const;
 export const CONTENT_W = 1080 - SAFE.side * 2;
 export const SAFE_H = SAFE.bottom - SAFE.top;
 
-// ---------- 文字尺寸估算（不量 DOM：CJK 按 1em，ASCII 约 0.55em） ----------
+// ---------- 文字尺寸估算（不量 DOM：CJK 按 1em，大写字母与数字约 0.65em，其余 ASCII 约 0.55em） ----------
+
+/** 单行不折行（nowrap）时的宽度余量，弥补估算误差 */
+const ONE_LINE_MARGIN = 0.94;
 
 const charEm = (ch: string): number => {
   if (ch === ' ') return 0.3;
+  if (/[A-Z0-9]/.test(ch)) return 0.65;
   return ch.charCodeAt(0) < 128 ? 0.55 : 1;
 };
 
@@ -30,10 +38,10 @@ export function maxFontSize(text: string, widthPx: number, lines: number): numbe
   return em <= 0 ? Infinity : Math.floor((widthPx * lines) / em);
 }
 
-/** 让文字放进 maxWidthPx：优先少折行——能以不小于 minPx 的字号排成 1 行就排 1 行，否则再试 2 行……；字号不超过 basePx，放不下时取 minPx（由 clampLines 兜底） */
+/** 让文字放进 maxWidthPx：优先少折行——能以不小于 minPx 的字号排成 1 行就排 1 行（留 6% 余量），否则再试 2 行……；字号不超过 basePx，放不下时取 minPx（由 clampLines 兜底） */
 export function fitFontSize(text: string, maxWidthPx: number, basePx: number, minPx: number, maxLines = 1): number {
   for (let lines = 1; lines <= maxLines; lines++) {
-    const px = maxFontSize(text, maxWidthPx, lines);
+    const px = maxFontSize(text, lines === 1 ? maxWidthPx * ONE_LINE_MARGIN : maxWidthPx, lines);
     if (px >= minPx) return Math.min(basePx, px);
   }
   return minPx;

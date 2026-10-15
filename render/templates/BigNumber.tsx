@@ -14,9 +14,9 @@ const GREEN = THEME.badge['收益'];
 /** 纯数字（可带千分位与小数）才做滚动 */
 const PURE_NUMBER = /^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/;
 
-/** 数字在 0.6 秒内从 0 滚到目标值；非纯数字直接显示 */
+/** 数字在 0.6 秒内从 0 滚到目标值；非纯数字直接显示；滚完显示原字符串（保留前导零等写法） */
 export function countUp(value: string, p: number): string {
-  if (!PURE_NUMBER.test(value)) return value;
+  if (!PURE_NUMBER.test(value) || p >= 1) return value;
   const decimals = value.split('.')[1]?.length ?? 0;
   const target = Number(value.replace(/,/g, ''));
   const grouped = value.includes(',');
