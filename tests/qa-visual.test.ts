@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CostMeter } from '../src/cost/meter.js';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
 import { KexiangClient, type ChatOptions, type LlmClient } from '../src/llm/kexiang.js';
 import type { CardSpec, Storyboard } from '../src/storyboard/schema.js';
 
@@ -49,7 +50,7 @@ function fake(scores: unknown[], revisions: unknown[] = []) {
   } };
   return { client, calls };
 }
-const run = (client: LlmClient, m = meter(), sb: Storyboard = storyboard) => qaCards({ client, workDir: dir, storyboard: sb, captions: caps, meter: m });
+const run = (client: LlmClient, m = meter(), sb: Storyboard = storyboard) => qaCards({ client, workDir: dir, storyboard: sb, captions: caps, meter: m, ffmpeg: 'ffmpeg' });
 
 beforeEach(() => { vi.mocked(renderCardFrames).mockClear(); vi.mocked(withBundle).mockClear(); made.files.length = 0; });
 
@@ -160,9 +161,20 @@ describe('qaCards', () => {
     expect(res.report[1].passed).toBe(true);
     expect(res.storyboard.shots[0].card).toEqual(card('原始'));
   });
+  it('封面预留：预算够自检但不够预留封面的钱时不检查，原因写明已为封面预留', async () => {
+    const res = await qaCards({ client: fake([sc(9), sc(9)]).client, workDir: dir, storyboard, captions: caps, meter: meter(1), ffmpeg: 'ffmpeg', reserveYuan: 1.25 });
+    expect(res.report.map((e) => e.skipped)).toEqual(['预算不足，未检查（已为封面预留 ¥1.25）', '预算不足，未检查（已为封面预留 ¥1.25）']);
+    expect(renderCardFrames).not.toHaveBeenCalled();
+    const enough = await qaCards({ client: fake([sc(9), sc(9)]).client, workDir: dir, storyboard, captions: caps, meter: meter(2), ffmpeg: 'ffmpeg', reserveYuan: 1.25 });
+    expect(enough.report.every((e) => e.passed)).toBe(true);
+  });
+  it('余额不足：打分阶段抛出的 InsufficientBalanceError 不当作自检失败，直接往外抛', async () => {
+    const client: LlmClient = { chatJson: async () => { throw new InsufficientBalanceError(); } };
+    await expect(run(client)).rejects.toBeInstanceOf(InsufficientBalanceError);
+  });
   it('按镜头时长渲染三联图；所有卡片共用一次打包，打完分删除三联图', async () => {
     await run(fake([sc(9), sc(9)]).client);
-    expect(vi.mocked(renderCardFrames).mock.calls.map((c) => [c[2], c[3]])).toEqual([[3, 'bundle://test'], [3, 'bundle://test']]);
+    expect(vi.mocked(renderCardFrames).mock.calls.map((c) => [c[2], c[3], c[4]])).toEqual([[3, 'ffmpeg', 'bundle://test'], [3, 'ffmpeg', 'bundle://test']]);
     expect(withBundle).toHaveBeenCalledTimes(1);
     expect(made.files).toHaveLength(2);
     expect(made.files.some((f) => existsSync(f))).toBe(false);
@@ -175,6 +187,18 @@ describe('qaCards', () => {
     expect(res.report.map((r) => r.shotIndex)).toEqual([0, 2]);
     expect(res.report.every((r) => !r.passed && r.revised === 0 && r.skipped === '打包失败：webpack 炸了')).toBe(true);
     expect(calls).toHaveLength(0);
+  });
+  it('检查都跑完后清理打包目录失败：已付费的检查结果和改写保留，进度里说明清理失败', async () => {
+    vi.mocked(withBundle).mockImplementationOnce(async (_dir: string, fn: (url: string) => Promise<unknown>) => {
+      await fn('bundle://test');
+      throw new Error('rm 失败');
+    });
+    const messages: string[] = [];
+    const { client } = fake([sc(5), sc(9), sc(9)], [{ card: card('改写后') }]);
+    const res = await qaCards({ client, workDir: dir, storyboard, captions: caps, meter: meter(), ffmpeg: 'ffmpeg', onProgress: (m) => messages.push(m) });
+    expect(res.report.map((r) => r.passed)).toEqual([true, true]);
+    expect(res.storyboard.shots[0].card).toEqual(card('改写后'));
+    expect(messages.some((m) => m.includes('清理失败') && m.includes('rm 失败'))).toBe(true);
   });
   it('打分抛错时三联图仍被删除', async () => {
     const client: LlmClient = { chatJson: async () => { throw new Error('网络断了'); } };

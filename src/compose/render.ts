@@ -5,10 +5,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundle } from '@remotion/bundler';
 import { renderMedia, renderStill, selectComposition } from '@remotion/renderer';
-import type { CardSpec, TalkProps } from '../storyboard/schema.js';
+import { CANVAS, type CardSpec, type TalkProps } from '../storyboard/schema.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { CoverProps } from '../cover/styles.js';
-import { loadConfig } from '../config.js';
 import { run } from '../media/exec.js';
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'render', 'index.ts');
@@ -64,13 +63,12 @@ export async function renderCardStill(opts: { workDir: string; card: CardSpec; o
 }
 
 const STRIP_EDGE_SEC = 0.3;
-const CARD_FPS = 30;
 
 /** 自检取样时刻：镜头开头后 0.3 秒、中点、镜头结束前 0.3 秒（镜头不足 0.6 秒时三点收拢到中点附近），换算成帧并夹在合成范围内 */
 export function cardSampleFrames(durationSec: number): number[] {
-  const last = Math.max(0, Math.round(durationSec * CARD_FPS) - 1);
+  const last = Math.max(0, Math.round(durationSec * CANVAS.fps) - 1);
   const edge = Math.min(STRIP_EDGE_SEC, durationSec / 2);
-  return [edge, durationSec / 2, durationSec - edge].map((t) => Math.min(last, Math.max(0, Math.round(t * CARD_FPS))));
+  return [edge, durationSec / 2, durationSec - edge].map((t) => Math.min(last, Math.max(0, Math.round(t * CANVAS.fps))));
 }
 
 /** 在已有打包上渲染三个取样帧到 files */
@@ -80,8 +78,8 @@ async function renderSamples(serveUrl: string, card: CardSpec, durationSec: numb
   for (const s of stills) await renderStill({ composition, serveUrl, inputProps, output: s.file, frame: s.frame, imageFormat: 'png' });
 }
 
-/** 视觉自检用的三联图：卡片在镜头开头后 0.3 秒、中点、结束前 0.3 秒的静帧，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径（调用方用完自行删除）。传入 serveUrl 时复用已有打包（批量检查时只打一次包），否则自己打包 */
-export async function renderCardFrames(workDir: string, card: CardSpec, durationSec: number, serveUrl?: string): Promise<string> {
+/** 视觉自检用的三联图：卡片在镜头开头后 0.3 秒、中点、结束前 0.3 秒的静帧，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径（调用方用完自行删除）。ffmpeg 由调用方传入（不在渲染层读配置）。传入 serveUrl 时复用已有打包（批量检查时只打一次包），否则自己打包 */
+export async function renderCardFrames(workDir: string, card: CardSpec, durationSec: number, ffmpeg: string, serveUrl?: string): Promise<string> {
   const tmp = mkdtempSync(join(tmpdir(), 'mz-strip-'));
   const outDir = join(workDir, 'qa');
   mkdirSync(outDir, { recursive: true });
@@ -91,7 +89,7 @@ export async function renderCardFrames(workDir: string, card: CardSpec, duration
     if (serveUrl) await renderSamples(serveUrl, card, durationSec, stills);
     else await withBundle(workDir, (url) => renderSamples(url, card, durationSec, stills));
     const inputs = stills.flatMap((s) => ['-i', s.file]);
-    await run(loadConfig().ffmpeg, ['-v', 'error', '-y', ...inputs, '-filter_complex', 'hstack=inputs=3,scale=1620:480', '-frames:v', '1', output]);
+    await run(ffmpeg, ['-v', 'error', '-y', ...inputs, '-filter_complex', 'hstack=inputs=3,scale=1620:480', '-frames:v', '1', output]);
     return output;
   } finally {
     rmSync(tmp, { recursive: true, force: true });

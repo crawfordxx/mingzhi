@@ -63,14 +63,24 @@ export async function scoreCard(client: LlmClient, stripPng: string, card: CardS
 }
 
 export interface QaCardsOptions {
-  client: LlmClient; workDir: string; storyboard: Storyboard; captions: TimedCaption[]; meter: CostMeter; onProgress?: (msg: string) => void;
+  client: LlmClient; workDir: string; storyboard: Storyboard; captions: TimedCaption[]; meter: CostMeter;
+  /** 拼三联图用的 ffmpeg 路径 */
+  ffmpeg: string;
+  /** 给后续步骤（封面）预留的花费（元），每次预算检查一并扣除，缺省 0 */
+  reserveYuan?: number;
+  onProgress?: (msg: string) => void;
 }
+
+/** 再花一次视觉调用（并为封面留出预留）是否仍在预算内 */
+const canAffordStep = (opts: QaCardsOptions): boolean => opts.meter.canSpend(STEP_BUDGET_YUAN + (opts.reserveYuan ?? 0));
+/** 预算不足时的原因后缀：有预留时写明，免得误以为总预算耗尽 */
+const reserveNote = (opts: QaCardsOptions): string => ((opts.reserveYuan ?? 0) > 0 ? `（已为封面预留 ¥${(opts.reserveYuan ?? 0).toFixed(2)}）` : '');
 
 const captionsIn = (captions: TimedCaption[], shot: Shot): TimedCaption[] => captions.filter((c) => c.end > shot.start && c.start < shot.end);
 
 /** 评分一个版本：复用打包渲染三帧再打分，打完分就删掉三联图 */
 async function evaluate(opts: QaCardsOptions, serveUrl: string, shot: Shot, card: CardSpec): Promise<Version> {
-  const strip = await renderCardFrames(opts.workDir, card, shot.end - shot.start, serveUrl);
+  const strip = await renderCardFrames(opts.workDir, card, shot.end - shot.start, opts.ffmpeg, serveUrl);
   try {
     return { card, score: await scoreCard(opts.client, strip, card) };
   } finally {
@@ -97,13 +107,13 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
   let card = shot.card as CardSpec;
   try {
     for (;;) {
-      if (!opts.meter.canSpend(STEP_BUDGET_YUAN)) { skipped = '预算不足，停止检查'; break; }
+      if (!canAffordStep(opts)) { skipped = `预算不足，停止检查${reserveNote(opts)}`; break; }
       const version = await evaluate(opts, serveUrl, shot, card);
       versions.push(version);
       scores.push(version.score);
       opts.onProgress?.(`第 ${index + 1} 镜卡片自检：版式 ${version.score.layout} 层级 ${version.score.hierarchy} 动效 ${version.score.motion} 品牌 ${version.score.brand}`);
       if (isPass(version.score) || revised >= MAX_REVISIONS) break;
-      if (!opts.meter.canSpend(STEP_BUDGET_YUAN)) { skipped = '预算不足，停止重写'; break; }
+      if (!canAffordStep(opts)) { skipped = `预算不足，停止重写${reserveNote(opts)}`; break; }
       const base = versions.reduce(better);
       const next = await reviseCard(opts.client, { ...shot, card: base.card }, captionsIn(opts.captions, shot), base.score, images);
       if (!next) { skipped = '重写结果无效，保留现有版本'; break; }
@@ -119,6 +129,12 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
   return { entry: { shotIndex: index, scores, revised, passed, ...(skipped ? { skipped } : {}) }, card: best?.card ?? (shot.card as CardSpec) };
 }
 
+/** 打包失败：分镜原样返回，每个目标镜头都标注原因 */
+function failedBundle(opts: QaCardsOptions, targets: number[], err: unknown): { storyboard: Storyboard; report: CardQaEntry[] } {
+  const skipped = `打包失败：${err instanceof Error ? err.message : String(err)}`;
+  return { storyboard: opts.storyboard, report: targets.map((shotIndex) => ({ shotIndex, scores: [], revised: 0, passed: false, skipped })) };
+}
+
 /** 逐个检查分屏卡片，返回替换后的分镜与报告；打包、检查或重写出错只标注、不中断，保留原卡片 */
 export async function qaCards(opts: QaCardsOptions): Promise<{ storyboard: Storyboard; report: CardQaEntry[] }> {
   const images = usedImages(opts.storyboard);
@@ -126,23 +142,26 @@ export async function qaCards(opts: QaCardsOptions): Promise<{ storyboard: Story
   const report: CardQaEntry[] = [];
   const targets = opts.storyboard.shots.flatMap((s, i) => (s.layout === 'split' && s.card ? [i] : []));
   if (targets.length > 0) {
+    let checked = false; // 逐张检查已全部跑完（此后 withBundle 再抛错只可能是清理打包目录失败）
     try {
       // 全部卡片共用一次打包
       await withBundle(opts.workDir, async (serveUrl) => {
         for (const index of targets) {
-          if (!opts.meter.canSpend(STEP_BUDGET_YUAN)) {
-            report.push({ shotIndex: index, scores: [], revised: 0, passed: false, skipped: '预算不足，未检查' });
+          if (!canAffordStep(opts)) {
+            report.push({ shotIndex: index, scores: [], revised: 0, passed: false, skipped: `预算不足，未检查${reserveNote(opts)}` });
             continue;
           }
           const { entry, card } = await checkOne(opts, serveUrl, index, images);
           report.push(entry);
           cards.set(index, card);
         }
+        checked = true;
       });
     } catch (err) {
       rethrowIfBalance(err);
-      const skipped = `打包失败：${err instanceof Error ? err.message : String(err)}`;
-      return { storyboard: opts.storyboard, report: targets.map((shotIndex) => ({ shotIndex, scores: [], revised: 0, passed: false, skipped })) };
+      // 检查结果已经花了钱：清理失败时保留结果，只在进度里说明
+      if (checked) opts.onProgress?.(`卡片自检的打包目录清理失败（检查结果已保留）：${err instanceof Error ? err.message : String(err)}`);
+      else return failedBundle(opts, targets, err);
     }
   }
   const shots = opts.storyboard.shots.map((s, i): Shot => (cards.has(i) ? { ...s, card: cards.get(i) } : s));

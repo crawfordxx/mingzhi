@@ -83,7 +83,7 @@ export const Terminal: React.FC<TemplateProps<'terminal'>> = ({ props, local, du
       <Reveal p={springAt(local, 0, fps)} dy={20}>
         <div style={{ height: WIN_H, background: THEME.terminal, borderRadius: 22, boxShadow: '0 28px 64px rgba(20, 16, 12, 0.30)', overflow: 'hidden' }}>
           <Header title={props.title ?? 'Claude Code'} />
-          <div style={{ padding: `4px ${PAD_X}px`, fontFamily: MONO_CJK, fontSize: px, lineHeight: LINE_HEIGHT, color: '#E6E6E6', wordBreak: 'break-all' }}>
+          <div style={{ padding: `4px ${PAD_X}px`, fontFamily: MONO_CJK, fontSize: px, lineHeight: LINE_HEIGHT, wordBreak: 'break-all' }}>
             {props.lines.map((line, i) => (i > 0 && typed[i] === 0 ? null : (
               <div key={i} style={{ marginTop: i === 0 ? 0 : `${i === 1 ? PROMPT_GAP_EM : LINE_GAP_EM}em`, fontWeight: i === 0 ? 700 : 500, color: i === 0 ? THEME.termInk.head : THEME.termInk.body }}>
                 {i === 0 ? <span style={{ color: THEME.termInk.prompt }}>{PROMPT}</span> : null}

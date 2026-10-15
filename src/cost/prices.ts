@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 
@@ -15,24 +15,45 @@ export const FALLBACK_PRICES: Record<string, Price> = {
   'openai/gpt-5.6-luna': { input: 0.0014, output: 0.0084 },
 };
 
-const ModelsBody = z.object({
-  list: z.array(z.object({ model: z.string(), mode: z.string().optional(), input_price: z.unknown(), output_price: z.unknown() }).passthrough()),
-});
+const ModelsBody = z.object({ list: z.array(z.unknown()) });
+const ModelItem = z.object({ model: z.string(), mode: z.string().optional(), input_price: z.unknown(), output_price: z.unknown() }).passthrough();
+const LEADING_NUMBER = /^-?\d+(\.\d+)?/;
 const Cache = z.object({ fetchedAt: z.number(), prices: z.record(z.object({ input: z.number(), output: z.number() })) });
 
-const priceNumber = (v: unknown): number => (typeof v === 'string' || typeof v === 'number' ? Number(v) : NaN);
+/** 价格取开头的数字（如「0.0105元」）；空串、「-」、负数都当作没有价格，不能按 ¥0 记 */
+function priceNumber(v: unknown): number {
+  const text = typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : '';
+  const m = LEADING_NUMBER.exec(text);
+  const n = m ? Number.parseFloat(m[0]) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : NaN;
+}
 
-/** 解析价格表响应；阶梯计价（tiered）或价格为 '-' 的模型跳过 */
+/** 解析价格表响应：逐条校验，坏的一条不影响其他；阶梯计价（tiered）或没有有效价格的模型跳过 */
 export function parsePrices(body: unknown): Record<string, Price> {
   const parsed = ModelsBody.safeParse(body);
   if (!parsed.success) return {};
-  const entries = parsed.data.list.flatMap((m): [string, Price][] => {
+  const entries = parsed.data.list.flatMap((raw): [string, Price][] => {
+    const item = ModelItem.safeParse(raw);
+    if (!item.success) return [];
+    const m = item.data;
     const input = priceNumber(m.input_price);
     const output = priceNumber(m.output_price);
-    if (m.mode === 'tiered' || !Number.isFinite(input) || !Number.isFinite(output)) return [];
+    if (m.mode === 'tiered' || Number.isNaN(input) || Number.isNaN(output)) return [];
     return [[m.model, { input, output }]];
   });
   return Object.fromEntries(entries);
+}
+
+/** 先写临时文件再改名，进程中途被杀也不会留下写了一半的缓存 */
+function writeCache(cacheFile: string, fetchedAt: number, prices: Record<string, Price>): void {
+  mkdirSync(dirname(cacheFile), { recursive: true });
+  const tmp = `${cacheFile}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify({ fetchedAt, prices }));
+    renameSync(tmp, cacheFile);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
 }
 
 function readCache(cacheFile: string): z.infer<typeof Cache> | undefined {
@@ -63,8 +84,7 @@ export async function loadPrices(cacheFile: string, fetchImpl: typeof fetch = fe
   try {
     const prices = await fetchPrices(fetchImpl, apiKey);
     try {
-      mkdirSync(dirname(cacheFile), { recursive: true });
-      writeFileSync(cacheFile, JSON.stringify({ fetchedAt: now(), prices }));
+      writeCache(cacheFile, now(), prices);
     } catch {
       // 缓存写不进去不影响本次使用
     }

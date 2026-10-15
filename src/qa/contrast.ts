@@ -25,7 +25,7 @@ const NEAR_BLACK = '#1C1B19';
 const BLACK = '#000000';
 const MIN_READABLE = 4.5;
 
-/** 彩色底上的文字色：白或近黑里取对比度高的；仍不足 4.5 时退到纯黑（鲜亮的红/橙底上白字不够、近黑字刚好差一点） */
+/** 彩色底上的文字色：白或近黑里取对比度高的；仍不足 4.5 时退到纯黑（目前只有红底会走到这一步：白字不够、近黑字刚好差一点） */
 export function readableOn(fill: string): string {
   const best = [WHITE, NEAR_BLACK].reduce((a, b) => (contrastRatio(b, fill) > contrastRatio(a, fill) ? b : a));
   return contrastRatio(best, fill) >= MIN_READABLE ? best : BLACK;

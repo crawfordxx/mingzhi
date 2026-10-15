@@ -17,15 +17,18 @@ export const COVER_ART_YUAN = 0.6;
 export const COVER_READ_YUAN = 0.05;
 export const COVER_YUAN = 2 * COVER_ART_YUAN + COVER_READ_YUAN;
 export const COVER_HIGH_FACTOR = 2;
-/** 卡片自检：每 6 秒 1 张卡，每张 ¥0.02，重写最多重检 ×3 */
+/** 卡片自检：每 6 秒 1 张卡，每张 ¥0.05（打分一次约 ¥0.02，加三联图与重写），最坏每张反复检 5 轮 */
 export const QA_SEC_PER_CARD = 6;
-export const QA_CARD_YUAN = 0.02;
-export const QA_HIGH_FACTOR = 3;
+export const QA_CARD_YUAN = 0.05;
+export const QA_HIGH_FACTOR = 5;
 
 /** yuan 是该项的高估值，low 是低估值（可能为 0） */
 export interface EstimateItem { label: string; yuan: number; low: number }
 export interface Estimate { low: number; high: number; items: EstimateItem[] }
 export interface EstimateOptions { durationSec: number; bgPrompt: boolean; broll: boolean; maxVideos: number; qa: boolean; cover?: boolean }
+
+/** 这三步有意不查预算（没有它们出不了片），预估里单独核对它们是否已超上限 */
+const REQUIRED_LABELS: readonly string[] = ['剪口误', '字幕校对', '分镜'];
 
 const round2 = (v: number): number => Math.round(v * 100) / 100;
 const item = (label: string, low: number, high: number): EstimateItem => ({ label, low: round2(low), yuan: round2(high) });
@@ -55,6 +58,8 @@ const range = (low: number, high: number): string => (low === high ? yuan(high) 
 /** 预估的多行文字：总额区间、预算与各项明细；最高值超出预算时附降级提示 */
 export function formatEstimate(est: Estimate, budgetYuan: number): string {
   const lines = [`预估花费 ${range(est.low, est.high)}（上限 ${yuan(budgetYuan)}）`, ...est.items.map((i) => `  · ${i.label} ${range(i.low, i.yuan)}`)];
+  const required = round2(est.items.filter((i) => REQUIRED_LABELS.includes(i.label)).reduce((s, i) => s + i.yuan, 0));
+  if (required > budgetYuan) lines.push(`必需步骤（剪口误、字幕校对、分镜）约 ${yuan(required)} 已超上限 ${yuan(budgetYuan)}，仍会花费`);
   if (est.high > budgetYuan) lines.push(`预估最高 ${yuan(est.high)}，超过上限 ${yuan(budgetYuan)}：将自动降级（不用 Seedance，必要时少生图）`);
   return lines.join('\n');
 }

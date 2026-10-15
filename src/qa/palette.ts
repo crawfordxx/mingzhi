@@ -78,6 +78,7 @@ export function defaultPalette(): PalettePair[] {
     { fg: THEME.hint, bg: THEME.card, label: '浏览器加载提示 hint/card' },
     { fg: THEME.url.fg, bg: THEME.url.bg, label: '地址栏 url.fg/bg' },
     { fg: WHITE, bg: THEME.hookBg, label: 'Hook 标题 白/hookBg' },
+    { fg: WHITE, bg: THEME.ink, label: '对比条结论按钮 白字/ink 底' },
     ...Object.entries(THEME.termInk).map(([k, fg]) => ({ fg, bg: THEME.terminal, label: `终端 ${k} 字/terminal` })),
     ...filledPairs(),
     ...glassPairs(),

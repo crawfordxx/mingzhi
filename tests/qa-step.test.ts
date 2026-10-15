@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { CostMeter } from '../src/cost/meter.js';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
 import type { LlmClient } from '../src/llm/kexiang.js';
 import { CANVAS, type Storyboard } from '../src/storyboard/schema.js';
 import { FULL_CAPTION_Y } from '../src/captions/styles.js';
@@ -44,11 +45,36 @@ describe('runQaCards', () => {
     const meter = new CostMeter({}, 5);
     const seen: unknown[] = [];
     const calls: { step: string; message: string; patch?: ProjectPatch }[] = [];
-    const out = await runQaCards({ llm, workDir: '/w', meter, qaCards: async (o) => { seen.push(o.client, o.workDir, o.meter); return { storyboard: revised, report: REPORT }; } },
+    const out = await runQaCards({ llm, workDir: '/w', meter, ffmpeg: 'ff', qaCards: async (o) => { seen.push(o.client, o.workDir, o.meter, o.ffmpeg); return { storyboard: revised, report: REPORT }; } },
       SB, [], (step, message, patch) => { calls.push({ step, message, patch }); return {} as never; });
     expect(out).toEqual({ storyboard: revised, report: REPORT });
-    expect(seen).toEqual([llm, '/w', meter]);
+    expect(seen).toEqual([llm, '/w', meter, 'ff']);
     expect(calls).toEqual([{ step: 'qa-cards', message: '卡片自检 4 张：通过 2、重写 3 次、跳过 1 · 跳过原因：预算不足，未检查', patch: { storyboard: revised, qa: { cards: REPORT, hard: [] } } }]);
+  });
+});
+
+describe('runQaCards 出错处理', () => {
+  const calls: { step: string; message: string; patch?: ProjectPatch }[] = [];
+  const complete = (step: 'qa-cards', message: string, patch?: ProjectPatch): never => { calls.push({ step, message, patch }); return {} as never; };
+
+  it('自检本身抛错：记一条进度、沿用原分镜、报告为空，不让出片失败', async () => {
+    calls.length = 0;
+    const out = await runQaCards({ llm, workDir: '/w', meter: new CostMeter({}, 5), ffmpeg: 'ff', qaCards: async () => { throw new Error('渲染崩了'); } }, SB, [], complete);
+    expect(out).toEqual({ storyboard: SB, report: [] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].message).toBe('卡片自检失败，已跳过（成片不受影响）：渲染崩了');
+  });
+
+  it('余额不足照常往外抛，不当作自检失败', async () => {
+    calls.length = 0;
+    await expect(runQaCards({ llm, workDir: '/w', meter: new CostMeter({}, 5), ffmpeg: 'ff', qaCards: async () => { throw new InsufficientBalanceError(); } }, SB, [], complete)).rejects.toBeInstanceOf(InsufficientBalanceError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('把封面预留 reserveYuan 与 ffmpeg 交给自检', async () => {
+    const seen: unknown[] = [];
+    await runQaCards({ llm, workDir: '/w', meter: new CostMeter({}, 5), ffmpeg: 'ff', reserveYuan: 1.25, qaCards: async (o) => { seen.push(o.reserveYuan, o.ffmpeg); return { storyboard: SB, report: [] }; } }, SB, [], complete);
+    expect(seen).toEqual([1.25, 'ff']);
   });
 });
 

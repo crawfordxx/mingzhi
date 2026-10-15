@@ -298,6 +298,18 @@ describe('runPipeline 失败时保留花费', () => {
   });
 });
 
+describe('runPipeline finally 不掩盖原错误', () => {
+  it('收尾写 project.json 失败（路径被目录占用）时，仍抛出步骤里的原始错误', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-fail2-'));
+    mkdirSync(join(workDir, 'project.json')); // 让 finally 里的写盘必然失败
+    const input = join(workDir, 'silent.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=270x480:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input]);
+    const llm: LlmClient = { chatJson: async () => { throw new Error('不应调用模型'); } };
+    await expect(runPipeline({ input, workDir, output: join(workDir, 'out.mp4'), cfg, llm })).rejects.toThrow('没有音轨');
+  });
+});
+
 const BROLL_STORYBOARD = { bgm: 'upbeat', coverTitle: { title: '钱放哪里', subtitle: '应急金' }, shots: [
   { start: 0, end: 3, layout: 'split', card: { template: 'hook', props: { index: 1, total: 1, headline: '钱要放在取得到的地方', highlight: ['取得到'], visual: { source: 'video', prompt: 'a jar of coins on a wooden table, slow push in' } } } },
   { start: 3, end: 8, layout: 'split', card: { template: 'photo', props: { label: '应急金', visual: { source: 'generate', prompt: 'a savings jar on a desk, editorial photo' } } } },
@@ -360,6 +372,21 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     expect(attempts).toBe(1);
     const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
     expect(project.costs).toMatchObject({ total: 0.6, budget: 10 });
+  }, 240_000);
+
+  it('封面预留接线：封面开启时 B-roll 预算检查扣掉 COVER_YUAN，--no-cover 时不扣', async () => {
+    const cfg = loadConfig({});
+    /** 跑到卡片自检就用余额不足错误中止（只关心 B-roll 取了几张图），返回生图次数 */
+    const imagesFetched = async (cover: false | undefined): Promise<number> => {
+      const workDir = mkdtempSync(join(tmpdir(), 'mz-br-'));
+      const { deps, calls } = fakeBrollDeps(cfg.ffmpeg);
+      const stop: QaDeps = { qaCards: async () => { throw new InsufficientBalanceError('测试中止'); } };
+      await expect(runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps, qaDeps: stop, ...(cover === false ? { cover } : {}),
+        meter: new CostMeter({}, 1.4), broll: { enabled: true, maxVideos: 0, budgetYuan: 1.4 } })).rejects.toThrow('测试中止');
+      return calls.image.length;
+    };
+    expect(await imagesFetched(undefined)).toBe(0); // 0.2 + 封面预留 1.25 > 1.4
+    expect(await imagesFetched(false)).toBe(2);
   }, 240_000);
 
   it('关闭：不调用素材依赖，只靠 visual 的 photo 被去掉并补成全屏，project.json 无 broll', async () => {

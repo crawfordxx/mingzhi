@@ -89,7 +89,7 @@ function fixCtaActions(res: NormalizeResult): NormalizeResult {
 /** 让 Gemini 为字幕设计分镜并归一化；不合格过多或卡片太少时带原因重试 1 次（重试失败则保留首次结果）；首次请求失败直接抛出，由流程决定是否降级 */
 export async function generateStoryboard(client: LlmClient, captions: TimedCaption[], durationSec: number, availableImages: string[]): Promise<NormalizeResult & { attempts: number; retryError?: string }> {
   const user = buildUserMessage(captions, durationSec, availableImages);
-  const ask = (message: string) => client.chatJson({ model: STORYBOARD_MODEL, system: SYSTEM_PROMPT, user: message, reasoningEffort: 'low' });
+  const ask = (message: string) => client.chatJson({ model: STORYBOARD_MODEL, system: SYSTEM_PROMPT, user: message, reasoningEffort: 'low', label: '分镜' });
 
   const raw1 = await ask(user);
   const first = normalizeStoryboard(raw1, durationSec, availableImages);

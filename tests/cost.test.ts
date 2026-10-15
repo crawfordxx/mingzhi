@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { searchUrls } from '../src/broll/search.js';
 import { CostMeter } from '../src/cost/meter.js';
@@ -68,15 +68,44 @@ describe('CostMeter', () => {
     expect(m.canSpend(0)).toBe(false);
   });
 
-  it('entries 是副本，外部改动不影响账本', () => {
+  it('entries 是冻结的快照：数组与条目都改不动，也不影响账本', () => {
     const m = meter();
+    m.addChat(GEMINI, { prompt_tokens: 1000, completion_tokens: 1 });
+    const snapshot = m.entries;
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(() => (snapshot as unknown[]).push({})).toThrow(TypeError);
+    expect(() => { (snapshot[0] as { yuan: number }).yuan = 99; }).toThrow(TypeError);
+    expect(() => { (snapshot[0].tokens as { input: number }).input = 99; }).toThrow(TypeError);
     m.addTask('img', 1);
-    (m.entries as unknown[]).push({});
-    expect(m.entries).toHaveLength(1);
+    expect(snapshot).toHaveLength(1); // 旧快照不随新记账变化
+    expect(m.entries).toHaveLength(2);
+  });
+
+  it('对话花费四舍五入到 0.0001 元，没有浮点尾巴', () => {
+    expect(meter().addChat(GEMINI, { prompt_tokens: 1000, completion_tokens: 2000 }).yuan).toBe(0.1365);
+    expect(meter().addChat('openai/gpt-5.6-luna', { prompt_tokens: 3, completion_tokens: 3 }).yuan).toBe(0);
   });
 });
 
 describe('loadPrices', () => {
+  it('parsePrices 逐条校验：坏条目、空价格、负价格都只跳过那一条；带单位的价格取开头的数字', () => {
+    const body = { list: [
+      42, { model: 7 }, null,
+      { model: 'x/empty', input_price: '', output_price: '0.1' },
+      { model: 'x/neg', input_price: '-0.5', output_price: '0.1' },
+      { model: 'x/space', input_price: '  ', output_price: '0.1' },
+      { model: 'x/unit', input_price: '0.0105元', output_price: 0.063 },
+      { model: 'x/free', input_price: '0', output_price: '0' },
+    ] };
+    expect(parsePrices(body)).toEqual({ 'x/unit': { input: 0.0105, output: 0.063 }, 'x/free': { input: 0, output: 0 } });
+  });
+
+  it('价格缓存原子写入：写完后目录里没有临时文件', async () => {
+    const file = tmpFile();
+    await loadPrices(file, (async () => json(modelsBody)) as never, () => 0);
+    expect(readdirSync(dirname(file))).toEqual(['prices.json']);
+  });
+
   it('parsePrices 把字符串价格转数字，跳过 tiered 与 "-"', () => {
     expect(parsePrices(modelsBody)).toEqual({ [GEMINI]: { input: 0.02, output: 0.1 } });
     expect(parsePrices({ nope: 1 })).toEqual({});
@@ -129,6 +158,14 @@ describe('接入记账', () => {
     expect(m.entries).toHaveLength(1);
     expect(m.entries[0]).toMatchObject({ label: '自检', model: GEMINI });
     expect(m.total).toBeCloseTo(0.1365, 10);
+  });
+
+  it('响应成功但内容格式异常（缺 content）时仍先记账再报错', async () => {
+    const m = new CostMeter(FALLBACK_PRICES, 10);
+    const bad = json({ choices: [], usage: { prompt_tokens: 1000, completion_tokens: 0 } });
+    const client = new KexiangClient('k', (async () => bad) as never, async () => {}, m);
+    await expect(client.chatJson({ model: GEMINI, system: 's', user: 'u' })).rejects.toThrow('返回格式异常');
+    expect(m.total).toBeCloseTo(0.0105, 10);
   });
 
   it('不传 meter 的 KexiangClient 照常工作', async () => {

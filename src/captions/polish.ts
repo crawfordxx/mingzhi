@@ -38,7 +38,7 @@ function formatPlain(tokens: Token[], kept: number[]): string {
 
 /** 请模型分行校对；结构不合法时带上原因重试 1 次，仍不合法则抛错 */
 async function askLines(client: LlmClient, user: string): Promise<string[]> {
-  const ask = (u: string): Promise<unknown> => client.chatJson({ model: CAPTION_MODEL, reasoningEffort: 'low', system: SYSTEM_PROMPT, user: u });
+  const ask = (u: string): Promise<unknown> => client.chatJson({ model: CAPTION_MODEL, reasoningEffort: 'low', system: SYSTEM_PROMPT, user: u, label: '字幕校对' });
   let parsed = LinesSchema.safeParse(await ask(user));
   if (!parsed.success) parsed = LinesSchema.safeParse(await ask(`${user}\n\n上一次的输出不合格：没有按 {"lines":["…"]} 输出非空的字幕行列表。请重新输出。`));
   if (!parsed.success) throw new Error('字幕校对结果不合法：没有按 {"lines":["…"]} 输出非空的字幕行列表');
@@ -48,7 +48,7 @@ async function askLines(client: LlmClient, user: string): Promise<string[]> {
 /** 请模型拆分超宽行；某行的拆分改了字或仍超宽则记为 null，由调用方在行中切开。请求失败不影响整体 */
 async function askSplit(client: LlmClient, wide: string[]): Promise<(string[] | null)[]> {
   try {
-    const raw = await client.chatJson({ model: CAPTION_MODEL, reasoningEffort: 'low', system: SPLIT_PROMPT, user: JSON.stringify(wide) });
+    const raw = await client.chatJson({ model: CAPTION_MODEL, reasoningEffort: 'low', system: SPLIT_PROMPT, user: JSON.stringify(wide), label: '字幕校对' });
     const parsed = SplitSchema.safeParse(raw);
     if (!parsed.success || parsed.data.lines.length !== wide.length) return wide.map(() => null);
     return parsed.data.lines.map((parts, i) => {

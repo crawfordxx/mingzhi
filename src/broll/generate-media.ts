@@ -16,7 +16,7 @@ export type Download = (url: string, dest: string) => Promise<void>;
 export async function generateImage(task: TaskClient, prompt: string, dest: string, download: Download = downloadTo): Promise<{ cost?: number }> {
   const { url, cost } = await task.run(
     { modelName: IMAGE_MODEL, modelType: 'text2img', prompt: `${prompt}${NO_TEXT_SUFFIX}`, size: '1:1', resolution: '1k', quality: 'medium', output_format: 'jpeg' },
-    { kind: 'image' },
+    { kind: 'image', label: 'B-roll 生图' },
   );
   await download(url, dest);
   return cost !== undefined ? { cost } : {};
@@ -26,7 +26,7 @@ export async function generateImage(task: TaskClient, prompt: string, dest: stri
 export async function generateVideo(task: TaskClient, prompt: string, dest: string, cfg: AppConfig, download: Download = downloadTo, onStatus?: (status: string) => void): Promise<{ cost?: number }> {
   const { url, cost } = await task.run(
     { modelName: VIDEO_MODEL, modelType: 'text2video', content: [{ type: 'text', text: prompt }], ratio: '1:1', duration: 4, resolution: '720p', watermark: false, generate_audio: false },
-    { kind: 'video', timeoutMs: VIDEO_TIMEOUT_MS, onStatus },
+    { kind: 'video', timeoutMs: VIDEO_TIMEOUT_MS, onStatus, label: 'B-roll 视频' },
   );
   const raw = `${dest}.raw.mp4`;
   try {

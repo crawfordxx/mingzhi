@@ -20,6 +20,8 @@ const Usage = z.union([
 const MAX_PRICE: Price = Object.values(FALLBACK_PRICES).reduce((a, b) => (b.input + b.output > a.input + a.output ? b : a));
 
 const EPSILON = 1e-9;
+/** 对话花费四舍五入到 0.0001 元，去掉浮点误差（0.0105 + 0.126 不再是 0.13650000000000001） */
+const roundYuan = (v: number): number => Math.round(v * 10_000) / 10_000;
 
 /** 按实际用量累计花费；entries 只读，每次记账追加一条 */
 export class CostMeter {
@@ -36,7 +38,7 @@ export class CostMeter {
       : { input: parsed.data.input_tokens, output: parsed.data.output_tokens };
     const known = this.prices[model];
     const price = known ?? MAX_PRICE;
-    const yuan = (tokens.input * price.input + tokens.output * price.output) / 1000;
+    const yuan = roundYuan((tokens.input * price.input + tokens.output * price.output) / 1000);
     return this.push({ kind: 'chat', model, label: known ? base : `${base}（价格未知，按上限估）`, yuan, tokens });
   }
 
@@ -50,8 +52,9 @@ export class CostMeter {
     return this.log.reduce((sum, e) => sum + e.yuan, 0);
   }
 
+  /** 账目快照：数组与条目都冻结，调用方改不动内部账本 */
   get entries(): readonly CostEntry[] {
-    return [...this.log];
+    return Object.freeze([...this.log]);
   }
 
   /** 再花 yuan 元后是否仍不超预算（恰好用完算可以） */
@@ -69,7 +72,8 @@ export class CostMeter {
   }
 
   private push(entry: CostEntry): CostEntry {
-    this.log.push(entry);
-    return entry;
+    const frozen = Object.freeze({ ...entry, ...(entry.tokens ? { tokens: Object.freeze({ ...entry.tokens }) } : {}) });
+    this.log.push(frozen);
+    return frozen;
   }
 }

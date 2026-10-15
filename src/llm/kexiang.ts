@@ -94,9 +94,9 @@ export class KexiangClient implements LlmClient {
     } catch {
       throw new RetryableError('可想 AI 暂时不可用：响应不是合法 JSON');
     }
+    this.meter?.addChat(opts.model, data?.usage, opts.label); // 响应已成功，先记账（即使内容格式不对或解析失败，token 也已花掉）
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== 'string') throw new Error('可想 AI 返回格式异常：缺少 choices[0].message.content');
-    this.meter?.addChat(opts.model, data.usage, opts.label); // 响应已成功，先记账（即使内容解析失败，token 也已花掉）
     return parseJsonContent(content);
   }
 }

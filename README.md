@@ -61,7 +61,7 @@ pnpm mingzhi edit <口播视频.mp4> [-o 输出.mp4] [--work 工作目录] [--bg
 | `--bg` / `--bg-prompt` | 抠像换背景：内置预设 id、本地图片，或一句话描述（后者需要可想 AI key） |
 | `--no-broll` | 不取 B-roll 素材（截图、生图、生成视频），分镜里依赖素材的图片卡改为全屏人像 |
 | `--max-videos N` | 最多生成几段 B-roll 视频，默认 1（视频较贵） |
-| `--budget 元` | B-roll 素材的花费上限，默认 10 元 |
+| `--budget 元` | 每条视频的花费上限，默认 10 元（超限自动降级；剪口误、字幕校对、分镜这三步不查预算）。**重跑同一工作目录会重新付费**：只有 B-roll 素材与封面底图有缓存，其余 AI 步骤每次都重新调用；账户余额不足时会直接报错并提示充值 |
 | `--bgm auto\|none\|曲目id` | 背景乐：`auto` 按分镜的情绪自动选曲（默认），`none` 不加，或指定曲目 id（见 `assets/music.json`） |
 | `--caption-style 样式id` | 字幕样式，默认 `blade` |
 | `--cover-style 风格id` | 封面风格，默认 `bauhaus` |

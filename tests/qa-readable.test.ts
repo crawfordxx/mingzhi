@@ -49,6 +49,7 @@ describe('defaultPalette 覆盖模板里的文字配色', () => {
     expect(has(THEME.termInk.prompt, THEME.terminal)).toBe(true);
     expect(has(THEME.url.fg, THEME.url.bg)).toBe(true);
     expect(has(readableOn(THEME.neutral), THEME.neutral)).toBe(true);
+    expect(has('#FFFFFF', THEME.ink)).toBe(true); // 对比条结论按钮
   });
   it('每组都 ≥ 4.5', () => {
     for (const p of pairs) expect(contrastRatio(p.fg, p.bg), p.label).toBeGreaterThanOrEqual(4.5);

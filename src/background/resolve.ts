@@ -57,7 +57,7 @@ export async function resolveBackground(spec: BackgroundSpec, workDir: string, t
   if (meter && !meter.canSpend(BG_PROMPT_YUAN)) throw new Error(`预算不足，无法生成背景（剩余 ¥${meter.remaining().toFixed(2)}，约需 ¥${BG_PROMPT_YUAN.toFixed(2)}）；请调高 --budget，或改用 --bg 预设/图片`);
   const result = await task.run(
     { modelName: BG_IMAGE_MODEL, modelType: 'text2img', prompt: `${spec.prompt}${BG_SUFFIX}`, size: '2:3', resolution: '1k', quality: 'medium', output_format: 'jpeg' },
-    { kind: 'image' },
+    { kind: 'image', label: '背景生图' },
   );
   const path = join(workDir, 'background.jpg');
   await download(result.url, path);

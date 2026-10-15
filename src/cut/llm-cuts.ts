@@ -98,7 +98,7 @@ export function validateCuts(raw: unknown, tokens: Token[]): CutsResult {
 
 export async function detectCuts(client: LlmClient, tokens: Token[]): Promise<CutsResult> {
   if (tokens.length === 0) return { cuts: [], dropped: 0 };
-  const raw = await client.chatJson({ model: CUT_MODEL, reasoningEffort: 'low', system: SYSTEM_PROMPT, user: formatTokensForLlm(tokens) });
+  const raw = await client.chatJson({ model: CUT_MODEL, reasoningEffort: 'low', system: SYSTEM_PROMPT, user: formatTokensForLlm(tokens), label: '剪口误' });
   const result = validateCuts(raw, tokens);
   const removed = result.cuts.reduce((n, c) => n + (c.to - c.from + 1), 0);
   if (removed / tokens.length > MAX_CUT_RATIO) {

@@ -66,6 +66,9 @@ const fmtSec = (s: number): string => {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
 
+/** 给封面预留的花费：封面开启才预留，B-roll 与卡片自检的预算检查都要扣掉它 */
+const coverReserve = (args: PipelineArgs): number => (args.cover === false ? 0 : COVER_YUAN);
+
 /** 当前账目快照写进 project.json；预算不限时 budget 为 null（JSON 里没有 Infinity） */
 const costsOf = (meter: CostMeter): NonNullable<ProjectFile['costs']> => ({ total: meter.total, budget: Number.isFinite(meter.budget) ? meter.budget : null, entries: [...meter.entries] });
 
@@ -174,7 +177,7 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
 
   if (relative(workDir, base).startsWith('..')) throw new Error(`人像视频必须在工作目录内：${base}`);
   const planned = await planStoryboard(llm, captions, a.plan.outputDurationSec, complete);
-  const storyboard = await runBroll({ ...args, reserveYuan: args.cover === false ? 0 : COVER_YUAN }, planned, a.plan.outputDurationSec, complete);
+  const storyboard = await runBroll({ ...args, reserveYuan: coverReserve(args) }, planned, a.plan.outputDurationSec, complete);
   return { captions, storyboard, base, subject: project.subject ?? null };
 }
 
@@ -198,7 +201,11 @@ async function compose(args: PipelineArgs, a: Analysis, p: Produced, complete: C
   await runLoudness(cfg, raw, args.output, complete);
 }
 
-/** 全流程；每步完成后增量写 project.json 并回调一次，供 P5 剪辑直播使用 */
+/**
+ * 全流程；每步完成后增量写 project.json 并回调一次，供 P5 剪辑直播使用。
+ * 注意：剪口误、字幕校对、分镜这三步有意不查预算（没有它们出不了片，且花费很小），预估里会单独提示它们是否已超上限。
+ * 重跑同一工作目录会重新付费：只有 B-roll 素材与封面底图有磁盘缓存，其余 AI 步骤每次都重新调用。
+ */
 export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   if (args.background) validateBackground(args.background, args.cfg, args.task);
   validateBroll(args.broll, args.brollDeps, args.task);
@@ -225,7 +232,7 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
 /** 卡片自检（可跳过）：返回改写后的制作结果与报告 */
 async function qaCardsStep(args: PipelineArgs, meter: CostMeter, p: Produced, complete: Complete): Promise<{ produced: Produced; cards: CardQaEntry[] }> {
   if (args.qa === false) return { produced: p, cards: [] };
-  const ctx = { llm: args.llm, workDir: args.workDir, meter, qaCards: args.qaDeps?.qaCards, onProgress: (message: string) => args.onProgress?.({ step: 'qa-cards', message }) };
+  const ctx = { llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), qaCards: args.qaDeps?.qaCards, onProgress: (message: string) => args.onProgress?.({ step: 'qa-cards', message }) };
   const res = await runQaCards(ctx, p.storyboard, p.captions, complete);
   return { produced: { ...p, storyboard: res.storyboard }, cards: res.report };
 }

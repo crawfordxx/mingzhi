@@ -39,8 +39,8 @@ describe('estimateCost', () => {
     expect(item(estimateCost(noCoverField), '封面')).toBeDefined();
   });
 
-  it('卡片自检：每 6 秒 1 张 × 0.02，重写最多 ×3', () => {
-    expect(item(estimateCost({ ...base, qa: true }), '卡片自检')).toMatchObject({ low: 0.2, yuan: 0.6 });
+  it('卡片自检：每 6 秒 1 张 × 0.05，最坏 ×5', () => {
+    expect(item(estimateCost({ ...base, qa: true }), '卡片自检')).toMatchObject({ low: 0.5, yuan: 2.5 });
     expect(item(estimateCost(base), '卡片自检')).toBeUndefined();
   });
 
@@ -53,6 +53,13 @@ describe('estimateCost', () => {
 });
 
 describe('formatEstimate', () => {
+  it('必需步骤（剪口误、字幕校对、分镜）合计超过上限时单独提示「仍会花费」；没超就没有这行', () => {
+    const est = estimateCost(base); // 必需项合计 ¥0.25
+    expect(formatEstimate(est, 0.1)).toContain('必需步骤（剪口误、字幕校对、分镜）约 ¥0.25 已超上限 ¥0.10，仍会花费');
+    expect(formatEstimate(est, 0.25)).not.toContain('必需步骤');
+    expect(formatEstimate(estimateCost({ ...base, broll: true }), 1)).not.toContain('必需步骤'); // 只是总额超了，必需项没超
+  });
+
   it('显示区间、上限与明细；未超预算时没有降级提示', () => {
     const text = formatEstimate(estimateCost({ ...base, broll: true }), 10);
     expect(text).toContain('预估花费 ¥1.25–¥4.15（上限 ¥10.00）');

@@ -94,7 +94,7 @@ describe('renderCardFrames', () => {
   });
   it('三联图 1620×480 PNG，位于 workDir/qa', async () => {
     const workDir = mkdtempSync(join(tmpdir(), 'mz-frames-'));
-    const out = await renderCardFrames(workDir, { template: 'title', props: { title: '三联图', subtitle: '进场 停留 出场' } }, 2);
+    const out = await renderCardFrames(workDir, { template: 'title', props: { title: '三联图', subtitle: '进场 停留 出场' } }, 2, loadConfig({}).ffmpeg);
     expect(out.startsWith(join(workDir, 'qa'))).toBe(true);
     const ihdr = readFileSync(out); // PNG 的宽高在第 16、20 字节起（各 4 字节大端）
     expect([ihdr.readUInt32BE(16), ihdr.readUInt32BE(20)]).toEqual([1620, 480]);
@@ -105,7 +105,7 @@ describe('renderCardFrames 复用打包', () => {
   it('传入 serveUrl 时不再自己打包，一次打包可出多张三联图', async () => {
     const workDir = mkdtempSync(join(tmpdir(), 'mz-frames-shared-'));
     const card = { template: 'title', props: { title: '共用打包' } } as const;
-    const outs = await withBundle(workDir, async (serveUrl) => [await renderCardFrames(workDir, card, 2, serveUrl), await renderCardFrames(workDir, card, 3, serveUrl)]);
+    const outs = await withBundle(workDir, async (serveUrl) => [await renderCardFrames(workDir, card, 2, loadConfig({}).ffmpeg, serveUrl), await renderCardFrames(workDir, card, 3, loadConfig({}).ffmpeg, serveUrl)]);
     for (const out of outs) expect(statSync(out).size).toBeGreaterThan(1000);
   }, 300_000);
 });

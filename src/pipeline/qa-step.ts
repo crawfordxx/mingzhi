@@ -2,6 +2,7 @@ import type { AppConfig } from '../config.js';
 import type { TimedCaption } from '../captions/lines.js';
 import { FULL_CAPTION_Y } from '../captions/styles.js';
 import type { CostMeter } from '../cost/meter.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { hardChecks as realHardChecks, type HardCheck } from '../qa/hard.js';
 import { defaultPalette } from '../qa/palette.js';
@@ -42,11 +43,22 @@ export function captionCentersOf(storyboard: Storyboard): number[] {
   return [...(layouts.has('split') ? [CANVAS.seam] : []), ...(layouts.has('full') ? [FULL_CAPTION_Y] : [])];
 }
 
-export interface QaCardsContext { llm: LlmClient; workDir: string; meter: CostMeter; qaCards?: typeof realQaCards; onProgress?: (msg: string) => void }
+export interface QaCardsContext {
+  llm: LlmClient; workDir: string; meter: CostMeter; ffmpeg: string; qaCards?: typeof realQaCards; onProgress?: (msg: string) => void;
+  /** 给封面预留的花费（元），封面开启时传 COVER_YUAN，关闭传 0 */
+  reserveYuan?: number;
+}
 
-/** 卡片自检：不达标的卡片重写；返回（可能被改写的）分镜并落盘 */
+/** 卡片自检：不达标的卡片重写；返回（可能被改写的）分镜并落盘。自检本身出错（余额不足除外）只记一条进度，沿用原分镜 */
 export async function runQaCards(ctx: QaCardsContext, storyboard: Storyboard, captions: TimedCaption[], complete: Complete<'qa-cards'>): Promise<{ storyboard: Storyboard; report: CardQaEntry[] }> {
-  const res = await (ctx.qaCards ?? realQaCards)({ client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, onProgress: ctx.onProgress });
+  let res: { storyboard: Storyboard; report: CardQaEntry[] };
+  try {
+    res = await (ctx.qaCards ?? realQaCards)({ client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, ffmpeg: ctx.ffmpeg, reserveYuan: ctx.reserveYuan, onProgress: ctx.onProgress });
+  } catch (err) {
+    rethrowIfBalance(err);
+    complete('qa-cards', `卡片自检失败，已跳过（成片不受影响）：${err instanceof Error ? err.message : String(err)}`);
+    return { storyboard, report: [] };
+  }
   const reasons = [...new Set(res.report.flatMap((e) => (e.skipped ? [e.skipped] : [])))];
   complete('qa-cards', `${cardsSummary(res.report)}${reasons.length > 0 ? ` · 跳过原因：${reasons.join('；')}` : ''}`, { storyboard: res.storyboard, qa: { cards: res.report, hard: [] } });
   return res;
