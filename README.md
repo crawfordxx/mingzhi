@@ -13,7 +13,7 @@
 - Node.js 22 或更高，以及 pnpm
 - ffmpeg 和 ffprobe。程序会优先使用 `~/.mingzhi/bin/ffmpeg` 和 `~/.mingzhi/bin/ffprobe`，也可以用环境变量 `MINGZHI_FFMPEG`、`MINGZHI_FFPROBE` 指定路径
 - 联网（首次下载语音模型；剪辑判断与分镜需要调用大模型接口）
-- 成片由 [Remotion](https://www.remotion.dev) 渲染。**首次渲染会自动下载 Chrome Headless Shell（约 94MB）**；需要走代理时设置 `NODE_USE_ENV_PROXY=1`（让 Node 使用 `HTTPS_PROXY` 等环境变量），或使用镜像
+- 成片由 [Remotion](https://www.remotion.dev) 渲染。**首次渲染会自动下载 Chrome Headless Shell（约 94MB）**；需要走代理时设置 `NODE_USE_ENV_PROXY=1`（Node 22.21 及以上支持，让 Node 使用 `HTTPS_PROXY` 等环境变量），或使用镜像
 
 ### 安装
 
@@ -67,7 +67,7 @@ Status: P3a (storyboard and final render core, command line only). B-roll images
 - Node.js 22+ and pnpm
 - ffmpeg and ffprobe. The app prefers `~/.mingzhi/bin/ffmpeg` and `~/.mingzhi/bin/ffprobe`, or point to your own with `MINGZHI_FFMPEG` / `MINGZHI_FFPROBE`
 - Internet access (first-time model download; the LLM calls for cuts and the storyboard)
-- The final video is rendered with [Remotion](https://www.remotion.dev). **The first render downloads Chrome Headless Shell (about 94MB).** Behind a proxy, set `NODE_USE_ENV_PROXY=1` so Node honours `HTTPS_PROXY` and friends, or use a mirror
+- The final video is rendered with [Remotion](https://www.remotion.dev). **The first render downloads Chrome Headless Shell (about 94MB).** Behind a proxy, set `NODE_USE_ENV_PROXY=1` (Node 22.21+) so Node honours `HTTPS_PROXY` and friends, or use a mirror
 
 ### Install
 

@@ -148,7 +148,8 @@ function ensureCtaRoom(shots: Shot[]): Shot[] {
   if (!prev || last.card?.template !== 'cta' || round(last.end - last.start) >= CTA_MIN_SEC) return shots;
   // 向下取整到帧，帧对齐后仍不短于 CTA_MIN_SEC
   const wanted = Math.floor(round(last.end - CTA_MIN_SEC) * CANVAS.fps) / CANVAS.fps;
-  if (!prev.card && wanted - prev.start < MIN_SHOT_SEC) return [...shots.slice(0, -2), { ...last, start: prev.start }];
+  // 前一个是空镜头且借完不足 1 秒：整个并入 cta，再继续向更早的镜头借（镜头数递减，必然终止）
+  if (!prev.card && wanted - prev.start < MIN_SHOT_SEC) return ensureCtaRoom([...shots.slice(0, -2), { ...last, start: prev.start }]);
   const start = Math.max(wanted, round(prev.start + MIN_SHOT_SEC));
   return start >= last.start ? shots : [...shots.slice(0, -2), { ...prev, end: start }, { ...last, start }];
 }

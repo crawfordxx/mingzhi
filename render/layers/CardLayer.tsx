@@ -12,7 +12,7 @@ const ENTER_DY = 80;
 const ENTER_SCALE = 0.94;
 const EXIT_DY = 30;
 
-/** 出场进度（0 未开始 → 1 完全淡出）：镜头最后 EXIT_SEC 秒；片尾的末镜头（cta）一直停在画面上，不淡出 */
+/** 出场进度（0 未开始 → 1 完全淡出）：镜头最后 EXIT_SEC 秒；全片最后一个镜头（通常是 cta）一直停在画面上，不淡出 */
 export function cardExit(shotEnd: number, sec: number, isLast: boolean): number {
   if (isLast) return 0;
   return interpolate(shotEnd - sec, [0, EXIT_SEC], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });

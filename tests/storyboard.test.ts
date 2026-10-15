@@ -105,6 +105,18 @@ const shotRows = (shots: { start: number; end: number; layout: string; card?: { 
   shots.map((s) => [s.start, s.end, s.layout, s.card?.template ?? null]);
 
 describe('normalizeStoryboard：CTA 保留', () => {
+  it('CTA 不足 2 秒且前面是空镜头时：并入空镜头后继续向更早的卡片借时长', () => {
+    const raw = { shots: [
+      { start: 25.67, end: 33.49, layout: 'split', card: title('A') },
+      { start: 33.49, end: 34.63, layout: 'full' },
+      { start: 34.63, end: 34.93, layout: 'full', card: { template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } } },
+    ] };
+    const { storyboard } = normalizeStoryboard(raw, 34.93, []);
+    const last = storyboard.shots[storyboard.shots.length - 1];
+    expect(last.card?.template).toBe('cta');
+    expect(last.end - last.start).toBeGreaterThanOrEqual(2 - 1e-6);
+  });
+
   it('cta 5–8 在 10 秒片中：cta 是最后一个镜头，延伸到片长并全屏', () => {
     const raw = { shots: [{ start: 5, end: 8, layout: 'split', card: cta(['关注']) }] };
     const { storyboard, demoted } = normalizeStoryboard(raw, 10, []);
