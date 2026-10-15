@@ -42,8 +42,9 @@ describe('normalizeStoryboard', () => {
       { start: 5, end: 6.5, layout: 'split', card: title('B') },
       { start: 6.5, end: 10, layout: 'split', card: { template: 'title', props: {} } },
     ] };
-    const { storyboard, dropped } = normalizeStoryboard(raw, 10, []);
+    const { storyboard, dropped, demoted } = normalizeStoryboard(raw, 10, []);
     expect(dropped).toBe(1);
+    expect(demoted).toBe(1);
     expect(storyboard.shots.map((s) => [s.start, s.end, s.card?.props])).toEqual([
       [0, 6.5, { title: 'A' }],
       [6.5, 10, undefined],
@@ -80,5 +81,136 @@ describe('normalizeStoryboard', () => {
   it('模型输出不是 {shots:[]} 时返回整片全屏一个镜头', () => {
     expect(normalizeStoryboard({ nope: 1 }, 12, []).storyboard.shots).toEqual([{ start: 0, end: 12, layout: 'full' }]);
     expect(normalizeStoryboard(null, 12, []).storyboard.shots).toEqual([{ start: 0, end: 12, layout: 'full' }]);
+  });
+});
+
+const cta = (actions: string[]) => ({ template: 'cta', props: { actions } });
+const shotRows = (shots: { start: number; end: number; layout: string; card?: { template: string } }[]) =>
+  shots.map((s) => [s.start, s.end, s.layout, s.card?.template ?? null]);
+
+describe('normalizeStoryboard：CTA 保留', () => {
+  it('cta 5–8 在 10 秒片中：cta 是最后一个镜头，延伸到片长并全屏', () => {
+    const raw = { shots: [{ start: 5, end: 8, layout: 'split', card: cta(['关注']) }] };
+    const { storyboard, demoted } = normalizeStoryboard(raw, 10, []);
+    expect(shotRows(storyboard.shots)).toEqual([
+      [0, 5, 'full', null],
+      [5, 10, 'full', 'cta'],
+    ]);
+    expect(demoted).toBe(0);
+  });
+  it('cta 9.2–10 在 title 0–9.2 之后：cta 保留（短于 1 秒也不并入前一个）', () => {
+    const raw = { shots: [
+      { start: 0, end: 9.2, layout: 'split', card: title('A') },
+      { start: 9.2, end: 10, layout: 'split', card: cta(['关注']) },
+    ] };
+    const { storyboard, demoted, dropped } = normalizeStoryboard(raw, 10, []);
+    expect(shotRows(storyboard.shots)).toEqual([
+      [0, 9.2, 'split', 'title'],
+      [9.2, 10, 'full', 'cta'],
+    ]);
+    expect(demoted).toBe(0);
+    expect(dropped).toBe(0);
+  });
+});
+
+describe('normalizeStoryboard：hook 图片与计数', () => {
+  it('hook 的 image 不可用时去掉 image 保留卡片', () => {
+    const raw = { shots: [{ start: 0, end: 4, layout: 'split', card: { template: 'hook', props: { index: 1, total: 1, headline: '钩子', highlight: [], image: 'broll/x.jpg' } } }] };
+    const { storyboard, dropped, demoted } = normalizeStoryboard(raw, 4, []);
+    const card = storyboard.shots[0].card;
+    expect(card?.template).toBe('hook');
+    expect(card?.props).not.toHaveProperty('image');
+    expect(dropped).toBe(0);
+    expect(demoted).toBe(0);
+  });
+  it('被前一镜头整体覆盖的镜头计入 dropped，不计 demoted', () => {
+    const raw = { shots: [
+      { start: 0, end: 6, layout: 'split', card: title('A') },
+      { start: 1, end: 3, layout: 'split', card: title('B') },
+    ] };
+    const { dropped, demoted } = normalizeStoryboard(raw, 6, []);
+    expect(dropped).toBe(1);
+    expect(demoted).toBe(0);
+  });
+  it('超出片长的镜头计入 dropped', () => {
+    const raw = { shots: [
+      { start: 0, end: 10, layout: 'split', card: title('A') },
+      { start: 25, end: 30, layout: 'split', card: title('B') },
+    ] };
+    const { dropped, demoted } = normalizeStoryboard(raw, 10, []);
+    expect(dropped).toBe(1);
+    expect(demoted).toBe(0);
+  });
+  it('版式规则降级（hook 超出窗口）计入 demoted，不计 dropped', () => {
+    const hook = (i: number) => ({ template: 'hook', props: { index: i, total: 3, headline: `钩子${i}`, highlight: [] } });
+    const raw = { shots: [{ start: 16, end: 20, layout: 'split', card: hook(1) }] };
+    const { demoted, dropped } = normalizeStoryboard(raw, 20, []);
+    expect(demoted).toBe(1);
+    expect(dropped).toBe(0);
+  });
+  it('hook 编号按保留下来的钩子重新编为 1..n，total 为 n', () => {
+    const hook = (i: number) => ({ template: 'hook', props: { index: i, total: 3, headline: `钩子${i}`, highlight: [] } });
+    const raw = { shots: [
+      { start: 0, end: 4, layout: 'split', card: hook(2) },
+      { start: 5, end: 9, layout: 'split', card: hook(3) },
+    ] };
+    const { storyboard } = normalizeStoryboard(raw, 10, []);
+    expect(storyboard.shots.flatMap((s) => (s.card ? [s.card.props] : []))).toEqual([
+      { index: 1, total: 2, headline: '钩子2', highlight: [] },
+      { index: 2, total: 2, headline: '钩子3', highlight: [] },
+    ]);
+  });
+});
+
+describe('normalizeStoryboard：字段清理与边界', () => {
+  it('hook.highlight 只保留 headline 的子串；evidenceList.highlight 去掉越界下标', () => {
+    const raw = { shots: [
+      { start: 0, end: 4, layout: 'split', card: { template: 'hook', props: { index: 1, total: 1, headline: '吃抗氧化剂的人死亡率', highlight: ['死亡率', '不存在'] } } },
+      { start: 4, end: 8, layout: 'split', card: { template: 'evidenceList', props: { title: '证据', rows: [{ badge: '证据', text: 'a' }, { badge: '成本', text: 'b' }], highlight: [0, 3] } } },
+    ] };
+    const { storyboard } = normalizeStoryboard(raw, 8, []);
+    expect(storyboard.shots[0].card?.props).toMatchObject({ highlight: ['死亡率'] });
+    expect(storyboard.shots[1].card?.props).toMatchObject({ highlight: [0] });
+  });
+  it('split 但没有卡片的镜头变为 full', () => {
+    const { storyboard } = normalizeStoryboard({ shots: [{ start: 0, end: 4, layout: 'split' }] }, 4, []);
+    expect(storyboard.shots).toEqual([{ start: 0, end: 4, layout: 'full' }]);
+  });
+  it('短镜头恰好 1 秒（浮点误差后）保留', () => {
+    const raw = { shots: [{ start: 1.13, end: 2.13, layout: 'split', card: title('B') }] };
+    const { storyboard, demoted } = normalizeStoryboard(raw, 4, []);
+    expect(shotRows(storyboard.shots)).toEqual([
+      [0, 1.13, 'full', null],
+      [1.13, 2.13, 'split', 'title'],
+      [2.13, 4, 'full', null],
+    ]);
+    expect(demoted).toBe(0);
+  });
+  it('非有限的 start/end 按结构不合法计入 dropped', () => {
+    const raw = { shots: [{ start: 0, end: Infinity, layout: 'split', card: title('A') }] };
+    const { storyboard, dropped } = normalizeStoryboard(raw, 5, []);
+    expect(dropped).toBe(1);
+    expect(storyboard.shots).toEqual([{ start: 0, end: 5, layout: 'full' }]);
+  });
+  it.each([0, -1, NaN, Infinity])('片长 %s 无效时抛错', (d) => {
+    expect(() => normalizeStoryboard({ shots: [] }, d, [])).toThrow('分镜归一化失败：片长无效');
+  });
+});
+
+describe('CardSpecSchema：字段长度收紧', () => {
+  it('chip 类字段最长 12 字', () => {
+    const bn = (chips: string[]) => ({ template: 'bigNumber', props: { value: '3', label: '标签', chips } });
+    expect(CardSpecSchema.safeParse(bn(['一二三四五六七八九十一二'])).success).toBe(true);
+    expect(CardSpecSchema.safeParse(bn(['一二三四五六七八九十一二三'])).success).toBe(false);
+  });
+  it('terminal 行最长 40 字', () => {
+    const term = (line: string) => ({ template: 'terminal', props: { lines: [line] } });
+    expect(CardSpecSchema.safeParse(term('甲'.repeat(40))).success).toBe(true);
+    expect(CardSpecSchema.safeParse(term('甲'.repeat(41))).success).toBe(false);
+  });
+  it('bigNumber.chips 最多 18 个', () => {
+    const bn = (n: number) => ({ template: 'bigNumber', props: { value: '3', label: '标签', chips: Array.from({ length: n }, () => '词') } });
+    expect(CardSpecSchema.safeParse(bn(18)).success).toBe(true);
+    expect(CardSpecSchema.safeParse(bn(19)).success).toBe(false);
   });
 });

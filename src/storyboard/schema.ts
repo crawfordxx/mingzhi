@@ -12,28 +12,30 @@ export type TemplateId = (typeof TEMPLATE_IDS)[number];
 
 const text = z.string().trim().min(1).max(60);
 const short = z.string().trim().min(1).max(24);
+/** 徽章、标签、选项等短词，最长 12 字 */
+const chip = z.string().trim().min(1).max(12);
 
 const card = <T extends TemplateId, P extends z.ZodTypeAny>(template: T, props: P) => z.object({ template: z.literal(template), props });
 
 export const CardSpecSchema = z.discriminatedUnion('template', [
-  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(short).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional() })),
+  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(chip).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional() })),
   card('title', z.object({ title: text, subtitle: text.optional(), crumb: short.optional() })),
-  card('bigNumber', z.object({ value: z.string().trim().min(1).max(10), unit: short.optional(), label: text, chips: z.array(short).max(36).optional(), highlight: z.array(short).max(6).optional() })),
-  card('chips', z.object({ groups: z.array(z.object({ label: short, items: z.array(z.object({ text: short, mark: z.enum(['yes', 'no', 'maybe']) })).min(1).max(5) })).min(1).max(2) })),
-  card('compareBars', z.object({ crumb: short.optional(), items: z.array(z.object({ name: short, note: short.optional(), value: z.number().min(0).max(1), annotation: short.optional(), tone: z.enum(['bad', 'warn', 'good']) })).min(1).max(3), verdict: short.optional() })),
-  card('evidenceList', z.object({ crumb: short.optional(), title: text, rows: z.array(z.object({ badge: z.enum(['成本', '收益', '证据', '来源']), text })).min(1).max(5), highlight: z.array(z.number().int().min(0).max(4)).max(5).optional(), tags: z.array(short).max(3).optional() })),
-  card('terminal', z.object({ title: short.optional(), lines: z.array(text).min(1).max(6) })),
-  card('toggles', z.object({ title: short.optional(), rows: z.array(z.object({ label: short, on: z.boolean() })).min(1).max(4), footnote: text.optional() })),
-  card('strikeList', z.object({ title: short.optional(), items: z.array(short).min(1).max(5) })),
+  card('bigNumber', z.object({ value: z.string().trim().min(1).max(10), unit: short.optional(), label: text, chips: z.array(chip).max(18).optional(), highlight: z.array(chip).max(6).optional() })),
+  card('chips', z.object({ groups: z.array(z.object({ label: chip, items: z.array(z.object({ text: chip, mark: z.enum(['yes', 'no', 'maybe']) })).min(1).max(5) })).min(1).max(2) })),
+  card('compareBars', z.object({ crumb: short.optional(), items: z.array(z.object({ name: chip, note: short.optional(), value: z.number().min(0).max(1), annotation: chip.optional(), tone: z.enum(['bad', 'warn', 'good']) })).min(1).max(3), verdict: chip.optional() })),
+  card('evidenceList', z.object({ crumb: short.optional(), title: text, rows: z.array(z.object({ badge: z.enum(['成本', '收益', '证据', '来源']), text })).min(1).max(5), highlight: z.array(z.number().int().min(0).max(4)).max(5).optional(), tags: z.array(chip).max(3).optional() })),
+  card('terminal', z.object({ title: short.optional(), lines: z.array(z.string().trim().min(1).max(40)).min(1).max(6) })),
+  card('toggles', z.object({ title: short.optional(), rows: z.array(z.object({ label: chip, on: z.boolean() })).min(1).max(4), footnote: text.optional() })),
+  card('strikeList', z.object({ title: short.optional(), items: z.array(chip).min(1).max(5) })),
   card('browser', z.object({ url: z.string().trim().min(1).max(80), title: text.optional(), image: z.string().optional() })),
   card('photo', z.object({ image: z.string().min(1), label: short.optional(), sublabel: text.optional() })),
   card('cta', z.object({ actions: z.array(z.string().trim().min(1).max(6)).min(1).max(3) })),
 ]);
 export type CardSpec = z.infer<typeof CardSpecSchema>;
 
-export const ShotSchema = z.object({ start: z.number(), end: z.number(), layout: z.enum(['split', 'full']), card: CardSpecSchema.optional() });
+export const ShotSchema = z.object({ start: z.number().finite(), end: z.number().finite(), layout: z.enum(['split', 'full']), card: CardSpecSchema.optional() });
 export type Shot = { start: number; end: number; layout: 'split' | 'full'; card?: CardSpec };
 export interface Storyboard { shots: Shot[] }
 
 /** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名 */
-export interface TalkProps { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number }
+export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number };
