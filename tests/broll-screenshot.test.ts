@@ -56,11 +56,14 @@ describe('screenshotUrl 子进程处理（假浏览器）', () => {
   posixOnly('超时会杀掉浏览器及其子进程并报错，不留输出文件', async () => {
     const { dir, fake } = fakeBrowser(`sleep 30 &\necho $! > "${'$(dirname "$0")'}/child.pid"\nwait`);
     const out = join(dir, 'o.png');
-    await expect(screenshotUrl('https://example.com', out, { browserPath: fake, timeoutMs: 1500 })).rejects.toThrow('超时');
+    // 超时给 3 秒：高并发下假浏览器脚本可能要一会儿才写出子进程号
+    await expect(screenshotUrl('https://example.com', out, { browserPath: fake, timeoutMs: 3000 })).rejects.toThrow('超时');
     expect(existsSync(out)).toBe(false);
     const childPid = Number(readFileSync(join(dir, 'child.pid'), 'utf8').trim());
-    await new Promise((r) => setTimeout(r, 200));
-    expect(() => process.kill(childPid, 0)).toThrow();
+    // 轮询等子进程退出（最多 3 秒），不用固定等待，避免高负载下误报
+    const alive = (): boolean => { try { process.kill(childPid, 0); return true; } catch { return false; } };
+    for (let i = 0; i < 30 && alive(); i += 1) await new Promise((r) => setTimeout(r, 100));
+    expect(alive()).toBe(false);
   });
 
   posixOnly('浏览器没产出图片时报错（空白/被拦截）', async () => {
