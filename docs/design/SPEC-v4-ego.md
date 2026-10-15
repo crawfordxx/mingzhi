@@ -5,7 +5,7 @@
 > **注意：底部不要再出现按 18 段分格的条带/步进键/刻度尺**——那仍然像剪辑软件。只保留一条细播放进度条（可带两三个“本版改动”小点）。
 
 ## ego (lite) 设计 DNA（已从线上实测抽取，务必遵守）
-截图：`/private/tmp/claude-501/-Users-crawford-workspace-mingzhi/33f03909-6312-4bc7-87c5-6cf211a66a30/scratchpad/ego/hero.png`、`sheet.jpg`（先 Read 看）。也可自行用 ego-browser 或 WebFetch 打开 https://lite.ego.app/ 细看（页面滚动在内部容器）。
+截图：`<临时目录>/ego/hero.png`、`sheet.jpg`（先 Read 看）。也可自行用 ego-browser 或 WebFetch 打开 https://lite.ego.app/ 细看（页面滚动在内部容器）。
 
 - **字体**：`system-ui, -apple-system, "PingFang SC", sans-serif`；标题 700、44–48px、行高 1.0、颜色 `#000000e6`/`#000000b3`；**每个大标题里一个词用细斜体衬线点缀**（ego 用的是类似 Instrument Serif / Newsreader Italic 300 的字形，如 *browser*、*(lite)*、*(yes, free)*）。中文可用「思源宋体 Light/Noto Serif SC 300 + 斜体变换」或用英文斜体衬线词做点缀（例：「把一条口播，变成 *finished cut*」），自行判断哪种更好看。正文 16–20px、字重 300–400、颜色 `#0000007a`。
 - **色彩 token（照抄）**：

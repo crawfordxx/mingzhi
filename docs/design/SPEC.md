@@ -71,6 +71,6 @@ bentogrids.com（便当网格）、60fps.design（微交互细节）、navbar.ga
 三版布局骨架必须结构性不同（不能只是换皮）。
 
 ## 交付
-写到 `/Users/crawford/workspace/mingzhi/onetake/design-demos/<A-dark-pro|B-bento-editorial|C-glass-3d>.html`。
+写到 `docs/design/<A-dark-pro|B-bento-editorial|C-glass-3d>.html`。
 完成后用 Playwright 截图 1440×900 到同目录 `<同名>.png`（`npx -y playwright@1.48.2 screenshot --viewport-size=1440,900 --wait-for-timeout=2500 file:///... out.png`），自己看截图，修掉溢出/错位/字体没加载/控制台报错，至少自查迭代 2 轮。
 回报：文件路径、一句话「form 来自内容的哪里」、已知缺陷。

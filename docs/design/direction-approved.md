@@ -1,7 +1,7 @@
 # 视觉方向确认
 
 **选定：G1 · ego 原味（浅色）** — `G1-ego-light.html`
-用户原话（2026-10-14）：「选这个吧, file:///Users/crawford/workspace/mingzhi/onetake/design-demos/G1-ego-light.html」
+用户原话（2026-10-14）：「选这个吧, docs/design/G1-ego-light.html」
 
 ## 展示过的方向（共四轮）
 | 轮次 | 方向 | 文件 | 结果 |

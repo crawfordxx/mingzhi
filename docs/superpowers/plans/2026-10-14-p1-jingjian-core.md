@@ -11,7 +11,7 @@
 **Spec:** `docs/DECISIONS.md`、`docs/superpowers/plans/2026-10-14-roadmap.md`
 
 ## Global Constraints
-- 仓库根：`/Users/crawford/workspace/mingzhi`；包管理器 pnpm；`"type": "module"`；许可证 MIT
+- 仓库根：`<仓库根>`；包管理器 pnpm；`"type": "module"`；许可证 MIT
 - 代码注释、日志、报错信息用中文；commit message 用中文，格式 `<type>: <描述>`（feat/fix/test/chore/docs）；**不加任何署名行**
 - 不得在仓库里写入任何 API key；可想 key 只从环境变量 `MINGZHI_KX_KEY` 读取（原始 key，不带 `sk-`，代码负责加前缀；若已带 `sk-` 不重复加）
 - 可想文本接口：`POST https://kexiangai.com/api/v1/chat/completions`，`Authorization: Bearer sk-<key>`
@@ -128,7 +128,7 @@ work/
 *.local.mp4
 ```
 
-Run: `cd /Users/crawford/workspace/mingzhi && pnpm install`
+Run: `cd <仓库根> && pnpm install`
 Expected: 安装成功，生成 `pnpm-lock.yaml`
 
 - [ ] **Step 2: 写失败测试 `tests/config.test.ts`**
@@ -1582,12 +1582,12 @@ git commit -m "feat: 精剪全流程管线与命令行入口"
 
 Run:
 ```bash
-cd /Users/crawford/workspace/mingzhi
+cd <仓库根>
 MINGZHI_KX_KEY=<你的可想 key> pnpm mingzhi edit tests/fixtures/talk.mp4 --work work/fixture
 ```
 Expected：控制台依次打印 9 个步骤；成片里「然后呢，嗯，」「去逛，」第一次、「一个，」第一次、「六百，不对，」被删；1.5 秒停顿被压到约 0.3 秒；字幕里出现「GitHub」「650 条」。
 
-- [ ] **Step 2: 用一条真实未剪的口播跑**（向用户要一条 2–4 分钟原片；没有时用 `~/workspace/小马学长AI/第2期/成片_A_原背景.mp4` 验证不误删）
+- [ ] **Step 2: 用一条真实未剪的口播跑**（向用户要一条 2–4 分钟原片；没有时用 `<参考片目录>/成片_A_原背景.mp4` 验证不误删）
 
 Run: `MINGZHI_KX_KEY=<key> pnpm mingzhi edit <原片.mp4> --work work/real`
 检查并写入 `docs/acceptance/p1.md`：

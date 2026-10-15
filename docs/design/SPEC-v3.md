@@ -40,5 +40,5 @@
 另外必须截 2 张状态图：重播剪辑过程进行中、对比模式开启。
 
 ## 交付
-`/Users/crawford/workspace/mingzhi/onetake/design-demos/<D-industrial|E-neobrutal|F-darkroom>.html` + 同名 `.png`（默认态）+ `-replay.png` + `-compare.png`。截图用本机已缓存的 Chromium + 自写 Playwright 脚本，脚本放 scratchpad 下你自己的子目录。
+`docs/design/<D-industrial|E-neobrutal|F-darkroom>.html` + 同名 `.png`（默认态）+ `-replay.png` + `-compare.png`。截图用本机已缓存的 Chromium + 自写 Playwright 脚本，脚本放 scratchpad 下你自己的子目录。
 回报：文件路径、参考清单摘要、每轮 5 维分数变化、form 来自内容哪里、已知缺陷。
