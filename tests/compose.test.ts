@@ -101,6 +101,15 @@ describe('renderCardFrames', () => {
   }, 300_000);
 });
 
+describe('renderCardFrames 复用打包', () => {
+  it('传入 serveUrl 时不再自己打包，一次打包可出多张三联图', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-frames-shared-'));
+    const card = { template: 'title', props: { title: '共用打包' } } as const;
+    const outs = await withBundle(workDir, async (serveUrl) => [await renderCardFrames(workDir, card, 2, serveUrl), await renderCardFrames(workDir, card, 3, serveUrl)]);
+    for (const out of outs) expect(statSync(out).size).toBeGreaterThan(1000);
+  }, 300_000);
+});
+
 describe('渲染封装', () => {
   it('默认并发不超过 CPU 核数', () => {
     expect(defaultConcurrency()).toBeLessThanOrEqual(availableParallelism());

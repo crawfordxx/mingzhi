@@ -53,6 +53,20 @@ describe('reviseCard', () => {
     expect(await reviseCard(scripted({ card: browser }).client, shot, caps, score, ['broll/a.jpg'])).toEqual({ template: 'browser', props: { url: 'example.com' } });
     expect(await reviseCard(scripted({ card: { template: 'photo', props: { image: 'broll/ghost.jpg' } } }).client, shot, caps, score)).toBeNull();
   });
+  it('提示词含镜头时长，并说明不能申请新素材', async () => {
+    const { client, calls } = scripted({ card: { template: 'title', props: { title: '新' } } });
+    await reviseCard(client, shot, caps, score);
+    expect(calls[0].user).toContain('镜头时长：3.0 秒');
+    expect(calls[0].system).toContain('本次重写不能申请新素材');
+  });
+  it('去掉模型写的 visual；photo 只有 visual 没有可用图片时返回 null', async () => {
+    const visual = { source: 'screenshot', url: 'https://example.com' };
+    const browser = { template: 'browser', props: { url: 'example.com', visual } };
+    expect(await reviseCard(scripted({ card: browser }).client, shot, caps, score)).toEqual({ template: 'browser', props: { url: 'example.com' } });
+    expect(await reviseCard(scripted({ card: { template: 'photo', props: { visual } } }).client, shot, caps, score)).toBeNull();
+    const photo = { template: 'photo', props: { image: 'broll/a.jpg', visual } };
+    expect(await reviseCard(scripted({ card: photo }).client, shot, caps, score, ['broll/a.jpg'])).toEqual({ template: 'photo', props: { image: 'broll/a.jpg' } });
+  });
   it('原镜头没有卡片返回 null，不调用模型', async () => {
     const { client, calls } = scripted({});
     expect(await reviseCard(client, { start: 0, end: 2, layout: 'full' }, caps, score)).toBeNull();

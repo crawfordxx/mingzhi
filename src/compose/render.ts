@@ -73,19 +73,23 @@ export function cardSampleFrames(durationSec: number): number[] {
   return [edge, durationSec / 2, durationSec - edge].map((t) => Math.min(last, Math.max(0, Math.round(t * CARD_FPS))));
 }
 
-/** 视觉自检用的三联图：卡片在 0.3 秒、中点、结束前 0.3 秒的静帧，同一次打包渲染，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径 */
-export async function renderCardFrames(workDir: string, card: CardSpec, durationSec: number): Promise<string> {
+/** 在已有打包上渲染三个取样帧到 files */
+async function renderSamples(serveUrl: string, card: CardSpec, durationSec: number, stills: { frame: number; file: string }[]): Promise<void> {
+  const inputProps = { card, dur: durationSec };
+  const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
+  for (const s of stills) await renderStill({ composition, serveUrl, inputProps, output: s.file, frame: s.frame, imageFormat: 'png' });
+}
+
+/** 视觉自检用的三联图：卡片在 0.3 秒、中点、结束前 0.3 秒的静帧，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径（调用方用完自行删除）。传入 serveUrl 时复用已有打包（批量检查时只打一次包），否则自己打包 */
+export async function renderCardFrames(workDir: string, card: CardSpec, durationSec: number, serveUrl?: string): Promise<string> {
   const tmp = mkdtempSync(join(tmpdir(), 'mz-strip-'));
   const outDir = join(workDir, 'qa');
   mkdirSync(outDir, { recursive: true });
   const output = join(outDir, `card-${randomUUID()}.png`);
   try {
     const stills = cardSampleFrames(durationSec).map((frame, i) => ({ frame, file: join(tmp, `f${i}.png`) }));
-    await withBundle(workDir, async (serveUrl) => {
-      const inputProps = { card, dur: durationSec };
-      const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
-      for (const s of stills) await renderStill({ composition, serveUrl, inputProps, output: s.file, frame: s.frame, imageFormat: 'png' });
-    });
+    if (serveUrl) await renderSamples(serveUrl, card, durationSec, stills);
+    else await withBundle(workDir, (url) => renderSamples(url, card, durationSec, stills));
     const inputs = stills.flatMap((s) => ['-i', s.file]);
     await run(loadConfig().ffmpeg, ['-v', 'error', '-y', ...inputs, '-filter_complex', 'hstack=inputs=3,scale=1620:480', '-frames:v', '1', output]);
     return output;
