@@ -6,6 +6,8 @@ import type { WorkEvent } from '../api';
 
 export interface TxLine { from: number; start: number; end: number; text: string; tokens: string[] }
 export interface CutMark { from: number; to: number; type: string }
+/** 校对后的字幕行：覆盖的 token 下标区间 [from, to]（区间内可能夹着被剪的 token） */
+export interface CapLine { from: number; to: number; text: string }
 export interface ShotInfo { index: number; start: number; end: number; layout: 'split' | 'full'; template?: string; title?: string }
 export interface StepLine { step: string; label: string; message: string; t0: number; t1?: number; pct?: number; state: 'run' | 'ok' | 'fail' }
 export interface QaScore { layout: number; hierarchy: number; motion: number; brand: number }
@@ -16,6 +18,8 @@ export interface LiveView {
   steps: StepLine[];
   transcript: TxLine[];
   cuts: CutMark[];
+  /** 字幕校对完成后才有；有它时转录显示校对后的文字 */
+  captions: CapLine[];
   shots: ShotInfo[];
   /** 各镜卡片的最新分数（按镜头序号） */
   qa: Record<number, QaScore>;
@@ -33,7 +37,7 @@ export const STEP_LABEL: Record<string, string> = {
   'qa-final': '成片检查', cover: '封面', edit: '修改', done: '完成', failed: '失败',
 };
 
-export const EMPTY_LIVE: LiveView = { status: 'idle', steps: [], transcript: [], cuts: [], shots: [], qa: {} };
+export const EMPTY_LIVE: LiveView = { status: 'idle', steps: [], transcript: [], cuts: [], captions: [], shots: [], qa: {} };
 
 /** 「m:ss」→ 秒 */
 const secOf = (m: string, s: string): number => Number(m) * 60 + Number(s);
@@ -54,6 +58,7 @@ function applyDetail(view: LiveView, e: WorkEvent): LiveView {
   if (d.kind === 'cost') return { ...view, cost: { total: Number(data.total) || 0, budget: data.budget == null ? null : Number(data.budget) } };
   if (d.kind === 'transcript') return { ...view, transcript: (data.lines as TxLine[]) ?? [] };
   if (d.kind === 'cut') return { ...view, cuts: ((data.cuts as CutMark[]) ?? []).map(({ from, to, type }) => ({ from, to, type })) };
+  if (d.kind === 'captions') return { ...view, captions: ((data.lines as CapLine[]) ?? []).map(({ from, to, text }) => ({ from, to, text })) };
   if (d.kind === 'shot') {
     const shots = (data.shots as ShotInfo[]) ?? [];
     const last = shots.at(-1);

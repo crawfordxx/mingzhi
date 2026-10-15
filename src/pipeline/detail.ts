@@ -1,4 +1,5 @@
 import type { Token, Transcript } from '../asr/types.js';
+import type { CaptionLine } from '../captions/lines.js';
 import type { Cut } from '../cut/llm-cuts.js';
 import type { HardCheck } from '../qa/hard.js';
 import type { CardQaEntry, CardScore } from '../qa/visual.js';
@@ -7,7 +8,7 @@ import type { ProjectFile, ProjectPatch } from './project.js';
 
 /** 进度事件携带的结构化数据，供工作台「剪辑直播」画界面；kind 决定 data 的形状 */
 export interface ProgressDetail {
-  kind: 'transcript' | 'cut' | 'shot' | 'qa' | 'cost' | 'progress';
+  kind: 'transcript' | 'cut' | 'captions' | 'shot' | 'qa' | 'cost' | 'progress';
   data: unknown;
 }
 
@@ -63,6 +64,11 @@ export function cutsDetail(cuts: Cut[], tokens: Token[]): ProgressDetail {
     return [{ from: c.from, to: c.to, start: first.start, end: last.end, text, type: c.type, reason: c.reason }];
   });
   return { kind: 'cut', data: { cuts: items } };
+}
+
+/** 校对后的字幕行：文字与覆盖的 token 下标区间 [from, to]（区间内可能夹着被剪的 token）；data: { lines } */
+export function captionsDetail(lines: CaptionLine[]): ProgressDetail {
+  return { kind: 'captions', data: { lines: lines.map(({ from, to, text }) => ({ from, to, text })) } };
 }
 
 type Props = Record<string, unknown>;
@@ -131,6 +137,7 @@ export function progressDetail(stage: 'matte' | 'compose', pct: number, frames?:
 export function detailOfStep(step: string, patch: ProjectPatch, project: ProjectFile): ProgressDetail | undefined {
   if (step === 'asr' && patch.transcript) return transcriptDetail(patch.transcript);
   if (step === 'cuts' && patch.cuts && project.transcript) return cutsDetail(patch.cuts, project.transcript.tokens);
+  if (step === 'captions' && patch.captionLines) return captionsDetail(patch.captionLines);
   // 素材步骤会重新归一化分镜（合并、降级镜头），所以改写后再发一次，前端以最后一次为准
   if ((step === 'storyboard' || step === 'broll') && patch.storyboard) return shotsDetail(patch.storyboard);
   if (step === 'qa-cards' && patch.qa && patch.qa.cards.length > 0) return cardsDetail(patch.qa.cards);
