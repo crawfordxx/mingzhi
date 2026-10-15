@@ -6,6 +6,9 @@ import { loadConfig } from '../src/config.js';
 import { run, runBuffer } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import { availableParallelism } from 'node:os';
+import { bgmEnvelope, sfxCues } from '../src/audio/plan.js';
+import { trackPath, type Track } from '../src/assets/catalog.js';
+import { stageAudio } from '../src/compose/stage-assets.js';
 import { defaultConcurrency, renderCardStill, renderTalk, withBundle } from '../src/compose/render.js';
 
 describe('renderTalk（真实 Remotion 渲染，首次运行会下载 Chrome Headless Shell）', () => {
@@ -25,6 +28,31 @@ describe('renderTalk（真实 Remotion 渲染，首次运行会下载 Chrome Hea
     expect([info.width, info.height, info.fps, info.hasAudio]).toEqual([1080, 1920, 30, true]);
     expect(Math.abs(info.durationSec - 2)).toBeLessThan(0.1);
     expect(ratios[ratios.length - 1]).toBe(1);
+  }, 300_000);
+
+  it('背景乐 + 音效：人像无声时输出仍有非静音音轨，时长约 2 秒', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'mz-audio-data-'));
+    const cfg = { ...loadConfig({}), dataDir };
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-audio-'));
+    const track: Track = { id: 'bgm-test', title: 't', zip: 'z', entry: 'e', mood: 'chill', energy: 1, durationSec: 1 };
+    mkdirSync(join(dataDir, 'assets', 'music'), { recursive: true });
+    // 曲目 1 秒、成片 2 秒，同时覆盖循环路径
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=1', '-c:a', 'libmp3lame', trackPath(cfg, track)]);
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=2', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', join(workDir, 'person.mp4')]);
+    const shots = [{ start: 0, end: 1, layout: 'split' as const, card: { template: 'title' as const, props: { title: '标题卡' } } }, { start: 1, end: 2, layout: 'full' as const }];
+    const sfx = [...sfxCues(shots), { sec: 1, sfx: 'click' as const, volume: 0.8 }];
+    const staged = await stageAudio(workDir, cfg, track, sfx);
+    const output = join(workDir, 'final.mp4');
+    await renderTalk({ workDir, output, props: {
+      person: 'person.mp4', personWidth: 360, personHeight: 640, subject: null, durationSec: 2, captions: [], shots, sfx,
+      bgm: { file: staged.bgm as string, keys: bgmEnvelope([], 2), durationSec: track.durationSec },
+    } });
+    const info = await probe(output, cfg);
+    expect(info.hasAudio).toBe(true);
+    expect(Math.abs(info.durationSec - 2)).toBeLessThan(0.1);
+    const log = await run(cfg.ffmpeg, ['-i', output, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
+    const max = Number(/max_volume: (-?[\d.]+) dB/.exec(log.stderr)?.[1]);
+    expect(max).toBeGreaterThan(-60);
   }, 300_000);
 
   it('视频卡在 3 秒起的镜头里从头播放并循环：3.0 秒与 7.0 秒（相隔一个 4 秒素材）画面一致，5.0 秒不同', async () => {

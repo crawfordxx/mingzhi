@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { TimedCaption } from '../captions/lines.js';
 import type { SubjectBox } from '../matting/composite.js';
+import type { SfxCue, VolumeKey } from '../audio/plan.js';
 
 /** 画布与版式常量：分界线 y=960 来自参考片实测 */
 export const CANVAS = { width: 1080, height: 1920, fps: 30, seam: 960 } as const;
@@ -54,4 +55,4 @@ export type Shot = { start: number; end: number; layout: 'split' | 'full'; card?
 export interface Storyboard { shots: Shot[] }
 
 /** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名 */
-export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number };
+export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number; bgm?: { file: string; keys: VolumeKey[]; durationSec: number }; sfx?: SfxCue[] };
