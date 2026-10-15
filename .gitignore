@@ -17,3 +17,6 @@ web/dist/
 # 含真人的设计参考帧（仅本机，不入库）
 docs/design/assets/frame_*.jpg
 docs/design/assets/speaker_bottom.jpg
+
+# 启动器清单生成产物
+dist/

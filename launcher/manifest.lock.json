@@ -1,0 +1,461 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "node-darwin-arm64",
+      "kind": "node",
+      "platform": "darwin-arm64",
+      "sha256": "23b25245dcfb9af7262f8ff142e9e2e0af025368117329e7a7458a51e5922f53",
+      "size": 49963763,
+      "dest": "runtime/node",
+      "urls": [
+        "https://npmmirror.com/mirrors/node/v22.23.3/node-v22.23.3-darwin-arm64.tar.gz",
+        "https://nodejs.org/dist/v22.23.3/node-v22.23.3-darwin-arm64.tar.gz"
+      ],
+      "unpack": "tar.gz",
+      "strip": 1,
+      "license": "MIT（Node.js）"
+    },
+    {
+      "id": "node-darwin-x64",
+      "kind": "node",
+      "platform": "darwin-x64",
+      "sha256": "8a677b0219178efd6eb0e475457c4afb452b521a92f6e67845a73bd85727f2a8",
+      "size": 51142049,
+      "dest": "runtime/node",
+      "urls": [
+        "https://npmmirror.com/mirrors/node/v22.23.3/node-v22.23.3-darwin-x64.tar.gz",
+        "https://nodejs.org/dist/v22.23.3/node-v22.23.3-darwin-x64.tar.gz"
+      ],
+      "unpack": "tar.gz",
+      "strip": 1,
+      "license": "MIT（Node.js）"
+    },
+    {
+      "id": "node-win32-x64",
+      "kind": "node",
+      "platform": "win32-x64",
+      "sha256": "2b0ff57b049cda1bbcea2240eec20467018713c1efe1f7360c2681859b90ed71",
+      "size": 35574076,
+      "dest": "runtime/node",
+      "urls": [
+        "https://npmmirror.com/mirrors/node/v22.23.3/node-v22.23.3-win-x64.zip",
+        "https://nodejs.org/dist/v22.23.3/node-v22.23.3-win-x64.zip"
+      ],
+      "unpack": "zip",
+      "strip": 1,
+      "license": "MIT（Node.js）"
+    },
+    {
+      "id": "ffmpeg-darwin-arm64",
+      "kind": "ffmpeg",
+      "platform": "darwin-arm64",
+      "sha256": "8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bbfa",
+      "size": 19246198,
+      "dest": "data/bin/ffmpeg",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/ffmpeg-static/b6.1.1/ffmpeg-darwin-arm64.gz",
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-darwin-arm64.gz"
+      ],
+      "unpack": "gz",
+      "executable": true,
+      "license": "GPL-3.0-or-later（静态构建，含 x264/x265/libass；来源 osxexperts.net，经 eugeneware/ffmpeg-static 打包）"
+    },
+    {
+      "id": "ffmpeg-darwin-x64",
+      "kind": "ffmpeg",
+      "platform": "darwin-x64",
+      "sha256": "929b375c1182d956c51f7ac25e0b2b0411fb01f6f407aa15c9758efeb4242106",
+      "size": 25296431,
+      "dest": "data/bin/ffmpeg",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/ffmpeg-static/b6.1.1/ffmpeg-darwin-x64.gz",
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-darwin-x64.gz"
+      ],
+      "unpack": "gz",
+      "executable": true,
+      "license": "GPL-3.0-or-later（静态构建，含 x264/x265/libass；来源 evermeet.cx，经 eugeneware/ffmpeg-static 打包）"
+    },
+    {
+      "id": "ffmpeg-win32-x64",
+      "kind": "ffmpeg",
+      "platform": "win32-x64",
+      "sha256": "8883a3dffbd0a16cf4ef95206ea05283f78908dbfb118f73c83f4951dcc06d77",
+      "size": 29581307,
+      "dest": "data/bin/ffmpeg.exe",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/ffmpeg-static/b6.1.1/ffmpeg-win32-x64.gz",
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-win32-x64.gz"
+      ],
+      "unpack": "gz",
+      "executable": true,
+      "license": "GPL-3.0-or-later（gyan.dev essentials 静态构建，含 x264/x265/libass，经 eugeneware/ffmpeg-static 打包）"
+    },
+    {
+      "id": "ffprobe-darwin-arm64",
+      "kind": "ffmpeg",
+      "platform": "darwin-arm64",
+      "sha256": "d986a8ec7b030899fe66a8a288ed809a3543338705a3ce178cfb85869c5d80be",
+      "size": 19207077,
+      "dest": "data/bin/ffprobe",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/ffmpeg-static/b6.1.1/ffprobe-darwin-arm64.gz",
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffprobe-darwin-arm64.gz"
+      ],
+      "unpack": "gz",
+      "executable": true,
+      "license": "GPL-3.0-or-later（静态构建，含 x264/x265/libass；来源 osxexperts.net，经 eugeneware/ffmpeg-static 打包）"
+    },
+    {
+      "id": "ffprobe-darwin-x64",
+      "kind": "ffmpeg",
+      "platform": "darwin-x64",
+      "sha256": "d4da574d6e2e197bd259b47d69cf262df9e312af24ad960444f6d806d3d4c186",
+      "size": 25239438,
+      "dest": "data/bin/ffprobe",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/ffmpeg-static/b6.1.1/ffprobe-darwin-x64.gz",
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffprobe-darwin-x64.gz"
+      ],
+      "unpack": "gz",
+      "executable": true,
+      "license": "GPL-3.0-or-later（静态构建，含 x264/x265/libass；来源 evermeet.cx，经 eugeneware/ffmpeg-static 打包）"
+    },
+    {
+      "id": "ffprobe-win32-x64",
+      "kind": "ffmpeg",
+      "platform": "win32-x64",
+      "sha256": "f309e6223ad89d2fe54bccd420a7709b66fd27540674e92309578ed491a43c8d",
+      "size": 29521644,
+      "dest": "data/bin/ffprobe.exe",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/ffmpeg-static/b6.1.1/ffprobe-win32-x64.gz",
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffprobe-win32-x64.gz"
+      ],
+      "unpack": "gz",
+      "executable": true,
+      "license": "GPL-3.0-or-later（gyan.dev essentials 静态构建，含 x264/x265/libass，经 eugeneware/ffmpeg-static 打包）"
+    },
+    {
+      "id": "chrome-darwin-arm64",
+      "kind": "chrome",
+      "platform": "darwin-arm64",
+      "sha256": "17ef152eba8ffcfebc42e25ab295eb040d8e62455cff7dfcc735b652456d6899",
+      "size": 98080877,
+      "dest": "runtime/chrome-headless-shell/149.0.7790.0/mac-arm64",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/chrome-for-testing/149.0.7790.0/mac-arm64/chrome-headless-shell-mac-arm64.zip",
+        "https://storage.googleapis.com/chrome-for-testing-public/149.0.7790.0/mac-arm64/chrome-headless-shell-mac-arm64.zip"
+      ],
+      "unpack": "zip",
+      "strip": 1,
+      "exec": "runtime/chrome-headless-shell/149.0.7790.0/mac-arm64/chrome-headless-shell",
+      "license": "BSD-3-Clause（Chromium；内含第三方组件各自许可，见包内 LICENSE.headless_shell）"
+    },
+    {
+      "id": "chrome-darwin-x64",
+      "kind": "chrome",
+      "platform": "darwin-x64",
+      "sha256": "2597bf0940b54afbdfcb76519b5c8cf423cec49eea90ce1c4123456aca47a851",
+      "size": 103187459,
+      "dest": "runtime/chrome-headless-shell/149.0.7790.0/mac-x64",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/chrome-for-testing/149.0.7790.0/mac-x64/chrome-headless-shell-mac-x64.zip",
+        "https://storage.googleapis.com/chrome-for-testing-public/149.0.7790.0/mac-x64/chrome-headless-shell-mac-x64.zip"
+      ],
+      "unpack": "zip",
+      "strip": 1,
+      "exec": "runtime/chrome-headless-shell/149.0.7790.0/mac-x64/chrome-headless-shell",
+      "license": "BSD-3-Clause（Chromium；内含第三方组件各自许可，见包内 LICENSE.headless_shell）"
+    },
+    {
+      "id": "chrome-win32-x64",
+      "kind": "chrome",
+      "platform": "win32-x64",
+      "sha256": "8a112c0e768907ff382ff994dcde35cdbd0e1f5a3a475da93d3a83e3260e78c2",
+      "size": 118785025,
+      "dest": "runtime/chrome-headless-shell/149.0.7790.0/win64",
+      "urls": [
+        "https://cdn.npmmirror.com/binaries/chrome-for-testing/149.0.7790.0/win64/chrome-headless-shell-win64.zip",
+        "https://storage.googleapis.com/chrome-for-testing-public/149.0.7790.0/win64/chrome-headless-shell-win64.zip"
+      ],
+      "unpack": "zip",
+      "strip": 1,
+      "exec": "runtime/chrome-headless-shell/149.0.7790.0/win64/chrome-headless-shell.exe",
+      "license": "BSD-3-Clause（Chromium；内含第三方组件各自许可，见包内 LICENSE.headless_shell）"
+    },
+    {
+      "id": "model-silero-vad",
+      "kind": "model",
+      "platform": "any",
+      "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+      "size": 643854,
+      "dest": "data/models/silero_vad.onnx",
+      "urls": [
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+      ],
+      "license": "MIT（Silero VAD）"
+    },
+    {
+      "id": "model-sensevoice-int8",
+      "kind": "model",
+      "platform": "any",
+      "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+      "size": 239233841,
+      "dest": "data/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx",
+      "urls": [
+        "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/model.int8.onnx",
+        "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/model.int8.onnx"
+      ],
+      "license": "FunASR Model Open Source License（SenseVoice）"
+    },
+    {
+      "id": "model-sensevoice-tokens",
+      "kind": "model",
+      "platform": "any",
+      "sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
+      "size": 315894,
+      "dest": "data/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt",
+      "urls": [
+        "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/tokens.txt",
+        "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/tokens.txt"
+      ],
+      "license": "FunASR Model Open Source License（SenseVoice）"
+    },
+    {
+      "id": "model-rvm",
+      "kind": "model",
+      "platform": "any",
+      "sha256": "88d4531297118f595bf2fd60f6f566aec2e559393802d1f436c380f0cbbd2828",
+      "size": 14975696,
+      "dest": "data/models/rvm_mobilenetv3_fp32.onnx",
+      "urls": [
+        "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx"
+      ],
+      "license": "GPL-3.0（RobustVideoMatting 权重）"
+    },
+    {
+      "id": "music-chill",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "53ce04d6c124843235ccfbea94be3f8c6afb3cfd3c6924badc124a4ec0d49f37",
+      "size": 80890568,
+      "dest": "data/assets/music",
+      "urls": [
+        "https://opengameart.org/sites/default/files/chill_beats.zip"
+      ],
+      "unpack": "zip",
+      "entries": [
+        {
+          "entry": "Chill Beats/03 HoliznaCC0 - Families.mp3",
+          "dest": "data/assets/music/families.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Chill Beats/05 HoliznaCC0 - Opinions.mp3",
+          "dest": "data/assets/music/opinions.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Chill Beats/06 HoliznaCC0 - Old Age.mp3",
+          "dest": "data/assets/music/old-age.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Chill Beats/08 HoliznaCC0 - Dream Pop.mp3",
+          "dest": "data/assets/music/dream-pop.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Chill Beats/28 HoliznaCC0 - Autumn.mp3",
+          "dest": "data/assets/music/autumn.mp3",
+          "transcode": "mp3"
+        }
+      ],
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
+    },
+    {
+      "id": "music-happy",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "7d36a9172a030d5b2e9ec7df622095e468877cdd35d92904004bb8c13266f80b",
+      "size": 82114757,
+      "dest": "data/assets/music",
+      "urls": [
+        "https://opengameart.org/sites/default/files/happy_lo-fi_lofi_collection.zip"
+      ],
+      "unpack": "zip",
+      "entries": [
+        {
+          "entry": "Happy Lo-Fi (Lofi Collection)/01 HoliznaCC0 - Poor, But Happy.mp3",
+          "dest": "data/assets/music/poor-but-happy.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Lo-Fi (Lofi Collection)/03 HoliznaCC0 - Blue Skies.mp3.mp3",
+          "dest": "data/assets/music/blue-skies.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Lo-Fi (Lofi Collection)/16 HoliznaCC0 - Letting Go Of The Past.mp3",
+          "dest": "data/assets/music/letting-go.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Lo-Fi (Lofi Collection)/19 HoliznaCC0 - Puppy Love.mp3",
+          "dest": "data/assets/music/puppy-love.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Lo-Fi (Lofi Collection)/21 HoliznaCC0 - Clouds.mp3",
+          "dest": "data/assets/music/clouds.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Lo-Fi (Lofi Collection)/22 HoliznaCC0 - Happy, but a little off.mp3",
+          "dest": "data/assets/music/a-little-off.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Lo-Fi (Lofi Collection)/26 HoliznaCC0 - New Shoes.mp3",
+          "dest": "data/assets/music/new-shoes.mp3",
+          "transcode": "mp3"
+        }
+      ],
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
+    },
+    {
+      "id": "music-electronic",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "b0c799be8b60620d01b8862d37103e58f6d30d33285141e9b645622c1d758449",
+      "size": 96171138,
+      "dest": "data/assets/music",
+      "urls": [
+        "https://opengameart.org/sites/default/files/happy_electronic.zip"
+      ],
+      "unpack": "zip",
+      "entries": [
+        {
+          "entry": "Happy Electronic/03 HoliznaCC0 - Back In The 80s.mp3",
+          "dest": "data/assets/music/back-in-the-80s.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Electronic/03 HoliznaCC0 - Earth.mp3",
+          "dest": "data/assets/music/earth.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Electronic/04 HoliznaCC0 - A Small Town On Pluto.mp3",
+          "dest": "data/assets/music/small-town-on-pluto.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Electronic/06 HoliznaCC0 - Happy Dance.mp3",
+          "dest": "data/assets/music/happy-dance.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Electronic/08 HoliznaCC0 - transcendental earth people.mp3",
+          "dest": "data/assets/music/earth-people.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Electronic/10 HoliznaCC0 - Bouncing.mp3",
+          "dest": "data/assets/music/bouncing.mp3",
+          "transcode": "mp3"
+        },
+        {
+          "entry": "Happy Electronic/11 HoliznaCC0 - Love Love Love.mp3",
+          "dest": "data/assets/music/love-love-love.mp3",
+          "transcode": "mp3"
+        }
+      ],
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
+    },
+    {
+      "id": "font-noto-sans-sc",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+      "size": 17772300,
+      "dest": "data/assets/fonts/NotoSansSC-VF.ttf",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+      ],
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "font-noto-serif-sc",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9",
+      "size": 25125512,
+      "dest": "data/assets/fonts/NotoSerifSC-VF.ttf",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf",
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf"
+      ],
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "font-zcool-kuaile",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "812a6fc1fe54b6d73a419245c32dfeba8aa33104d5be90d1cf6af082007cb71d",
+      "size": 1514968,
+      "dest": "data/assets/fonts/ZCOOLKuaiLe-Regular.ttf",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf",
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf"
+      ],
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "font-zcool-huangyou",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "54f0c0df4308cd74cd0f2fd3494ae054dbc4a1fd6fa7d71f4807eb4cdd8b4136",
+      "size": 8328684,
+      "dest": "data/assets/fonts/ZCOOLQingKeHuangYou-Regular.ttf",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf",
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf"
+      ],
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "font-lxgw-wenkai",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "d4bdeb38a39151d74d084cba5090f8cb7d20bf83eedb78c35939ae70b9f4e3f6",
+      "size": 25379848,
+      "dest": "data/assets/fonts/LXGWWenKai-Medium.ttf",
+      "urls": [
+        "https://github.com/lxgw/LxgwWenKai/releases/download/v1.522/LXGWWenKai-Medium.ttf"
+      ],
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "font-smiley-sans",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "299c0be6c960ae37361762eca76f7d0cd516615435bb96c0d4b98a1e70178a07",
+      "size": 5781344,
+      "dest": "data/assets/fonts",
+      "urls": [
+        "https://github.com/atelier-anchor/smiley-sans/releases/download/v2.0.1/smiley-sans-v2.0.1.zip"
+      ],
+      "unpack": "zip",
+      "entries": [
+        {
+          "entry": "SmileySans-Oblique.ttf",
+          "dest": "data/assets/fonts/SmileySans-Oblique.ttf"
+        }
+      ],
+      "license": "SIL OFL 1.1"
+    }
+  ]
+}
