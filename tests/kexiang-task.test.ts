@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { downloadTo, KexiangTaskClient, KEXIANG_TASK_BASE } from '../src/llm/kexiang-task.js';
+import { CostMeter } from '../src/cost/meter.js';
+import { downloadTo, EST_TASK_YUAN, KexiangTaskClient, KEXIANG_TASK_BASE } from '../src/llm/kexiang-task.js';
 
 type Reply = { status?: number; body: unknown };
 /** 按顺序回放响应，并记录请求 */
@@ -42,6 +43,27 @@ describe('KexiangTaskClient', () => {
     expect((await new KexiangTaskClient('k', a.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).cost).toBe(0.6);
     const b = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', cost: 'n/a', service_output: { imgUrl: 'u' } } }]);
     expect('cost' in (await new KexiangTaskClient('k', b.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' }))).toBe(false);
+  });
+
+  it('成功但没返回 cost 时按预估价记账（生图 0.2、视频 2.4），返回给调用方的结果不变', async () => {
+    const meter = new CostMeter({}, 10);
+    const img = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', service_output: { imgUrl: 'u' } } }]);
+    const res = await new KexiangTaskClient('k', img.impl, noSleep, 1, meter).run({ modelName: 'M', modelType: 't' }, { kind: 'image', label: '背景' });
+    expect('cost' in res).toBe(false);
+    expect(meter.total).toBeCloseTo(0.2);
+    expect(meter.entries[0].label).toContain('按预估');
+    const vid = fakeFetch([{ body: { id: 2 } }, { body: { task_status: 'success', service_output: { videoUrl: 'v' } } }]);
+    await new KexiangTaskClient('k', vid.impl, noSleep, 1, meter).run({ modelName: 'V', modelType: 't' }, { kind: 'video' });
+    expect(meter.total).toBeCloseTo(0.2 + 2.4);
+    expect(EST_TASK_YUAN).toEqual({ image: 0.2, video: 2.4 });
+  });
+
+  it('返回了 cost 时按实际记账，不用预估价', async () => {
+    const meter = new CostMeter({}, 10);
+    const { impl } = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', cost: '0.6', service_output: { imgUrl: 'u' } } }]);
+    await new KexiangTaskClient('k', impl, noSleep, 1, meter).run({ modelName: 'M', modelType: 't' }, { kind: 'image' });
+    expect(meter.total).toBeCloseTo(0.6);
+    expect(meter.entries[0].label).not.toContain('按预估');
   });
 
   it('视频任务取 videoUrl', async () => {

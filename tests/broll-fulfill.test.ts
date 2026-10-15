@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fulfillVisuals, makeDeps, visualKey, type BrollAsset, type BrollDeps } from '../src/broll/fulfill.js';
 import { loadConfig } from '../src/config.js';
+import { COVER_YUAN } from '../src/cost/estimate.js';
 import { CostMeter } from '../src/cost/meter.js';
 import { FALLBACK_PRICES } from '../src/cost/prices.js';
 import type { Shot, Storyboard, Visual } from '../src/storyboard/schema.js';
@@ -337,6 +338,48 @@ describe('fulfillVisuals 统一记账', () => {
     const r = await fulfillVisuals(board(photo(0, gen('a jar of coins on a table'))), deps, opts(workDir(), { meter }));
     expect(r.costYuan).toBeCloseTo(0.2);
     expect(meter.total).toBeCloseTo(0.2);
+  });
+});
+
+describe('fulfillVisuals 搜索与封面预留', () => {
+  const shotQuery = (): Storyboard => board(browser(0, { source: 'screenshot', query: 'central bank rate decision' }));
+
+  it('联网搜索前检查预算：剩余不足 0.05 时不调用 search，按超出预算跳过', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 1);
+    meter.addChat('openai/gpt-5.6-sol', { prompt_tokens: 10000, completion_tokens: 5000 }, '前序步骤'); // 0.98，剩 0.02
+    const { deps, calls } = fakeDeps();
+    const r = await fulfillVisuals(shotQuery(), deps, opts(workDir(), { meter }));
+    expect(calls.search).toEqual([]);
+    expect(r.failures).toEqual([{ shotIndex: 0, reason: '超出预算' }]);
+  });
+
+  it('预算够搜索时照常搜索并截图', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 1);
+    const { deps, calls } = fakeDeps();
+    const r = await fulfillVisuals(shotQuery(), deps, opts(workDir(), { meter }));
+    expect(calls.search).toEqual(['central bank rate decision']);
+    expect(r.failures).toEqual([]);
+  });
+
+  it('reserveYuan：预算 = 图价 + 预留 − 0.01 时不生图，恰好够时生图', async () => {
+    const sb = board(photo(0, gen('a jar of coins on a table')));
+    const short = fakeDeps();
+    const r1 = await fulfillVisuals(sb, short.deps, opts(workDir(), { meter: new CostMeter(FALLBACK_PRICES, 0.2 + COVER_YUAN - 0.01), reserveYuan: COVER_YUAN }));
+    expect(short.calls.image).toEqual([]);
+    expect(r1.failures).toEqual([{ shotIndex: 0, reason: '超出预算' }]);
+    const enough = fakeDeps();
+    await fulfillVisuals(sb, enough.deps, opts(workDir(), { meter: new CostMeter(FALLBACK_PRICES, 0.2 + COVER_YUAN), reserveYuan: COVER_YUAN }));
+    expect(enough.calls.image).toHaveLength(1);
+  });
+
+  it('没有 meter 时 reserveYuan 同样参与本步预算检查；缺省不预留', async () => {
+    const sb = board(photo(0, gen('a jar of coins on a table')));
+    const a = fakeDeps();
+    await fulfillVisuals(sb, a.deps, opts(workDir(), { budgetYuan: 0.2 + COVER_YUAN - 0.01, reserveYuan: COVER_YUAN }));
+    expect(a.calls.image).toEqual([]);
+    const b = fakeDeps();
+    await fulfillVisuals(sb, b.deps, opts(workDir(), { budgetYuan: 0.2 }));
+    expect(b.calls.image).toHaveLength(1);
   });
 });
 

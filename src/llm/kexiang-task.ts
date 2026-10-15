@@ -9,6 +9,9 @@ const SUCCEEDED = new Set(['success', 'succeeded', 'completed']);
 /** 轮询连续失败的容忍次数，超过则放弃（任务可能仍在云端运行，但已付费，报错让调用方知情） */
 const MAX_POLL_FAILURES = 3;
 
+/** 接口没返回 cost 时的预估单价（元/次），用于记账与预算检查 */
+export const EST_TASK_YUAN = { image: 0.2, video: 2.4 } as const;
+
 export interface TaskInput { modelName: string; modelType: string; [key: string]: unknown }
 export interface TaskResult { taskId: string; url: string; cost?: number }
 export interface TaskRunOptions { kind: 'image' | 'video'; timeoutMs?: number; onStatus?: (status: string) => void; /** 记账时显示的用途说明，缺省用模型名 */ label?: string }
@@ -62,13 +65,19 @@ export class KexiangTaskClient implements TaskClient {
       const url = kind === 'image' ? out.imgUrl : out.videoUrl;
       if (url) {
         const result = { taskId, url, ...costOf(q.cost) };
-        this.meter?.addTask(input.modelName, result.cost, label);
+        this.charge(input.modelName, kind, result.cost, label);
         return result;
       }
       if (SUCCEEDED.has(status)) throw new Error(`可想任务 ${taskId} 已完成但没有返回${kind === 'image' ? '图片' : '视频'}地址`);
       onStatus?.(status);
     }
     throw new Error(`可想任务 ${taskId} 等待超时（${Math.round(timeoutMs / 1000)} 秒）`);
+  }
+
+  /** 只在成功时记账；超时/失败的任务若云端仍扣费，这里不计入。没拿到 cost 时按预估价记，避免预算形同虚设 */
+  private charge(model: string, kind: 'image' | 'video', cost: number | undefined, label?: string): void {
+    if (cost === undefined) this.meter?.addTask(model, EST_TASK_YUAN[kind], `${label ?? model}（按预估）`);
+    else this.meter?.addTask(model, cost, label);
   }
 
   private async request<T>(url: string, init: RequestInit = {}): Promise<T> {

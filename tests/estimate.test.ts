@@ -21,8 +21,9 @@ describe('estimateCost', () => {
     const est = estimateCost({ ...base, broll: true, maxVideos: 2 });
     expect(item(est, 'B-roll 生图')).toMatchObject({ low: 0.8, yuan: 1.2 });
     expect(item(est, 'B-roll 视频')).toMatchObject({ low: 0, yuan: 4.8 });
-    expect(est.low).toBe(1.05);
-    expect(est.high).toBe(6.25);
+    expect(item(est, 'B-roll 联网搜索')).toMatchObject({ low: 0.2, yuan: 0.3 }); // 每个截图需求 0.05，沿用生图数口径（4 ~ 6 个）
+    expect(est.low).toBe(1.25);
+    expect(est.high).toBe(6.55);
   });
 
   it('不取素材时没有 B-roll 项；maxVideos 为 0 时视频项为 0', () => {
@@ -54,7 +55,7 @@ describe('estimateCost', () => {
 describe('formatEstimate', () => {
   it('显示区间、上限与明细；未超预算时没有降级提示', () => {
     const text = formatEstimate(estimateCost({ ...base, broll: true }), 10);
-    expect(text).toContain('预估花费 ¥1.05–¥3.85（上限 ¥10.00）');
+    expect(text).toContain('预估花费 ¥1.25–¥4.15（上限 ¥10.00）');
     expect(text).toContain('剪口误 ¥0.15');
     expect(text).toContain('B-roll 视频（Seedance） ¥0.00–¥2.40');
     expect(text).not.toContain('自动降级');
@@ -62,6 +63,6 @@ describe('formatEstimate', () => {
 
   it('最高值超出预算时提示自动降级', () => {
     const text = formatEstimate(estimateCost({ ...base, broll: true, maxVideos: 5 }), 3);
-    expect(text).toContain('预估最高 ¥13.45，超过上限 ¥3.00：将自动降级（不用 Seedance，必要时少生图）');
+    expect(text).toContain('预估最高 ¥13.75，超过上限 ¥3.00：将自动降级（不用 Seedance，必要时少生图）');
   });
 });

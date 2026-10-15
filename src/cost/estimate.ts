@@ -1,9 +1,13 @@
+import { EST_TASK_YUAN } from '../llm/kexiang-task.js';
+
 /** 开跑前的花费预估：系数来自实测，全部写成具名常量；low 为「可能不需要」时的下限，high 为最坏情况 */
 export const CUT_YUAN_PER_MIN = 0.15;
 export const POLISH_YUAN_PER_MIN = 0.05;
 export const STORYBOARD_YUAN_PER_MIN = 0.05;
-export const IMAGE_YUAN = 0.2;
-export const VIDEO_YUAN = 2.4;
+export const IMAGE_YUAN = EST_TASK_YUAN.image;
+export const VIDEO_YUAN = EST_TASK_YUAN.video;
+/** B-roll 联网搜索（找截图网址）每个截图需求的预估花费 */
+export const SEARCH_YUAN = 0.05;
 export const BG_PROMPT_YUAN = IMAGE_YUAN;
 /** B-roll 生图密度：low 每 15 秒 1 张，high 每 10 秒 1 张 */
 export const BROLL_SEC_PER_IMAGE_LOW = 15;
@@ -38,7 +42,7 @@ export function estimateCost(opts: EstimateOptions): Estimate {
     item('字幕校对', min * POLISH_YUAN_PER_MIN, min * POLISH_YUAN_PER_MIN),
     item('分镜', min * STORYBOARD_YUAN_PER_MIN, min * STORYBOARD_YUAN_PER_MIN),
     ...(opts.bgPrompt ? [item('背景生图', BG_PROMPT_YUAN, BG_PROMPT_YUAN)] : []),
-    ...(opts.broll ? [item('B-roll 生图', imagesLow * IMAGE_YUAN, imagesHigh * IMAGE_YUAN), item('B-roll 视频（Seedance）', 0, opts.maxVideos * VIDEO_YUAN)] : []),
+    ...(opts.broll ? [item('B-roll 生图', imagesLow * IMAGE_YUAN, imagesHigh * IMAGE_YUAN), item('B-roll 视频（Seedance）', 0, opts.maxVideos * VIDEO_YUAN), item('B-roll 联网搜索', imagesLow * SEARCH_YUAN, imagesHigh * SEARCH_YUAN)] : []),
     ...(opts.cover ?? true ? [item('封面', COVER_YUAN, COVER_YUAN * COVER_HIGH_FACTOR)] : []),
     ...(opts.qa ? [item('卡片自检', cards * QA_CARD_YUAN, cards * QA_CARD_YUAN * QA_HIGH_FACTOR)] : []),
   ];

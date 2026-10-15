@@ -19,6 +19,8 @@ export interface BrollContext {
   task?: TaskClient;
   /** 统一记账；缺省时按 broll.budgetYuan 在本步内累计检查 */
   meter?: CostMeter;
+  /** 给后续步骤（封面）预留的花费，预算检查时一并扣除，缺省 0 */
+  reserveYuan?: number;
   onProgress?: (e: ProgressEvent) => void;
 }
 type Complete = (step: 'broll', message: string, patch?: ProjectPatch) => ProjectFile;
@@ -109,7 +111,7 @@ function progressHooks(ctx: BrollContext, total: number): Pick<FulfillOptions, '
 async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: Storyboard, durationSec: number, complete: Complete): Promise<Storyboard> {
   try {
     const res = await fulfillVisuals(storyboard, resolveDeps(ctx, broll), {
-      workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter,
+      workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter, reserveYuan: ctx.reserveYuan,
       ...progressHooks(ctx, visualsOf(storyboard).length),
     });
     complete('broll', brollSummary(res.assets, res.failures.length, res.costYuan),

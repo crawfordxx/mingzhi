@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { burnSubtitles } from '../src/captions/burn.js';
 import { toAss } from '../src/captions/ass.js';
 import { loadConfig } from '../src/config.js';
+import { CostMeter } from '../src/cost/meter.js';
 import type { LlmClient } from '../src/llm/kexiang.js';
 import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
@@ -207,6 +208,22 @@ describe('runPipeline 背景提前校验', () => {
       input, workDir, output: join(workDir, 'out.mp4'), cfg: loadConfig({}), llm, background: { kind: 'prompt', prompt: '海边' },
     })).rejects.toThrow('MINGZHI_KX_KEY');
     expect(existsSync(join(workDir, 'project.json'))).toBe(false);
+  });
+});
+
+describe('runPipeline 失败时保留花费', () => {
+  it('步骤抛错（输入没有音轨）时 finally 仍把已花费写进 project.json，并保留原错误', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-fail-'));
+    const input = join(workDir, 'silent.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=270x480:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input]);
+    const meter = new CostMeter({}, 10);
+    meter.addTask('M', 0.6, '前序生图');
+    const llm: LlmClient = { chatJson: async () => { throw new Error('不应调用模型'); } };
+    await expect(runPipeline({ input, workDir, output: join(workDir, 'out.mp4'), cfg, llm, meter })).rejects.toThrow('没有音轨');
+    const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
+    expect(project.costs).toMatchObject({ total: 0.6, budget: 10 });
+    expect(project.costs?.entries).toHaveLength(1);
   });
 });
 

@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { COVER_YUAN } from '../cost/estimate.js';
 import { CostMeter } from '../cost/meter.js';
 import type { Transcript } from '../asr/types.js';
 import { transcribeWav } from '../asr/local-asr.js';
@@ -102,7 +103,7 @@ export function throttledMatteProgress(emit: (e: ProgressEvent) => void): (done:
 /** 换背景：落地背景图 → 抠像合成到 person.mp4；返回之后要烧字幕的视频 */
 async function replaceBackground(args: PipelineArgs, cut: string, complete: Complete): Promise<string> {
   if (!args.background) return cut;
-  const bg = await resolveBackground(args.background, args.workDir, args.task);
+  const bg = await resolveBackground(args.background, args.workDir, args.task, undefined, args.meter);
   complete('background', `背景：${describeBackground(bg.spec)}`, { background: { spec: bg.spec, path: bg.path } });
   const person = join(args.workDir, 'person.mp4');
   const started = Date.now();
@@ -165,7 +166,7 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
 
   if (relative(workDir, base).startsWith('..')) throw new Error(`人像视频必须在工作目录内：${base}`);
   const planned = await planStoryboard(llm, captions, a.plan.outputDurationSec, complete);
-  const storyboard = await runBroll(args, planned, a.plan.outputDurationSec, complete);
+  const storyboard = await runBroll({ ...args, reserveYuan: args.cover === false ? 0 : COVER_YUAN }, planned, a.plan.outputDurationSec, complete);
   return { captions, storyboard, base, subject: project.subject ?? null };
 }
 
@@ -205,6 +206,16 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
     args.onProgress?.({ step, message });
     return project;
   };
+  try {
+    return await runSteps(args, projectPath, complete);
+  } finally {
+    // 无论成败都把最新账目落盘：失败时钱已经花了；写盘失败不能盖掉原错误
+    try { record({ costs: costsOf(meter) }); } catch { /* 忽略：保留 try 块里的原始错误 */ }
+  }
+}
+
+/** 分析 → 制作 → 成片 → 封面 */
+async function runSteps(args: PipelineArgs, projectPath: string, complete: Complete): Promise<PipelineResult> {
   const analysis = await analyze(args, complete);
   const produced = await produce(args, analysis, complete);
   await compose(args, analysis, produced, complete);

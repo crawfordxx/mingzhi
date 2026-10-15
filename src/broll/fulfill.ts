@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { SEARCH_YUAN } from '../cost/estimate.js';
 import type { CostMeter } from '../cost/meter.js';
-import type { TaskClient } from '../llm/kexiang-task.js';
+import { EST_TASK_YUAN, type TaskClient } from '../llm/kexiang-task.js';
 import { normalizeStoryboard } from '../storyboard/normalize.js';
 import type { Storyboard, Visual } from '../storyboard/schema.js';
 import { visualsOf, type VisualNeed } from '../storyboard/visuals.js';
@@ -29,6 +30,8 @@ export interface FulfillOptions {
   budgetYuan: number;
   /** 统一记账：预算检查读 meter.canSpend（含前面步骤已花的钱）；costYuan 仅用于展示，不再参与预算判断 */
   meter?: CostMeter;
+  /** 预算检查时给后续步骤（如封面）预留的花费（元），缺省 0 */
+  reserveYuan?: number;
   /** 某个素材开始获取前回调（缓存命中不回调） */
   onStart?: (need: VisualNeed) => void;
   onAsset?: (a: BrollAsset | { key: string; failed: string }) => void;
@@ -39,14 +42,15 @@ export interface FulfillOptions {
 export interface FulfillResult { storyboard: Storyboard; assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number }
 
 /** 单次付费请求的预估花费（元），用于发起前的预算检查；接口没返回 cost 时也按它计 */
-const EST_IMAGE_YUAN = 0.2;
-const EST_VIDEO_YUAN = 2.4;
+const EST_IMAGE_YUAN = EST_TASK_YUAN.image;
+const EST_VIDEO_YUAN = EST_TASK_YUAN.video;
+const EST_SEARCH_YUAN = SEARCH_YUAN;
 const OVER_BUDGET = '超出预算';
 const SEARCH_TRIES = 2;
 const PEXELS_WORDS = 6;
 
 type Attempt = { asset: BrollAsset } | { reason: string };
-interface Env { deps: BrollDeps; workDir: string; budgetYuan: number; maxVideos: number; meter?: CostMeter; onStatus?: (status: string) => void }
+interface Env { deps: BrollDeps; workDir: string; budgetYuan: number; maxVideos: number; meter?: CostMeter; reserveYuan: number; onStatus?: (status: string) => void }
 /** yuan：已花费；videos：已发起（含失败、含缓存命中）的视频请求数 */
 interface Spend { yuan: number; videos: number }
 
@@ -76,8 +80,8 @@ export function makeDeps(opts: { apiKey: string; task: TaskClient; cfg: AppConfi
   };
 }
 
-/** 再花 estimate 元是否仍在预算内：有 meter 以 meter 为准，否则按本步已花费累计 */
-const canAfford = (env: Env, spend: Spend, estimate: number): boolean => (env.meter ? env.meter.canSpend(estimate) : spend.yuan + estimate <= env.budgetYuan);
+/** 再花 estimate 元（并为后续步骤留出 reserveYuan）是否仍在预算内：有 meter 以 meter 为准，否则按本步已花费累计 */
+const canAfford = (env: Env, spend: Spend, estimate: number): boolean => (env.meter ? env.meter.canSpend(estimate + env.reserveYuan) : spend.yuan + estimate + env.reserveYuan <= env.budgetYuan);
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const relFile = (key: string, ext: string): string => `broll/${key}.${ext}`;
@@ -123,8 +127,9 @@ function findCached(env: Env, key: string, source: Visual['source'], videoReques
   return hit ? { key, file: relFile(key, hit[0]), source: hit[1], cached: true } : undefined;
 }
 
-async function tryScreenshot(env: Env, key: string, need: { url?: string; query?: string }): Promise<Attempt> {
+async function tryScreenshot(env: Env, key: string, need: { url?: string; query?: string }, spend: Spend): Promise<Attempt> {
   const file = relFile(key, 'png');
+  if (!need.url && !canAfford(env, spend, EST_SEARCH_YUAN)) return { reason: OVER_BUDGET };
   let urls: string[];
   try {
     urls = need.url ? [need.url] : (await env.deps.search(need.query ?? '')).slice(0, SEARCH_TRIES);
@@ -184,7 +189,7 @@ async function fetchAsset(env: Env, need: VisualNeed, key: string, spend: Spend)
     const { attempt, tried } = await tryVideo(env, key, v.prompt, spend);
     return { outcome: 'asset' in attempt ? attempt : await tryGenerate(env, key, v.prompt, spend), videoTried: tried };
   }
-  const shot = await tryScreenshot(env, key, v);
+  const shot = await tryScreenshot(env, key, v, spend);
   if ('asset' in shot || need.template !== 'photo') return { outcome: shot, videoTried: false };
   const original = v.query ?? v.url ?? '';
   const gen = await tryGenerate(env, key, `Editorial photo illustrating: ${original}`, spend, original);
@@ -230,7 +235,7 @@ function existingFiles(storyboard: Storyboard, workDir: string): string[] {
  */
 export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, opts: FulfillOptions): Promise<FulfillResult> {
   mkdirSync(join(opts.workDir, 'broll'), { recursive: true });
-  const env: Env = { deps, workDir: opts.workDir, budgetYuan: opts.budgetYuan, maxVideos: opts.maxVideos, meter: opts.meter, onStatus: opts.onStatus };
+  const env: Env = { deps, workDir: opts.workDir, budgetYuan: opts.budgetYuan, maxVideos: opts.maxVideos, meter: opts.meter, reserveYuan: opts.reserveYuan ?? 0, onStatus: opts.onStatus };
   let current = storyboard;
   let assets: BrollAsset[] = [];
   let failures: FulfillResult['failures'] = [];
