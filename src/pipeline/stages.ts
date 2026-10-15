@@ -147,8 +147,9 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   const cards = res.storyboard.shots.filter((s) => s.card).length;
   const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
   const retry = res.retryError ? ` · 重试失败（已用首次结果）：${res.retryError}` : '';
+  const facts = res.unsupported.length > 0 ? ` · 去掉 ${res.unsupported.length} 处口播里没有的数字（${res.unsupported.join('、')}）` : '';
   const patch = { storyboard: res.storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped };
-  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${retry}`, patch);
+  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${facts}${retry}`, patch);
   return res.storyboard;
 }
 

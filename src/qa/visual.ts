@@ -134,7 +134,7 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
       if (opts.keep?.includes(index)) { skipped = KEEP_NOTE; break; }
       if (!canAffordStep(opts)) { skipped = `预算不足，停止重写${reserveNote(opts)}`; break; }
       const base = versions.reduce(better);
-      const next = await reviseCard(opts.client, { ...shot, card: base.card }, captionsIn(opts.captions, shot), base.score, images);
+      const next = await reviseCard(opts.client, { ...shot, card: base.card }, captionsIn(opts.captions, shot), base.score, images, opts.captions);
       if (!next) { skipped = '重写结果无效，保留现有版本'; break; }
       revised += 1;
       card = next;
