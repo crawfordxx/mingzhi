@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import ort from 'onnxruntime-node';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,6 +45,28 @@ describe.skipIf(!hasRvm())('matteVideo（需要 RVM 模型）', () => {
     await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x808080:s=180x320:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input]);
     return input;
   }
+
+  it('抠像结束（成功或失败）都释放 ORT 会话', async () => {
+    const cfg = loadConfig({});
+    const dir = mkdtempSync(join(tmpdir(), 'mz-rvm-rel-'));
+    const input = await makeClip(cfg, dir);
+    const released: string[] = [];
+    const realCreate = ort.InferenceSession.create.bind(ort.InferenceSession);
+    const spy = vi.spyOn(ort.InferenceSession, 'create').mockImplementation(async (...a) => {
+      const session = await realCreate(...a);
+      const realRelease = session.release.bind(session);
+      session.release = async () => { released.push('released'); await realRelease(); };
+      return session;
+    });
+    try {
+      await matteVideo({ input, output: join(dir, 'ok.mp4'), backgroundPath: presetPath('cafe'), cfg });
+      expect(released).toHaveLength(1);
+      await expect(matteVideo({ input, output: join(dir, 'no-such-dir', 'out.mp4'), backgroundPath: presetPath('cafe'), cfg })).rejects.toThrow(/失败|错误/);
+      expect(released).toHaveLength(2);
+    } finally {
+      spy.mockRestore();
+    }
+  }, 60_000);
 
   it('输出目录不存在时报错退出，不挂起也不产生未处理的 rejection', async () => {
     const cfg = loadConfig({});

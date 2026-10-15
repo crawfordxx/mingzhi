@@ -55,6 +55,11 @@ describe('KexiangTaskClient', () => {
     await expect(new KexiangTaskClient('k', b.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('任务超过套餐限制');
   });
 
+  it('提交返回 id 为 null 时视为提交失败', async () => {
+    const { impl } = fakeFetch([{ body: { id: null, msg: '提交被拒绝' } }]);
+    await expect(new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('可想任务提交失败');
+  });
+
   it('轮询总时长超过 timeoutMs 时报超时', async () => {
     const { impl } = fakeFetch([{ body: { id: 1 } }, ...Array.from({ length: 5 }, () => ({ body: { task_status: 'running' } }))]);
     await expect(new KexiangTaskClient('k', impl, noSleep, 10).run({ modelName: 'M', modelType: 't' }, { kind: 'image', timeoutMs: 30 })).rejects.toThrow('超时');
@@ -125,5 +130,18 @@ describe('downloadTo', () => {
     expect(existsSync(join(dir, 'a.jpg.part'))).toBe(false);
     const bad = (async () => new Response('no', { status: 404 })) as unknown as typeof fetch;
     await expect(downloadTo('https://x/b.jpg', join(dir, 'b.jpg'), bad)).rejects.toThrow('404');
+  });
+
+  it('下载中途失败时删除 .part 文件并继续抛错', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-dl-'));
+    const broken = (async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('half'));
+        setTimeout(() => controller.error(new Error('连接中断')), 20);
+      },
+    }))) as unknown as typeof fetch;
+    await expect(downloadTo('https://x/c.jpg', join(dir, 'c.jpg'), broken)).rejects.toThrow();
+    expect(existsSync(join(dir, 'c.jpg.part'))).toBe(false);
+    expect(existsSync(join(dir, 'c.jpg'))).toBe(false);
   });
 });

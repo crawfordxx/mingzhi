@@ -29,6 +29,28 @@ describe('parseProbe', () => {
     expect(() => parseProbe({ streams: [{ ...video, duration: undefined }] })).toThrow('无法读取视频时长');
   });
 
+  describe('旋转视频返回显示尺寸', () => {
+    const base = { codec_type: 'video', width: 1920, height: 1080, r_frame_rate: '30/1' };
+    const dims = (video: object): [number, number] => {
+      const info = parseProbe({ format: { duration: '1' }, streams: [{ ...base, ...video }] });
+      return [info.width, info.height];
+    };
+    it('side_data_list 的 displaymatrix 旋转 -90 / 90 / 270 时宽高互换', () => {
+      expect(dims({ side_data_list: [{ side_data_type: 'Display Matrix', rotation: -90 }] })).toEqual([1080, 1920]);
+      expect(dims({ side_data_list: [{ side_data_type: 'Display Matrix', rotation: 90 }] })).toEqual([1080, 1920]);
+      expect(dims({ side_data_list: [{ rotation: 270 }] })).toEqual([1080, 1920]);
+    });
+    it('tags.rotate 为 90 时宽高互换', () => {
+      expect(dims({ tags: { rotate: '90' } })).toEqual([1080, 1920]);
+      expect(dims({ tags: { rotate: '-270' } })).toEqual([1080, 1920]);
+    });
+    it('旋转 180 或 0 不互换', () => {
+      expect(dims({ side_data_list: [{ rotation: 180 }] })).toEqual([1920, 1080]);
+      expect(dims({ side_data_list: [{ rotation: -180 }] })).toEqual([1920, 1080]);
+      expect(dims({ tags: { rotate: '0' } })).toEqual([1920, 1080]);
+    });
+  });
+
   it('没有视频流时报错', () => {
     expect(() => parseProbe({ format: { duration: '1' }, streams: [{ codec_type: 'audio' }] })).toThrow('没有视频流');
   });

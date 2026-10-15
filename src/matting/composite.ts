@@ -4,7 +4,7 @@ export interface SubjectBox { top: number; bottom: number; left: number; right: 
 
 /** RVM 建议推理分辨率的长边在 256–512：长边缩到 512，小视频不放大 */
 const TARGET_LONG_SIDE = 512;
-/** 每个通道增益的上下限，避免把人调成别的颜色 */
+/** 白平衡因子、亮度因子各自的上下限，避免把人调成别的颜色 */
 const MIN_GAIN = 0.85;
 const MAX_GAIN = 1.15;
 
@@ -36,14 +36,14 @@ export function foregroundMean(fgr: Float32Array, pha: Float32Array, pixels: num
   return n === 0 ? null : [sum[0] / n, sum[1] / n, sum[2] / n];
 }
 
-/** 人物朝背景靠拢的逐通道增益：白平衡按「色度比」的 wbStrength 次方、亮度按「亮度比」的 lumStrength 次方，各通道限制在 0.85–1.15 */
+/** 人物朝背景靠拢的逐通道增益：白平衡按「色度比」的 wbStrength 次方（逐通道）、亮度按「亮度比」的 lumStrength 次方，两个因子各自限制在 0.85–1.15 后相乘 */
 export function colorMatchGains(fg: Rgb, bg: Rgb, wbStrength = 0.3, lumStrength = 0.2): Rgb {
   const fgL = Math.max(luma(fg), 1e-4);
   const bgL = Math.max(luma(bg), 1e-4);
-  const lumGain = (bgL / fgL) ** lumStrength;
+  const lumGain = clamp((bgL / fgL) ** lumStrength, MIN_GAIN, MAX_GAIN);
   const gain = (c: 0 | 1 | 2): number => {
     const ratio = (bg[c] / bgL) / Math.max(fg[c] / fgL, 1e-4);
-    return clamp(Math.max(ratio, 1e-4) ** wbStrength * lumGain, MIN_GAIN, MAX_GAIN);
+    return clamp(Math.max(ratio, 1e-4) ** wbStrength, MIN_GAIN, MAX_GAIN) * lumGain;
   };
   return [gain(0), gain(1), gain(2)];
 }

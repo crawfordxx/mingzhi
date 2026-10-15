@@ -9,7 +9,11 @@ export interface MediaInfo {
   hasAudio: boolean;
 }
 
-interface ProbeStream { codec_type?: string; width?: number; height?: number; r_frame_rate?: string; duration?: string }
+interface ProbeStream {
+  codec_type?: string; width?: number; height?: number; r_frame_rate?: string; duration?: string;
+  tags?: { rotate?: string };
+  side_data_list?: { rotation?: number }[];
+}
 interface ProbeJson { format?: { duration?: string }; streams?: ProbeStream[] }
 
 function parseRate(rate: string | undefined): number {
@@ -25,15 +29,23 @@ function parseDuration(format: string | undefined, stream: string | undefined): 
   return sec;
 }
 
+/** 手机竖拍的视频常是横向编码 + 旋转标记；旋转 ±90/±270 时显示宽高与编码宽高互换 */
+function isQuarterTurn(video: ProbeStream): boolean {
+  const raw = video.side_data_list?.find((d) => typeof d.rotation === 'number')?.rotation ?? Number(video.tags?.rotate ?? 0);
+  const degrees = Number.isFinite(raw) ? Math.abs(Math.round(raw)) % 180 : 0;
+  return degrees === 90;
+}
+
 export function parseProbe(json: unknown): MediaInfo {
   const data = json as ProbeJson;
   const streams = data.streams ?? [];
   const video = streams.find((s) => s.codec_type === 'video');
   if (!video || !video.width || !video.height) throw new Error('输入文件没有视频流');
+  const swap = isQuarterTurn(video);
   return {
     durationSec: parseDuration(data.format?.duration, video.duration),
-    width: video.width,
-    height: video.height,
+    width: swap ? video.height : video.width,
+    height: swap ? video.width : video.height,
     fps: parseRate(video.r_frame_rate),
     hasAudio: streams.some((s) => s.codec_type === 'audio'),
   };

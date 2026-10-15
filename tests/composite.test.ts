@@ -32,11 +32,23 @@ describe('colorMatchGains', () => {
     expect(r).toBeGreaterThan(1);
     expect(b).toBeLessThan(1);
   });
-  it('背景更亮时整体增益 >1；每个通道限制在 0.85–1.15', () => {
+  it('背景更亮时整体增益 >1；白平衡与亮度因子各限制在 0.85–1.15，乘积落在 0.85²–1.15²', () => {
     const lum = colorMatchGains([0.3, 0.3, 0.3], [0.6, 0.6, 0.6]);
     lum.forEach((v) => expect(v).toBeGreaterThan(1));
     const extreme = colorMatchGains([0.9, 0.1, 0.1], [0.1, 0.1, 0.9], 1, 1);
-    extreme.forEach((v) => { expect(v).toBeGreaterThanOrEqual(0.85); expect(v).toBeLessThanOrEqual(1.15); });
+    extreme.forEach((v) => { expect(v).toBeGreaterThanOrEqual(0.85 ** 2 - 1e-9); expect(v).toBeLessThanOrEqual(1.15 ** 2 + 1e-9); });
+  });
+  it('前景灰、背景暗中性色时三通道增益相等（只变亮度、不偏色）', () => {
+    const [r, g, b] = colorMatchGains([0.5, 0.5, 0.5], [0.2, 0.2, 0.2]);
+    expect(r).toBeCloseTo(g, 10);
+    expect(g).toBeCloseTo(b, 10);
+    expect(r).toBeLessThan(1);
+  });
+  it('白平衡因子与亮度因子分别限幅后相乘：亮度被压到下限时，白平衡调整不会被一并吞掉', () => {
+    // 背景偏暖且很暗：白平衡 r 因子限到 1.15、b 因子限到 0.85，亮度因子限到 0.85
+    const [r, , b] = colorMatchGains([0.5, 0.5, 0.5], [0.24, 0.2, 0.16], 1, 1);
+    expect(r).toBeCloseTo(1.15 * 0.85, 10);
+    expect(b).toBeCloseTo(0.85 * 0.85, 10);
   });
   it('强度为 0 时不调整', () => {
     colorMatchGains([0.3, 0.4, 0.5], [0.6, 0.5, 0.2], 0, 0).forEach((v) => expect(v).toBeCloseTo(1, 5));

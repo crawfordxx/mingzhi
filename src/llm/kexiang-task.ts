@@ -1,4 +1,4 @@
-import { createWriteStream, renameSync } from 'node:fs';
+import { createWriteStream, renameSync, rmSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
@@ -34,8 +34,8 @@ export class KexiangTaskClient implements TaskClient {
   }
 
   private async runOnce(input: TaskInput, { kind, timeoutMs = 20 * 60_000, onStatus }: TaskRunOptions): Promise<TaskResult> {
-    const submitted = await this.request<{ id?: number | string }>(`${KEXIANG_TASK_BASE}/asyncCreateWithCost`, { method: 'POST', body: JSON.stringify({ user_input: input }) });
-    if (submitted.id === undefined) throw new Error(`可想任务提交失败：${JSON.stringify(submitted).slice(0, 200)}`);
+    const submitted = await this.request<{ id?: number | string | null }>(`${KEXIANG_TASK_BASE}/asyncCreateWithCost`, { method: 'POST', body: JSON.stringify({ user_input: input }) });
+    if (submitted.id == null) throw new Error(`可想任务提交失败：${JSON.stringify(submitted).slice(0, 200)}`);
     const taskId = String(submitted.id);
     let pollFailures = 0;
     for (let waited = 0; waited < timeoutMs; waited += this.pollMs) {
@@ -77,6 +77,11 @@ export async function downloadTo(url: string, dest: string, fetchImpl: typeof fe
   const res = await fetchImpl(url, { signal: AbortSignal.timeout(5 * 60_000) });
   if (!res.ok || !res.body) throw new Error(`下载失败 ${res.status}：${url}`);
   const part = `${dest}.part`;
-  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(part));
-  renameSync(part, dest);
+  try {
+    await pipeline(Readable.fromWeb(res.body as never), createWriteStream(part));
+    renameSync(part, dest);
+  } catch (err) {
+    rmSync(part, { force: true });
+    throw err;
+  }
 }

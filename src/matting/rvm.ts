@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import ort from 'onnxruntime-node';
 import type { AppConfig } from '../config.js';
 import { loadBackgroundRgb } from '../background/prepare.js';
-import { probe } from '../media/probe.js';
+import { probe, type MediaInfo } from '../media/probe.js';
 import { alphaBox, chooseDownsample, colorMatchGains, compositeFrame, foregroundMean, meanRgb, medianBox, type Rgb, type SubjectBox } from './composite.js';
 
 export const RVM_FILE = 'rvm_mobilenetv3_fp32.onnx';
@@ -55,6 +55,10 @@ class RvmSession {
   }
   reset(): void {
     this.state = zeroState();
+  }
+  /** 释放 ORT 原生会话（模型权重与推理缓冲区），用完必须调用 */
+  release(): Promise<void> {
+    return this.session.release();
   }
 }
 
@@ -163,8 +167,16 @@ async function rootCause(err: unknown, enc: Encoder): Promise<string> {
 /** 整段抠像换背景：解码 → RVM → 合成 → x264 编码（30fps），音轨从输入直接拷贝 */
 export async function matteVideo(opts: MatteOptions): Promise<MatteResult> {
   const media = await probe(opts.input, opts.cfg);
+  const rvm = await RvmSession.create(opts.cfg.modelsDir, media.width, media.height);
+  try {
+    return await matteWith(rvm, opts, media);
+  } finally {
+    await rvm.release();
+  }
+}
+
+async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo): Promise<MatteResult> {
   const { width: w, height: h } = media;
-  const rvm = await RvmSession.create(opts.cfg.modelsDir, w, h);
   const bg = await loadBackgroundRgb(opts.backgroundPath, w, h, opts.blurSigma ?? DEFAULT_BLUR, opts.cfg);
   const fgMean = opts.colorMatch === false ? null : await sampleForeground(rvm, opts, w, h, media.durationSec);
   const gains: Rgb = fgMean ? colorMatchGains(fgMean, meanRgb(bg)) : [1, 1, 1];

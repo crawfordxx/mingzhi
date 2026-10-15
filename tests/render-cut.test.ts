@@ -9,9 +9,9 @@ import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 
 describe('buildCutFilter', () => {
-  it('每段 fps=30 归一化后 trim、atrim + 20ms 淡入淡出，最后 concat', () => {
+  it('每段 fps=30 归一化、宽高取偶后 trim、atrim + 20ms 淡入淡出，最后 concat', () => {
     const f = buildCutFilter([{ start: 0, end: 1 }, { start: 2.5, end: 3 }]);
-    expect(f).toContain('[0:v]fps=30,trim=start=0:end=1,setpts=PTS-STARTPTS[v0]');
+    expect(f).toContain('[0:v]fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,trim=start=0:end=1,setpts=PTS-STARTPTS[v0]');
     expect(f).toContain('[0:a]apad,atrim=start=2.5:end=3,asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.02,afade=t=out:st=0.48:d=0.02[a1]');
     expect(f.endsWith('[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]')).toBe(true);
   });
@@ -33,6 +33,19 @@ describe('renderCut（ffmpeg）', () => {
     expect(info.durationSec).toBeGreaterThan(1.9);
     expect(info.durationSec).toBeLessThan(2.15);
     expect(info.fps).toBe(30);
+  });
+
+  it('奇数宽高的输入（181×321）也能渲染，输出宽高取偶', async () => {
+    const cfg = loadConfig({});
+    const dir = mkdtempSync(join(tmpdir(), 'mz-'));
+    const input = join(dir, 'odd.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=red:s=181x321:r=30:d=1', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono',
+      '-t', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv444p', '-c:a', 'aac', input]);
+    expect((await probe(input, cfg)).width).toBe(181);
+    const out = join(dir, 'cut.mp4');
+    await renderCut(input, [{ start: 0, end: 1 }], out, cfg);
+    const info = await probe(out, cfg);
+    expect([info.width, info.height]).toEqual([180, 320]);
   });
 
   it('切 60 段以上时成片时长与剪辑方案一致到 1 帧以内', async () => {

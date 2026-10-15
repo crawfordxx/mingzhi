@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PRESETS, presetPath } from '../src/background/presets.js';
-import { BG_IMAGE_MODEL, parseBackgroundArgs, resolveBackground } from '../src/background/resolve.js';
+import { BG_IMAGE_MODEL, parseBackgroundArgs, resolveBackground, validateBackground } from '../src/background/resolve.js';
 import { loadBackgroundRgb } from '../src/background/prepare.js';
 import type { TaskClient, TaskInput } from '../src/llm/kexiang-task.js';
 import { loadConfig } from '../src/config.js';
+import { RVM_FILE } from '../src/matting/rvm.js';
 
 describe('presets', () => {
   it('10 张预设，文件都存在', () => {
@@ -64,5 +65,38 @@ describe('loadBackgroundRgb', () => {
     expect(sharp.length).toBe(90 * 160 * 3);
     expect(blurred.length).toBe(90 * 160 * 3);
     expect(blurred.equals(sharp)).toBe(false);
+  });
+});
+
+describe('validateBackground（流程开始前的快速校验）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mz-vbg-'));
+  const modelsDir = join(dir, 'models');
+  mkdirSync(modelsDir);
+  const cfgNoModel = { ...loadConfig({}), modelsDir };
+  const cfgWithModel = { ...cfgNoModel };
+  writeFileSync(join(dir, 'models', RVM_FILE), '');
+  const img = join(dir, 'bg.jpg');
+  writeFileSync(img, 'x');
+  const task: TaskClient = { run: async () => ({ taskId: '1', url: 'u' }) };
+
+  it('缺少抠像模型时报错并提示 fetch-models', () => {
+    const empty = { ...cfgNoModel, modelsDir: join(dir, 'empty') };
+    expect(() => validateBackground({ kind: 'preset', id: 'study' }, empty)).toThrow('pnpm fetch-models');
+  });
+  it('预设、存在的图片文件、带 task 的提示词都通过', () => {
+    expect(() => validateBackground({ kind: 'preset', id: 'study' }, cfgWithModel)).not.toThrow();
+    expect(() => validateBackground({ kind: 'file', path: img }, cfgWithModel)).not.toThrow();
+    expect(() => validateBackground({ kind: 'prompt', prompt: '海边' }, cfgWithModel, task)).not.toThrow();
+  });
+  it('文件不存在或是目录时报错', () => {
+    expect(() => validateBackground({ kind: 'file', path: join(dir, 'nope.jpg') }, cfgWithModel)).toThrow('背景图片不存在或不是文件');
+    expect(() => validateBackground({ kind: 'file', path: dir }, cfgWithModel)).toThrow('背景图片不存在或不是文件');
+  });
+  it('看起来像预设 id（无扩展名）的不存在路径，错误里列出可用预设', () => {
+    expect(() => validateBackground({ kind: 'file', path: join(dir, 'beach') }, cfgWithModel)).toThrow('study');
+    expect(() => validateBackground({ kind: 'file', path: join(dir, 'nope.jpg') }, cfgWithModel)).not.toThrow('study');
+  });
+  it('一句话生成但没有任务客户端时提前报错', () => {
+    expect(() => validateBackground({ kind: 'prompt', prompt: 'x' }, cfgWithModel)).toThrow('MINGZHI_KX_KEY');
   });
 });

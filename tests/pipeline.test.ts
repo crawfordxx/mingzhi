@@ -90,8 +90,14 @@ describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR �
     const output = join(workDir, 'out.mp4');
     const llm: LlmClient = { chatJson: async (o) => (o.system.includes('字幕') ? { lines: ['我平时经常在 GitHub 上面'] } : { cuts: [] }) };
     const steps: string[] = [];
-    await runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output, cfg, llm, background: { kind: 'preset', id: 'study' }, onProgress: (e: ProgressEvent) => steps.push(e.step) });
-    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'burn', 'done']);
+    const events: ProgressEvent[] = [];
+    await runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output, cfg, llm, background: { kind: 'preset', id: 'study' }, onProgress: (e: ProgressEvent) => { steps.push(e.step); events.push(e); } });
+    // 抠像期间的节流进度（不落盘）也算 matte 步骤，必须出现在 matte 完成消息之前
+    const matteMessages = events.filter((e) => e.step === 'matte').map((e) => e.message);
+    expect(matteMessages.length).toBeGreaterThan(1);
+    expect(matteMessages[0]).toMatch(/抠像 \d+\/\d+ 帧/);
+    expect(matteMessages[matteMessages.length - 1]).toContain('抠像换背景完成');
+    expect(steps.filter((s) => s !== 'matte')).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'captions', 'burn', 'done']);
     const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
     expect(project.background?.spec).toEqual({ kind: 'preset', id: 'study' });
     expect(project.artifacts.person).toBe(join(workDir, 'person.mp4'));
@@ -99,5 +105,29 @@ describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR �
     expect('subject' in project).toBe(true);
     const info = await probe(output, cfg);
     expect(info.hasAudio).toBe(true);
+  });
+});
+
+describe('runPipeline 背景提前校验', () => {
+  const llm: LlmClient = { chatJson: async () => { throw new Error('不应调用模型'); } };
+  const input = join(import.meta.dirname, 'fixtures', 'talk.mp4');
+
+  it('背景图片不存在时在任何耗时步骤之前报错，不产生 project.json', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-fast-'));
+    const events: ProgressEvent[] = [];
+    await expect(runPipeline({
+      input, workDir, output: join(workDir, 'out.mp4'), cfg: loadConfig({}), llm,
+      background: { kind: 'file', path: join(workDir, 'nope.jpg') }, onProgress: (e) => events.push(e),
+    })).rejects.toThrow('背景图片不存在或不是文件');
+    expect(events).toEqual([]);
+    expect(existsSync(join(workDir, 'project.json'))).toBe(false);
+  });
+
+  it('一句话生成背景但没有 task 时提前报缺 key', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-fast-'));
+    await expect(runPipeline({
+      input, workDir, output: join(workDir, 'out.mp4'), cfg: loadConfig({}), llm, background: { kind: 'prompt', prompt: '海边' },
+    })).rejects.toThrow('MINGZHI_KX_KEY');
+    expect(existsSync(join(workDir, 'project.json'))).toBe(false);
   });
 });
