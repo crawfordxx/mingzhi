@@ -37,6 +37,13 @@ describe('KexiangTaskClient', () => {
     expect(statuses).toEqual(['running']);
   });
 
+  it('可想返回的 cost 是字符串（实测 "0.6"）时转成数字；无法解析时不带 cost', async () => {
+    const a = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', cost: '0.6', service_output: { imgUrl: 'u' } } }]);
+    expect((await new KexiangTaskClient('k', a.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).cost).toBe(0.6);
+    const b = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', cost: 'n/a', service_output: { imgUrl: 'u' } } }]);
+    expect('cost' in (await new KexiangTaskClient('k', b.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' }))).toBe(false);
+  });
+
   it('视频任务取 videoUrl', async () => {
     const { impl } = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', service_output: { videoUrl: 'https://x/v.mp4' } } }]);
     const res = await new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'V', modelType: 'text2video' }, { kind: 'video' });

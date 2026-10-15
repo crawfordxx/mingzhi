@@ -13,7 +13,13 @@ export interface TaskResult { taskId: string; url: string; cost?: number }
 export interface TaskRunOptions { kind: 'image' | 'video'; timeoutMs?: number; onStatus?: (status: string) => void }
 export interface TaskClient { run(input: TaskInput, opts: TaskRunOptions): Promise<TaskResult> }
 
-interface TaskQuery { task_status?: string; cost?: number; service_output?: { imgUrl?: string; videoUrl?: string; failReason?: string } }
+interface TaskQuery { task_status?: string; cost?: number | string; service_output?: { imgUrl?: string; videoUrl?: string; failReason?: string } }
+
+/** 可想返回的 cost 可能是字符串（实测 "0.6"），统一转成数字；无法解析时不带 cost */
+const costOf = (cost: number | string | undefined): { cost?: number } => {
+  const n = cost === undefined ? NaN : Number(cost);
+  return Number.isFinite(n) ? { cost: n } : {};
+};
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -53,7 +59,7 @@ export class KexiangTaskClient implements TaskClient {
       const status = String(q.task_status ?? '').toLowerCase();
       if (out.failReason || FAILED.has(status)) throw new Error(`可想任务失败：${out.failReason ?? status}`);
       const url = kind === 'image' ? out.imgUrl : out.videoUrl;
-      if (url) return { taskId, url, ...(q.cost !== undefined ? { cost: q.cost } : {}) };
+      if (url) return { taskId, url, ...costOf(q.cost) };
       if (SUCCEEDED.has(status)) throw new Error(`可想任务 ${taskId} 已完成但没有返回${kind === 'image' ? '图片' : '视频'}地址`);
       onStatus?.(status);
     }
