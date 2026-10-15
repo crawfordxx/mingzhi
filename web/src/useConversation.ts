@@ -3,30 +3,33 @@
  * 规则：有选项时等用户选（执行 ops + 所选选项的 ops）；没有选项但有 ops 时直接执行；都没有时只是回复。
  * 输入框里的 @ 引用（TimeRef）也在这里，预览区点画面或暂停后「插入」都往这里加。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type EditOp, type Space } from './api';
 import { composeMessage, type TimeRef } from './lib/shots';
-import { loadTurns, newId, saveTurns, type AiTurn, type Turn } from './lib/turns';
+import { mergeTurns, newId, sanitizeTurns, type AiTurn, type Turn } from './lib/turns';
 import { errText } from './useWorkbench';
 
 const MAX_REFS = 4;
+const NONE: Turn[] = [];
 
 /** 引用飞入输入框的起点（屏幕坐标） */
 export interface Flying { ref: TimeRef; x: number; y: number; key: string }
 
-/** 对话按项目放在内存里；变化后再写 localStorage（setState 的更新函数保持纯） */
+/** 对话以服务端为准：打开项目时取服务端的对话记录，与内存里还在途的条目合并；连不上服务时只显示内存里的 */
 function useTurns(spaceId?: string) {
   const [all, setAll] = useState<Record<string, Turn[]>>({});
-  const dirty = useRef(new Set<string>());
-  const turns = useMemo(() => (spaceId ? all[spaceId] ?? loadTurns(spaceId) : []), [all, spaceId]);
-  const update = useCallback((id: string, fn: (list: Turn[]) => Turn[]) => {
-    dirty.current.add(id);
-    setAll((m) => ({ ...m, [id]: fn(m[id] ?? loadTurns(id)) }));
-  }, []);
   useEffect(() => {
-    dirty.current.forEach((id) => { const list = all[id]; if (list) saveTurns(id, list); });
-    dirty.current.clear();
-  }, [all]);
+    if (!spaceId) return undefined;
+    let dead = false;
+    api.chat(spaceId)
+      .then((r) => { if (!dead) setAll((m) => ({ ...m, [spaceId]: mergeTurns(sanitizeTurns(r.turns), m[spaceId] ?? []) })); })
+      .catch(() => undefined);
+    return () => { dead = true; };
+  }, [spaceId]);
+  const turns = spaceId ? all[spaceId] ?? NONE : NONE;
+  const update = useCallback((id: string, fn: (list: Turn[]) => Turn[]) => {
+    setAll((m) => ({ ...m, [id]: fn(m[id] ?? []) }));
+  }, []);
   return { turns, update };
 }
 
@@ -57,7 +60,7 @@ function useApply(update: Update, refresh: (id: string) => Promise<void>) {
   const runOps = useCallback(async (id: string, turnId: string, ops: EditOp[], parent: number, summary: string, picked: number) => {
     patchAi(id, turnId, { picked, applying: true, appliedOps: ops });
     try {
-      const out = await api.apply(id, ops, parent, summary);
+      const out = await api.apply(id, ops, parent, summary, { turn: turnId, picked });
       patchAi(id, turnId, { applying: false, applied: out.version, dropped: out.dropped });
       await refresh(id);
     } catch (err) {
@@ -86,12 +89,13 @@ export function useConversation({ space, base, busy, notify, refresh }: Deps) {
     const message = composeMessage(r.refs, text);
     const id = space.id;
     const aiId = newId();
+    const userId = newId();
     const now = Date.now();
-    update(id, (list) => [...list, { id: newId(), kind: 'user', at: now, message, base }, { id: aiId, kind: 'ai', at: now + 1, base, pending: true }]);
+    update(id, (list) => [...list, { id: userId, kind: 'user', at: now, message, base }, { id: aiId, kind: 'ai', at: now + 1, base, pending: true }]);
     setDraft(''); r.setRefs([]);
     sending.current = true;
     try {
-      const plan = await api.messages(id, message, base);
+      const plan = await api.messages(id, message, base, { user: userId, ai: aiId });
       patchAi(id, aiId, { pending: false, reply: plan.reply, ops: plan.ops, options: plan.options ?? [] });
       if (!plan.options?.length && plan.ops.length) await runOps(id, aiId, plan.ops, plan.version, text.slice(0, 40) || '对话修改', -1);
     } catch (err) {

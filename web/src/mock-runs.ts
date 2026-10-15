@@ -133,6 +133,7 @@ export function withRuns(base: Api, f: Find, spaces: Space[]): Api {
       return { reply, ops: [], options, version: version ?? 1 };
     },
     async apply(id, ops, _parent, summary) { return { ...enqueue(id, summary ?? '对话修改', ops), dropped: [] }; },
+    async chat() { return { turns: [] }; },
     async revert(id, n) { return enqueue(id, `回退到 v${n}`, []); },
     async cancel() { /* 演示数据不支持取消 */ },
     async exportVersion(_id, n) { return { dir: '~/Downloads/明知AI剪辑', files: [`~/Downloads/明知AI剪辑/演示-v${n}.mp4`] }; },

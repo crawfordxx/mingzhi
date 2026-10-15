@@ -1,7 +1,7 @@
 /**
  * 工作台端到端（pnpm e2e，不在 pnpm test 里，约 2–4 分钟）：
  * 上传样片 → 开始出片 → 中途取消（v1 失败）→ 改字幕样式 → 再开始 → 剪辑直播（转录、划掉的词、分镜、自检分）→ v2 首版完成
- * → 重播 → 点画面插入 @时间 → 发一条修改 → 点内联选项 → 出 v3（本版改动蓝点）→ 对比同步播放 → 导出 → 接近预算上限的提示。
+ * → 重播 → 点画面插入 @时间 → 发一条修改 → 点内联选项 → 出 v3（本版改动蓝点）→ 换浏览器资料对话还在 → 对比同步播放 → 导出 → 接近预算上限的提示。
  * 服务以 MINGZHI_FAKE_LLM=1 启动：模型与生图是假的，识别、剪切、渲染、响度、成片检查是真的。样片是合成的（没有真人）。
  * 设 E2E_SHOTS=目录 时，在关键状态截 1440×900 的图（final-*.png）。
  */
@@ -140,6 +140,23 @@ async function editRound(page: Page): Promise<void> {
   });
 }
 
+/** 对话记录存在服务端：换一个浏览器资料（全新的本地存储）打开，对话和版本卡上的那句话都在 */
+async function chatRestored(h: Harness): Promise<void> {
+  const ctx = await h.browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  try {
+    await step(page, '换一个浏览器资料打开：对话记录还在，版本卡写着触发它的那句话', async () => {
+      await page.goto(h.url);
+      await page.locator('.bubble', { hasText: '这张卡太弱了' }).waitFor({ timeout: 30_000 });
+      await page.locator('.ver', { hasText: 'v3' }).locator('.ver-said', { hasText: '这张卡太弱了' }).waitFor();
+      await page.locator('.iopt').first().waitFor();
+      await shot(page, '5-chat-restored');
+    });
+  } finally {
+    await ctx.close();
+  }
+}
+
 async function compareAndExport(page: Page, h: Harness): Promise<void> {
   await step(page, '对比：左右同步播放', async () => {
     await page.locator('.sw').click();
@@ -203,6 +220,7 @@ async function main(): Promise<void> {
     await firstVersion(page);
     await replayAndRef(page, h);
     await editRound(page);
+    await chatRestored(h);
     await compareAndExport(page, h);
     await nearBudget(page);
     assert(errors.length === 0, `页面报错：${errors.join('；')}`);
