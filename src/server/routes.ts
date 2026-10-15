@@ -28,8 +28,12 @@ const appVersion = (): string => {
   }
 };
 
-let ffmpegOk: Promise<boolean> | undefined;
-const ffmpegReady = (app: AppCtx): Promise<boolean> => (ffmpegOk ??= run(app.cfg.ffmpeg, ['-version']).then(() => true, () => false));
+/** 只缓存成功：用户装好 ffmpeg 后不必重启服务 */
+let ffmpegOk = false;
+async function ffmpegReady(app: AppCtx): Promise<boolean> {
+  if (!ffmpegOk) ffmpegOk = await run(app.cfg.ffmpeg, ['-version']).then(() => true, () => false);
+  return ffmpegOk;
+}
 
 async function status(app: AppCtx): Promise<Record<string, unknown>> {
   const { cfg } = app;
@@ -60,6 +64,7 @@ async function saveKey(app: AppCtx, body: Record<string, unknown>): Promise<Reco
   if (!valid) throw new HttpError(400, 'key 无效，请检查是否复制完整，或到 kexiangai.com 重新获取');
   try {
     await app.keyStore.set(key);
+    app.keys.invalidate();
   } catch (err) {
     throw new HttpError(500, `保存 key 失败：${err instanceof Error ? err.message.split(key).join('***') : '未知错误'}`);
   }
@@ -83,6 +88,7 @@ export function buildRoutes(app: AppCtx): Route[] {
     route('POST', 'api/key', async (c) => sendJson(c.res, 200, await saveKey(app, await readJsonBody(c.req)))),
     route('DELETE', 'api/key', async (c) => {
       await app.keyStore.clear();
+      app.keys.invalidate();
       sendNoContent(c.res);
     }),
     ...spaceRoutes(app),

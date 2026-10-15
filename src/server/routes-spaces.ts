@@ -8,7 +8,7 @@ import { HttpError, readJsonBody, sendJson } from './http.js';
 import { loadSpace } from './lookup.js';
 import { route, type Route, type RouteCtx } from './router.js';
 import {
-  checkBackgroundFile, DEFAULT_SETTINGS, DEFAULT_TITLE, mergeSettings, parseSettingsPatch, parseTitle, saveSpace, spaceDir, toDto,
+  BACKGROUNDS_DIR, checkBackgroundFile, DEFAULT_SETTINGS, DEFAULT_TITLE, mergeSettings, parseSettingsPatch, parseTitle, saveSpace, spaceDir, toDto,
 } from './spaces.js';
 import { IMAGE_EXTS, looksLikeImage, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, receiveFile, VIDEO_EXTS } from './upload.js';
 
@@ -79,7 +79,7 @@ function deleteInput(app: AppCtx, c: RouteCtx): void {
 async function uploadBackground(app: AppCtx, c: RouteCtx): Promise<void> {
   const before = loadSpace(app, c.params.id);
   requirePristine(app, before, '换自定义背景');
-  const file = await receiveFile(c.req, { parent: join(spaceDir(app, before.id), 'backgrounds'), allowed: IMAGE_EXTS, maxBytes: MAX_IMAGE_BYTES, kind: '图片' });
+  const file = await receiveFile(c.req, { parent: join(spaceDir(app, before.id), BACKGROUNDS_DIR), allowed: IMAGE_EXTS, maxBytes: MAX_IMAGE_BYTES, kind: '图片' });
   try {
     if (!looksLikeImage(file.path)) throw new HttpError(400, '这不是有效的 jpg / png / webp 图片');
     const space = loadSpace(app, before.id);

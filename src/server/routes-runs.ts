@@ -1,13 +1,15 @@
 import { planEdit } from '../edit/plan.js';
 import { validateOps } from '../edit/validate.js';
 import { estimateCost, formatEstimate } from '../cost/estimate.js';
-import type { AppCtx } from './context.js';
+import { CostMeter } from '../cost/meter.js';
+import { loadPricesOrEmpty, type AppCtx } from './context.js';
 import { exportVersion } from './export.js';
 import { HttpError, readJsonBody, sendJson } from './http.js';
 import { doneVersion, loadSpace, parseVersionNumber, pickParent, readState } from './lookup.js';
-import { redact, requireKey } from './keys.js';
+import { requireKey } from './keys.js';
 import { route, type Route, type RouteCtx } from './router.js';
 import { handleEvents } from './sse.js';
+import { round4, saveSpace } from './spaces.js';
 
 export const MAX_MESSAGE_CHARS = 2000;
 export const MAX_OPS = 20;
@@ -32,6 +34,8 @@ async function estimate(app: AppCtx, c: RouteCtx): Promise<void> {
 async function start(app: AppCtx, c: RouteCtx): Promise<void> {
   const space = loadSpace(app, c.params.id);
   if (space.inputs.length === 0) throw new HttpError(400, '还没有上传口播视频');
+  // 运行器暂只支持一段口播（Task 9 支持多段后删掉这一行）
+  if (space.inputs.length > 1) throw new HttpError(400, '暂只支持一段口播视频，请先删掉多余的');
   if (space.versions.some((v) => v.status === 'done')) throw new HttpError(409, '已经出过片了，请在对话里提出修改');
   const { version, ahead } = await app.runs.submit(space.id, { kind: 'first' });
   sendJson(c.res, 202, { version, queued: ahead });
@@ -46,12 +50,24 @@ async function messages(app: AppCtx, c: RouteCtx): Promise<void> {
   const version = pickParent(space, body.version);
   const key = await requireKey(app);
   const state = readState(app, space.id, version);
+  const meter = new CostMeter(await loadPricesOrEmpty(app.deps, key), Number.POSITIVE_INFINITY);
+  let plan: Awaited<ReturnType<typeof planEdit>>;
   try {
-    const plan = await planEdit(app.deps.planClient(key), message, state);
-    sendJson(c.res, 200, { ...plan, version });
+    plan = await planEdit(app.deps.planClient(key, meter), message, state);
   } catch (err) {
-    throw new HttpError(502, redact(err instanceof Error ? err.message : String(err), key));
+    addChatCost(app, space.id, meter.total); // 模型已经调用过，失败也要记账
+    throw new HttpError(502, app.keys.redact(err instanceof Error ? err.message : String(err)));
   }
+  const chatCostYuan = addChatCost(app, space.id, meter.total);
+  sendJson(c.res, 200, { ...plan, version, costYuan: round4(meter.total), chatCostYuan });
+}
+
+/** 把一次对话的花费并入项目的 chatCostYuan（重新读项目，不覆盖期间别处的修改）；返回累计值 */
+function addChatCost(app: AppCtx, id: string, yuan: number): number {
+  const space = app.store.get(id);
+  const total = round4((space.chatCostYuan ?? 0) + yuan);
+  if (yuan > 0) saveSpace(app, { ...space, chatCostYuan: total });
+  return total;
 }
 
 async function apply(app: AppCtx, c: RouteCtx): Promise<void> {

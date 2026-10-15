@@ -4,12 +4,12 @@ import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createKeyStore } from '../workspace/keychain.js';
-import { EventBus } from '../workspace/events.js';
+import { ServerBus } from './bus.js';
 import { SpaceStore } from '../workspace/store.js';
 import { buildDeps, defaultExportDir, type AppCtx, type AppOptions } from './context.js';
 import { serveStatic } from './media.js';
-import { HttpError, sendJson } from './http.js';
-import { activeKey, redact } from './keys.js';
+import { asHttpError, HttpError, sendJson } from './http.js';
+import { KeyCache } from './keys.js';
 import { findRoute, splitUrl } from './router.js';
 import { buildRoutes } from './routes.js';
 import { RunManager } from './runs.js';
@@ -35,11 +35,20 @@ function buildApp(opts: AppOptions, portOf: () => number): AppCtx {
   const spacesRoot = join(opts.cfg.dataDir, 'spaces');
   mkdirSync(spacesRoot, { recursive: true });
   const store = new SpaceStore(spacesRoot);
-  const bus = new EventBus((id, n) => store.versionDir(id, n));
+  const keyStore = opts.keyStore ?? createKeyStore(opts.cfg.dataDir);
+  const keys = new KeyCache(opts.cfg, keyStore);
+  const versionExists = (id: string, n: number): boolean => {
+    try {
+      return store.get(id).versions.some((v) => v.n === n);
+    } catch {
+      return true; // 读不到项目时保守处理：不删任何东西
+    }
+  };
+  const bus = new ServerBus((id, n) => store.versionDir(id, n), (t) => keys.redact(t), versionExists);
   const runs = new RunManager(bus);
   const devPort = opts.devPort ?? (Number(process.env.MINGZHI_DEV_PORT) || undefined);
   const app: AppCtx = {
-    cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore: opts.keyStore ?? createKeyStore(opts.cfg.dataDir),
+    cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore, keys,
     deps: buildDeps(opts.cfg, opts.deps), webDir: opts.webDir ?? DEFAULT_WEB_DIR, exportDir: opts.exportDir ?? defaultExportDir(), devPort, port: portOf,
   };
   runs.attach(app);
@@ -47,17 +56,20 @@ function buildApp(opts: AppOptions, portOf: () => number): AppCtx {
   return app;
 }
 
+/** 所有响应都禁止被内嵌（防点击劫持）、禁止猜测内容类型 */
+const SECURITY_HEADERS: Record<string, string> = { 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff' };
+
 async function sendError(app: AppCtx, res: ServerResponse, err: unknown): Promise<void> {
-  const known = err instanceof HttpError;
-  const key = (await activeKey(app))?.key;
-  const raw = err instanceof Error ? err.message : String(err);
-  const message = redact(known ? raw : `服务内部出错：${raw}`, key);
+  const mapped = asHttpError(err);
+  const known = mapped instanceof HttpError;
+  const raw = mapped instanceof Error ? mapped.message : String(mapped);
+  const message = app.keys.redact(known ? raw : `服务内部出错：${raw}`);
   if (!known) console.error(message);
   if (res.headersSent) {
     res.destroy();
     return;
   }
-  sendJson(res, known ? err.status : 500, { error: message });
+  sendJson(res, known ? mapped.status : 500, { error: message });
 }
 
 async function dispatch(app: AppCtx, routes: ReturnType<typeof buildRoutes>, req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -84,8 +96,10 @@ export function createApp(opts: AppOptions): { server: Server; app: AppCtx } {
   const app = buildApp(opts, () => (server.address() as AddressInfo).port);
   const routes = buildRoutes(app);
   server = createServer((req, res) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     dispatch(app, routes, req, res).catch((err: unknown) => sendError(app, res, err));
   });
+  server.requestTimeout = 0; // 上传大视频可能超过默认的 5 分钟（本机服务，不防慢速攻击）
   return { server, app };
 }
 

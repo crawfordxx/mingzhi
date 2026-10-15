@@ -46,3 +46,9 @@ export async function readJsonBody(req: IncomingMessage, allowEmpty = false, lim
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new HttpError(400, '请求体必须是 JSON 对象');
   return value as Record<string, unknown>;
 }
+
+/** 磁盘写满等系统错误翻成中文提示；其余原样（调用方当作 500） */
+export function asHttpError(err: unknown): unknown {
+  if ((err as NodeJS.ErrnoException | null)?.code === 'ENOSPC') return new HttpError(507, '磁盘空间不足，请清理磁盘后重试');
+  return err;
+}

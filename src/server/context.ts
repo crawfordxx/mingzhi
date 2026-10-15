@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
+import type { CostMeter } from '../cost/meter.js';
 import { loadPrices, type Price } from '../cost/prices.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { KexiangClient } from '../llm/kexiang.js';
@@ -15,13 +16,14 @@ import type { VersionMeta } from '../workspace/store.js';
 import type { EditOp } from '../edit/plan.js';
 import { renderCaptionPreview } from './preview.js';
 import { makeBackgroundThumb } from './thumbs.js';
+import type { KeyCache } from './keys.js';
 import type { RunManager } from './runs.js';
 
 /** 可替换的外部依赖：默认是真实实现，测试注入假的 */
 export interface AppDeps {
   validateKey: (key: string) => Promise<boolean>;
   probe: (path: string) => Promise<MediaInfo>;
-  planClient: (key: string) => LlmClient;
+  planClient: (key: string, meter: CostMeter) => LlmClient;
   loadPrices: (key: string) => Promise<Record<string, Price>>;
   runFirst: (ctx: RunnerCtx, spaceId: string) => Promise<VersionMeta>;
   runNext: (ctx: RunnerCtx, spaceId: string, parent: number, ops: EditOp[], summary: string) => Promise<VersionMeta>;
@@ -49,6 +51,7 @@ export interface AppCtx {
   bus: EventBus;
   spacesRoot: string;
   keyStore: KeyStore;
+  keys: KeyCache;
   deps: AppDeps;
   runs: RunManager;
   webDir: string;
@@ -62,7 +65,7 @@ export function buildDeps(cfg: AppConfig, over: Partial<AppDeps> = {}): AppDeps 
   const base: AppDeps = {
     validateKey: (key) => validateKey(key),
     probe: (path) => probe(path, cfg),
-    planClient: (key) => new KexiangClient(key),
+    planClient: (key, meter) => new KexiangClient(key, undefined, undefined, meter),
     loadPrices: (key) => loadPrices(join(cfg.dataDir, 'prices.json'), fetch, Date.now, key),
     runFirst: runFirstVersion,
     runNext: runNextVersion,
@@ -76,10 +79,20 @@ export const defaultExportDir = (): string => join(homedir(), 'Downloads', '明�
 
 /** 默认的任务上下文：模型与任务客户端用当前 key 构造，花费记到本版本的计费器 */
 export async function defaultRunnerCtx(app: Pick<AppCtx, 'cfg' | 'store' | 'bus' | 'deps'>, key: string, signal: AbortSignal): Promise<RunnerCtx> {
-  const prices = await app.deps.loadPrices(key).catch(() => ({}));
+  const prices = await loadPricesOrEmpty(app.deps, key);
   return {
     store: app.store, bus: app.bus, cfg: { ...app.cfg, kexiangKey: key }, prices, signal,
     clients: (meter) => ({ llm: new KexiangClient(key, undefined, undefined, meter), task: new KexiangTaskClient(key, undefined, undefined, undefined, meter) }),
     ...app.deps.ctxOverrides,
   };
+}
+
+/** 取不到价格表时退化为空表（成本按内置最贵价估算），但留一行告警 */
+export async function loadPricesOrEmpty(deps: Pick<AppDeps, 'loadPrices'>, key: string): Promise<Record<string, Price>> {
+  try {
+    return await deps.loadPrices(key);
+  } catch (err) {
+    console.warn(`读取模型价格表失败，按内置价估算：${err instanceof Error ? err.message.split(key).join('***') : '未知错误'}`);
+    return {};
+  }
 }

@@ -33,6 +33,8 @@ export interface Space {
   inputs: string[];
   versions: VersionMeta[];
   settings: SpaceSettings;
+  /** 对话修改（只规划、未出新版本）累计花费，元 */
+  chatCostYuan?: number;
 }
 
 const SPACE_FILE = 'space.json';

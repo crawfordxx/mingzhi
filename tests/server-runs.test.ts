@@ -124,7 +124,7 @@ describe('对话修改', () => {
     const id = await firstDone();
     const r = await t.call('POST', `/api/spaces/${id}/messages`, { message: '字幕换成宋体' });
     expect(r.status).toBe(200);
-    expect(r.json).toEqual({ reply: '好的，换成宋韵', ops: [{ type: 'setCaptionStyle', id: 'song' }], options: [{ label: '备选', ops: [{ type: 'pace', direction: 'tighter' }] }], version: 1 });
+    expect(r.json).toEqual({ reply: '好的，换成宋韵', ops: [{ type: 'setCaptionStyle', id: 'song' }], options: [{ label: '备选', ops: [{ type: 'pace', direction: 'tighter' }] }], version: 1, costYuan: 0, chatCostYuan: 0 });
     expect((await t.call('POST', `/api/spaces/${id}/messages`, { message: '  ' })).status).toBe(400);
     expect((await t.call('POST', `/api/spaces/${id}/messages`, { message: 'x'.repeat(2001) })).status).toBe(400);
     expect((await t.call('POST', `/api/spaces/${id}/messages`, { message: '改', version: 9 })).status).toBe(404);

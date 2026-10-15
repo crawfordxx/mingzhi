@@ -1,5 +1,5 @@
-import { existsSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { renameSync, statSync, writeFileSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
 import { z } from 'zod';
 import { isPresetId } from '../background/presets.js';
 import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
@@ -9,6 +9,7 @@ import type { Space, SpaceSettings } from '../workspace/store.js';
 import type { AppCtx } from './context.js';
 import { HttpError } from './http.js';
 import type { RunState } from './runs.js';
+import { IMAGE_EXTS, looksLikeImage } from './upload.js';
 
 export const DEFAULT_BUDGET_YUAN = 10;
 export const DEFAULT_SETTINGS: SpaceSettings = { captionStyle: DEFAULT_CAPTION_STYLE, budgetYuan: DEFAULT_BUDGET_YUAN, broll: true, maxVideos: 1 };
@@ -63,10 +64,22 @@ export function mergeSettings(current: SpaceSettings, patch: SettingsPatchInput)
 
 export const spaceDir = (app: Pick<AppCtx, 'spacesRoot'>, id: string): string => join(app.spacesRoot, id);
 
-/** 自定义背景图必须落在本项目目录内且真实存在，否则能让页面把本机任意图片读进成片 */
+export const BACKGROUNDS_DIR = 'backgrounds';
+
+/** 自定义背景图只能是上传接口写进本项目 backgrounds/ 下的图片文件（扩展名与文件头都要对），否则能让页面把本机任意文件读进成片 */
 export function checkBackgroundFile(app: Pick<AppCtx, 'spacesRoot'>, id: string, path: string): void {
-  if (!isInside(spaceDir(app, id), path) || !existsSync(path)) throw new HttpError(400, '自定义背景图必须是本项目里上传的图片');
+  const dir = join(spaceDir(app, id), BACKGROUNDS_DIR);
+  const ok = isInside(dir, path) && (IMAGE_EXTS as readonly string[]).includes(extname(path).toLowerCase()) && isFile(path) && looksLikeImage(path);
+  if (!ok) throw new HttpError(400, '自定义背景图必须是本项目里上传的图片');
 }
+
+const isFile = (path: string): boolean => {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+};
 
 /** 与 SpaceStore 相同的保存方式（先写临时文件再改名）。SpaceStore 没有改输入与设置的接口，且不在本任务范围内 */
 export function saveSpace(app: Pick<AppCtx, 'spacesRoot'>, space: Space): void {
@@ -76,8 +89,11 @@ export function saveSpace(app: Pick<AppCtx, 'spacesRoot'>, space: Space): void {
   renameSync(tmp, file);
 }
 
+export const round4 = (v: number): number => Math.round(v * 10_000) / 10_000;
+
 /** 返回给前端的项目：输入只给文件名（不泄露本机路径），附当前任务状态与累计花费 */
-export function toDto(space: Space, job: RunState | null): Omit<Space, 'inputs'> & { inputs: string[]; job: RunState | null; totalCostYuan: number } {
-  const totalCostYuan = Math.round(space.versions.reduce((s, v) => s + v.costYuan, 0) * 10_000) / 10_000;
-  return { ...space, inputs: space.inputs.map((p) => basename(p)), job, totalCostYuan };
+export function toDto(space: Space, job: RunState | null): Omit<Space, 'inputs'> & { inputs: string[]; job: RunState | null; chatCostYuan: number; totalCostYuan: number } {
+  const chatCostYuan = space.chatCostYuan ?? 0;
+  const totalCostYuan = round4(space.versions.reduce((s, v) => s + v.costYuan, 0) + chatCostYuan);
+  return { ...space, inputs: space.inputs.map((p) => basename(p)), job, chatCostYuan, totalCostYuan };
 }

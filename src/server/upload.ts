@@ -11,6 +11,8 @@ export const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp'] as const;
 export const MAX_VIDEO_BYTES = 4 * 1024 ** 3;
 export const MAX_IMAGE_BYTES = 15 * 1024 ** 2;
 const MAX_NAME_CHARS = 80;
+/** Windows 保留设备名（CON、NUL、COM1…）不能当文件名，加下划线前缀 */
+const WINDOWS_DEVICE = /^(con|prn|aux|nul|com\d|lpt\d)(?=\.|$)/i;
 
 /** 上传文件名清洗：只留文件名本身（去掉任何目录），去控制字符与 Windows 保留字符，限长且保留扩展名 */
 export function sanitizeFileName(raw: string): string {
@@ -21,7 +23,7 @@ export function sanitizeFileName(raw: string): string {
     /* 不是编码过的就用原文 */
   }
   const leaf = decoded.split(/[\\/]/).pop() ?? '';
-  const cleaned = leaf.replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '_').replace(/^[.\s]+/, '').replace(/[.\s]+$/, '').trim();
+  const cleaned = leaf.replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '_').replace(/^[.\s]+/, '').replace(/[.\s]+$/, '').trim().replace(WINDOWS_DEVICE, '_$1');
   const ext = extname(cleaned);
   const stem = cleaned.slice(0, cleaned.length - ext.length);
   const shortStem = [...stem].slice(0, MAX_NAME_CHARS).join('');

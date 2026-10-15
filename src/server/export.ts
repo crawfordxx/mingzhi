@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { COVER_FILES, FINAL_FILE } from '../workspace/runner-files.js';
 
 const MAX_TITLE_CHARS = 60;
+const MAX_COPIES = 98;
 
 /** 文件名里不能出现的字符换成下划线，去掉首尾的点与空白 */
 export function safeTitle(title: string): string {
@@ -28,11 +29,13 @@ export async function exportVersion(exportDir: string, title: string, n: number,
   const final = join(versionDir, FINAL_FILE);
   if (!existsSync(final)) throw new Error(`v${n} 的成片文件不存在`);
   await mkdir(exportDir, { recursive: true });
-  const stem = `${safeTitle(title)}-v${n}`;
-  const pairs: [string, string][] = [
-    [final, join(exportDir, `${stem}.mp4`)],
-    ...COVER_FILES.filter((c) => existsSync(join(versionDir, c))).map((c): [string, string] => [join(versionDir, c), join(exportDir, `${stem}-${COVER_SUFFIX[c]}`)]),
-  ];
+  const covers = COVER_FILES.filter((c) => existsSync(join(versionDir, c)));
+  const names = (stem: string): string[] => [`${stem}.mp4`, ...covers.map((c) => `${stem}-${COVER_SUFFIX[c]}`)];
+  const base = `${safeTitle(title)}-v${n}`;
+  // 同名文件已存在（比如两个项目都叫「未命名项目」）就加 (2)、(3)… 后缀，绝不覆盖
+  const stem = [base, ...Array.from({ length: MAX_COPIES }, (_, i) => `${base}(${i + 2})`)].find((s) => names(s).every((f) => !existsSync(join(exportDir, f))));
+  if (!stem) throw new Error('导出目录里同名文件太多，请先清理');
+  const pairs: [string, string][] = [[final, join(exportDir, `${stem}.mp4`)], ...covers.map((c): [string, string] => [join(versionDir, c), join(exportDir, `${stem}-${COVER_SUFFIX[c]}`)])];
   for (const [from, to] of pairs) await copyAtomic(from, to);
   return pairs.map(([, to]) => to);
 }

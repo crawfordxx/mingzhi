@@ -1,4 +1,3 @@
-import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EditOp } from '../edit/plan.js';
 import { JobQueue, type Job } from '../workspace/jobs.js';
@@ -51,22 +50,13 @@ export class RunManager {
 
   /**
    * 取消项目的任务。运行中的：运行器收到信号后把版本置 failed（已取消）。
-   * 排队中的：还没建版本目录，只需清掉入队时写下的 queued/failed 事件，别污染以后同号的新版本。
+   * 排队中的：还没建版本，JobQueue 发 failed，ServerBus 会清掉入队时留下的事件文件。
    */
   cancel(spaceId: string): boolean {
     const p = this.pending.get(spaceId);
-    const running = this.queue.current()?.spaceId === spaceId;
     if (!p || !this.queue.cancel(spaceId)) return false;
-    if (!running) {
-      this.pending.delete(spaceId);
-      this.dropQueuedTrace(spaceId, p.version);
-    }
+    if (this.queue.current()?.spaceId !== spaceId) this.pending.delete(spaceId);
     return true;
-  }
-
-  private dropQueuedTrace(spaceId: string, version: number): void {
-    const exists = this.app.store.get(spaceId).versions.some((v) => v.n === version);
-    if (!exists) rmSync(this.app.store.versionDir(spaceId, version), { recursive: true, force: true });
   }
 
   private async execute(job: Job, signal: AbortSignal): Promise<void> {

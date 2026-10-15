@@ -28,6 +28,7 @@ function pickVersion(app: AppCtx, id: string, raw: string | null): number {
  */
 export function handleEvents(app: AppCtx, c: RouteCtx): void {
   const { req, res } = c;
+  if (req.method === 'HEAD') throw new HttpError(405, '事件流不支持 HEAD 请求');
   const id = c.params.id;
   const version = pickVersion(app, id, c.query.get('version'));
   const resumeFrom = Number(req.headers['last-event-id'] ?? c.query.get('lastEventId') ?? 0);
