@@ -51,7 +51,8 @@ describe.skipIf(!hasModels())('版本运行器端到端（真实小样片）', (
     const info = await probe(v1Final, ctx.cfg);
     expect([info.width, info.height, info.fps, info.hasAudio]).toEqual([1080, 1920, 30, true]);
     const state = JSON.parse(readFileSync(join(store.versionDir(space.id, 1), 'state.json'), 'utf8')) as VersionState;
-    expect(v1.changedShots).toEqual(state.storyboard.shots.map((_, i) => i));
+    expect(v1.changedShots).toEqual([]); // 首版没有父版本可比
+    expect(v1.shotHashes).toHaveLength(state.storyboard.shots.length);
     const before = sha(v1Final);
     const k = state.storyboard.shots.findIndex((s) => s.card?.props && (s.card.props as { title?: string }).title === '第二张');
     const v2 = await runNextVersion(ctx, space.id, 1, [{ type: 'replaceCard', shotIndex: k, card: { template: 'title', props: { title: '换过了' } } }], '换卡片');

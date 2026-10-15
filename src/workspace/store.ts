@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { BackgroundSpec } from '../background/resolve.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { CoverStyleId } from '../cover/styles.js';
+import { roundYuan } from '../cost/meter.js';
 
 export interface SpaceSettings {
   background?: BackgroundSpec;
@@ -20,7 +21,10 @@ export interface VersionMeta {
   createdAt: string;
   parent?: number;
   summary: string;
+  /** 和父版本相比画面内容变了的镜头序号（首个版本为空） */
   changedShots: number[];
+  /** 各镜头（按序号）的画面内容哈希，下一版据此和本版比较；旧数据没有 */
+  shotHashes?: string[];
   costYuan: number;
   qaScore?: number;
   status: 'running' | 'done' | 'failed';
@@ -38,6 +42,10 @@ export interface Space {
 }
 
 const SPACE_FILE = 'space.json';
+
+/** 项目累计花费（元）：各版本（含失败与取消的）+ 对话规划；预算上限按项目计 */
+export const projectSpentYuan = (space: Space): number =>
+  roundYuan(space.versions.reduce((s, v) => s + v.costYuan, 0) + (space.chatCostYuan ?? 0));
 const ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 /** 项目目录布局：<root>/<id>/space.json、<root>/<id>/base/（共用素材与中间产物）、<root>/<id>/v<n>/（各版本产物） */
@@ -111,6 +119,14 @@ export class SpaceStore {
     const updated: VersionMeta = { ...current, ...structuredClone(patch), n: current.n, createdAt: current.createdAt };
     this.save({ ...space, versions: space.versions.map((v) => (v.n === n ? updated : v)) });
     return updated;
+  }
+
+  /** 读-改-写：在同一个同步块里读最新的 space.json 再写回，不覆盖期间别处（运行器、对话记账）的修改 */
+  update(id: string, fn: (space: Space) => Space): Space {
+    const next = fn(this.get(id));
+    if (next.id !== id) throw new Error('不能改项目 id');
+    this.save(next);
+    return next;
   }
 
   rename(id: string, title: string): Space {

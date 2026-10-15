@@ -208,6 +208,8 @@ describe('renderSegmented（真实 Remotion 渲染）', () => {
   const frameRgb = (file: string, n: number): Promise<Buffer> => runBuffer(cfg.ffmpeg, ['-v', 'error', '-i', file, '-vf', `select=eq(n\\,${n}),scale=54:96`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
   const meanDiff = (a: Buffer, b: Buffer): number => a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0) / a.length;
 
+  let firstHashes: string[] = [];
+
   beforeAll(async () => {
     mkdirSync(cacheDir, { recursive: true });
     await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
@@ -216,7 +218,9 @@ describe('renderSegmented（真实 Remotion 渲染）', () => {
 
   it('首次：3 个镜头全部渲染；总帧数 = 时长×30、有音轨、1080×1920', async () => {
     const r = await renderSegmented({ workDir, cacheDir, props: BASE, output, ffmpeg: cfg.ffmpeg, onProgress: (d, t, u) => progress.push([d, t, u]) });
-    expect(r).toEqual({ rendered: [0, 1, 2], reused: [] });
+    expect(r).toMatchObject({ rendered: [0, 1, 2], reused: [] });
+    expect(r.hashes).toHaveLength(3);
+    firstHashes = r.hashes;
     expect(progress[progress.length - 1]).toEqual([3, 3, 0]);
     const info = await probe(output, cfg);
     expect([info.width, info.height, info.fps, info.hasAudio]).toEqual([1080, 1920, 30, true]);
@@ -236,7 +240,9 @@ describe('renderSegmented（真实 Remotion 渲染）', () => {
   it('改第 2 个镜头的卡片标题：只重渲 1，复用 0 与 2', async () => {
     const props = { ...BASE, shots: [SHOTS[0], { ...SHOTS[1], card: title('乙改') }, SHOTS[2]] };
     const r = await renderSegmented({ workDir, cacheDir, props, output, ffmpeg: cfg.ffmpeg });
-    expect(r).toEqual({ rendered: [1], reused: [0, 2] });
+    expect(r).toMatchObject({ rendered: [1], reused: [0, 2] });
+    // 内容哈希：只有第 2 个镜头和上一次不同
+    expect(r.hashes.map((h, i) => h === firstHashes[i])).toEqual([true, false, true]);
     expect(await frames(output)).toBe(90);
     expect((await probe(output, cfg)).hasAudio).toBe(true);
     expect(existsSync(join(workDir, 'audio.m4a'))).toBe(true);
@@ -246,7 +252,7 @@ describe('renderSegmented（真实 Remotion 渲染）', () => {
     const props = { ...BASE, shots: [SHOTS[0], { ...SHOTS[1], card: title('乙改') }, SHOTS[2]] };
     const seen: [number, number, number][] = [];
     const r = await renderSegmented({ workDir, cacheDir, props, output, ffmpeg: cfg.ffmpeg, onProgress: (d, t, u) => seen.push([d, t, u]) });
-    expect(r).toEqual({ rendered: [], reused: [0, 1, 2] });
+    expect(r).toMatchObject({ rendered: [], reused: [0, 1, 2] });
     expect(seen[seen.length - 1]).toEqual([3, 3, 3]);
   }, 300_000);
 });

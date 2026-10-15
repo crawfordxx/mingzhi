@@ -83,9 +83,12 @@ describe('口播与自定义背景上传', () => {
     expect(ok.status).toBe(201);
     const body = await ok.json() as { background: { kind: string; path: string }; settings: { background: unknown } };
     expect(body.background.kind).toBe('file');
-    expect(body.background.path.startsWith(join(t.root, 'data', 'spaces', id, 'backgrounds'))).toBe(true);
+    // 接口只给文件名；本机路径只在服务端
+    expect(body.background.path).toBe('我的 背景.png');
     expect(body.settings.background).toEqual(body.background);
-    expect(readFileSync(body.background.path).equals(PNG)).toBe(true);
+    const stored = t.app.store.get(id).settings.background as { kind: 'file'; path: string };
+    expect(stored.path.startsWith(join(t.root, 'data', 'spaces', id, 'backgrounds'))).toBe(true);
+    expect(readFileSync(stored.path).equals(PNG)).toBe(true);
     expect((await upload(`/api/spaces/${id}/background`, 'x.gif', PNG)).status).toBe(400);
     const fake = await upload(`/api/spaces/${id}/background`, 'x.png', 'not an image at all');
     expect(fake.status).toBe(400);
@@ -97,7 +100,8 @@ describe('口播与自定义背景上传', () => {
   it('PATCH 里的 file 背景必须是本项目上传的图片', async () => {
     const id = (await t.call('POST', '/api/spaces', {})).json.id as string;
     const other = (await t.call('POST', '/api/spaces', {})).json.id as string;
-    const mine = ((await (await upload(`/api/spaces/${id}/background`, 'a.png', PNG)).json()) as { background: { path: string } }).background;
+    await upload(`/api/spaces/${id}/background`, 'a.png', PNG);
+    const mine = t.app.store.get(id).settings.background as { kind: 'file'; path: string };
     writeFileSync(join(t.root, 'outside.png'), PNG);
     for (const path of [join(t.root, 'outside.png'), '/etc/passwd', join(t.root, 'data', 'spaces', id, '..', 'x.png')]) {
       expect((await t.call('PATCH', `/api/spaces/${id}`, { settings: { background: { kind: 'file', path } } })).status, path).toBe(400);

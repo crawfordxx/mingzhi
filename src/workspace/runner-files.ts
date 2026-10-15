@@ -19,6 +19,8 @@ export const LAYER_FILES = ['fgr.mp4', 'matte.mp4'] as const;
 /** 与抠像图层配套的信息：取景框与人物平均色（换背景合成时重算调色增益）；最后写，存在即图层完整 */
 export const MATTE_META = 'matte.json';
 export const COVER_FILES = ['cover-3x4.png', 'cover-4x3.png'] as const;
+/** base/ 里依赖口播内容的产物：口播换了（首版失败后增删口播）就都不能再用；分段缓存与素材按内容命中，不在其中 */
+export const INPUT_DEPENDENTS = [ANALYSIS_FILE, 'audio16k.wav', 'cut.mp4', ...LAYER_FILES, MATTE_META, SOURCE_FILE, 'order.json'] as const;
 
 export interface BaseAnalysis { media: MediaInfo; transcript: Transcript; cuts: Cut[] }
 export interface MatteMeta { subject: SubjectBox | null; fgMean: Rgb | null; frames: number }

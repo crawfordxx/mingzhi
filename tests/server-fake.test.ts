@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { CostMeter } from '../src/cost/meter.js';
 import { buildEditContext, formatContext } from '../src/edit/context.js';
 import { validateOps } from '../src/edit/validate.js';
 import { formatTokensForLlm } from '../src/cut/llm-cuts.js';
-import { fakeDeps, fakeLlm, isFakeMode } from '../src/server/fake.js';
+import { fakeAppOptions, fakeDeps, fakeLlm, isFakeMode } from '../src/server/fake.js';
 import { makeState } from './helpers/edit-state.js';
 
 const ask = (label: string, user: string) => fakeLlm().chatJson({ model: 'm', system: '', user, label });
@@ -50,5 +53,18 @@ describe('假模型模式（MINGZHI_FAKE_LLM=1）', () => {
     const shot = await clients?.task?.run({ modelName: 'x', modelType: 'text2img' }, { kind: 'image', label: '背景生图' });
     expect(shot?.url.startsWith('data:image/jpeg;base64,')).toBe(true);
     expect(meter.total).toBeGreaterThan(0);
+  });
+
+  it('假模式必须用独立数据目录；key 只存在该目录下的文件里，不碰系统钥匙串', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-fake-'));
+    const cfg = { ...loadConfig({}), dataDir: dir };
+    expect(() => fakeAppOptions(cfg, {})).toThrow('MINGZHI_DATA_DIR');
+    expect(() => fakeAppOptions(cfg, { MINGZHI_DATA_DIR: join(homedir(), '.mingzhi') })).toThrow('不能是 ~/.mingzhi');
+    const opts = fakeAppOptions(cfg, { MINGZHI_DATA_DIR: dir });
+    await opts.keyStore?.set('sk-fake-key-123');
+    expect(readFileSync(join(dir, 'key'), 'utf8').trim()).toBe('sk-fake-key-123');
+    expect(await opts.keyStore?.get()).toBe('sk-fake-key-123');
+    await opts.keyStore?.clear();
+    expect(existsSync(join(dir, 'key'))).toBe(false);
   });
 });

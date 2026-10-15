@@ -133,7 +133,8 @@ export interface SegmentedOptions {
   /** 取消信号：每段开始前检查，正在渲染的那一段也会被终止（抛 CancelledError，不留半截缓存） */
   signal?: AbortSignal;
 }
-export interface SegmentedResult { rendered: number[]; reused: number[] }
+/** rendered / reused：本次实际重渲与命中缓存的镜头序号；hashes：每个镜头（按序号）的画面内容哈希，用于和父版本比较 */
+export interface SegmentedResult { rendered: number[]; reused: number[]; hashes: string[] }
 
 /** concat 列表里的路径用单引号包裹，路径里的单引号要转义 */
 const concatLine = (file: string): string => `file '${file.replace(/'/g, "'\\''")}'`;
@@ -178,7 +179,8 @@ export async function renderSegmented(opts: SegmentedOptions): Promise<Segmented
   const stamper = createStamper(workDir);
   const plan = await Promise.all(segmentBounds(shots, props.durationSec).map(async (range, i) => {
     const salt = await segmentSalt(stamper, props, i);
-    return { range, i, file: join(cacheDir, `${shotHash(shots[i], rest, i, { shots, range, salt })}.mp4`) };
+    const hash = shotHash(shots[i], rest, i, { shots, range, salt });
+    return { range, i, hash, file: join(cacheDir, `${hash}.mp4`) };
   }));
   const todo = plan.filter((s) => s.range.end > s.range.start);
   const audio = join(workDir, 'audio.m4a');
@@ -193,5 +195,9 @@ export async function renderSegmented(opts: SegmentedOptions): Promise<Segmented
     await backend.renderAudio({ serveUrl, props, output: audio, signal: opts.signal });
   });
   await backend.concat({ ffmpeg: opts.ffmpeg ?? 'ffmpeg', files: todo.map((s) => s.file), audio, listFile: join(workDir, 'segments.txt'), output: opts.output, durationSec: secToFrame(props.durationSec) / CANVAS.fps });
-  return { rendered: done.filter((d) => !d.reused).map((d) => d.i), reused: done.filter((d) => d.reused).map((d) => d.i) };
+  return {
+    rendered: done.filter((d) => !d.reused).map((d) => d.i),
+    reused: done.filter((d) => d.reused).map((d) => d.i),
+    hashes: plan.map((s) => s.hash),
+  };
 }

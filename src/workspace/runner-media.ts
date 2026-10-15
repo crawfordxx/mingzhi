@@ -16,7 +16,9 @@ import { FINAL_FILE, isInside, LAYER_FILES, linkFile, linkIfExists, MATTE_META, 
 /** 这个版本的流程参数：工作目录是版本目录，分段缓存在 base/segments；付费开关与预算取项目当前设置 */
 export function pipelineArgs(env: VersionEnv, input: string, state: VersionState, cover: CoverOptions): PipelineArgs {
   const { ctx, space, dir, meter } = env;
-  const { budgetYuan, broll, maxVideos } = space.settings;
+  const { broll, maxVideos } = space.settings;
+  // B-roll 的预算与计费器一致：本版本还能花的钱（项目上限 − 此前已花）
+  const budgetYuan = meter.budget;
   return {
     input, workDir: dir, output: join(dir, FINAL_FILE), cfg: ctx.cfg, llm: env.llm, task: env.task, meter,
     background: state.settings.background, captionStyle: state.settings.captionStyle, audio: state.bgm, cover,

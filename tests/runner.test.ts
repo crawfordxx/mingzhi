@@ -49,8 +49,9 @@ describe('runFirstVersion', () => {
     const state = stateOf(f, 1);
     expect(state).toMatchObject({ coverStyle: 'bauhaus', bgm: { bgm: 'auto' }, extraCuts: [], restored: [], settings: { captionStyle: 'blade' } });
     expect(state.storyboard.shots.length).toBeGreaterThan(1);
-    // 首个版本：每个镜头都是新渲染的
-    expect(meta.changedShots).toEqual(state.storyboard.shots.map((_, i) => i));
+    // 首个版本：每个镜头都是新渲染的，但没有父版本可比，本版改动为空
+    expect(f.calls.segments).toHaveLength(state.storyboard.shots.length);
+    expect(meta.changedShots).toEqual([]);
     // 抠像对整条原片（不是剪切结果），只出前景与遮罩；人像由合成得到，取帧方案就是 v1 的剪辑方案
     expect(f.calls.matte).toEqual([f.store.get(f.spaceId).inputs[0]]);
     expect(f.calls.composite).toEqual([expect.objectContaining({ keep: state.plan.keep, cut: join(v1, 'cut.mp4'), fgr: join(base, 'fgr.mp4'), matte: join(base, 'matte.mp4') })]);
@@ -203,7 +204,7 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     const image = (photo?.card?.props as { image?: string }).image ?? '';
     expect(existsSync(join(f.store.versionDir(f.spaceId, 2), image))).toBe(true);
 
-    const poor = await afterV1({ budgetYuan: 0.1 }); // 每个版本单独计预算：¥0.1 不够一张图（预估 ¥0.2）
+    const poor = await afterV1({ budgetYuan: 0.1 }); // 预算按项目计：v1 已超 ¥0.1，没有余额生图（预估 ¥0.2）
     await runNextVersion(poor.ctx, poor.spaceId, 1, [visualOp(stateOf(poor, 1))], '加图');
     expect(poor.calls.images).toEqual([]);
 

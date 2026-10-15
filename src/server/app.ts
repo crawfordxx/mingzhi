@@ -14,6 +14,7 @@ import { findRoute, splitUrl } from './router.js';
 import { buildRoutes } from './routes.js';
 import { RunManager } from './runs.js';
 import { guardRequest } from './security.js';
+import { pathScrubber } from './paths.js';
 
 export const HOST = '127.0.0.1';
 export const DEFAULT_PORT = 4321;
@@ -24,10 +25,18 @@ const DEFAULT_WEB_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..'
 
 export interface RunningApp { url: string; port: number; app: AppCtx; close: () => Promise<void> }
 
-/** 服务重启后，上次没跑完的版本（状态还停在 running）改记为失败，免得项目一直显示「出片中」 */
+export const INTERRUPTED = '服务重启，任务中断';
+
+/**
+ * 服务重启后，上次没跑完的版本（状态还停在 running）改记为失败，并补发 failed 事件：
+ * 前端按事件判断进度，没有终止事件会一直计时。重启前还在排队的任务没有建版本，随进程丢失（项目回到可重新开始的状态）。
+ */
 function failInterrupted(app: AppCtx): void {
   for (const space of app.store.list()) {
-    for (const v of space.versions.filter((x) => x.status === 'running')) app.store.updateVersion(space.id, v.n, { status: 'failed' });
+    for (const v of space.versions.filter((x) => x.status === 'running')) {
+      app.store.updateVersion(space.id, v.n, { status: 'failed' });
+      app.bus.publish({ t: Date.now(), spaceId: space.id, version: v.n, step: 'failed', message: INTERRUPTED });
+    }
   }
 }
 
@@ -37,6 +46,7 @@ function buildApp(opts: AppOptions, portOf: () => number): AppCtx {
   const store = new SpaceStore(spacesRoot);
   const keyStore = opts.keyStore ?? createKeyStore(opts.cfg.dataDir);
   const keys = new KeyCache(opts.cfg, keyStore);
+  const scrub = pathScrubber(spacesRoot);
   const versionExists = (id: string, n: number): boolean => {
     try {
       return store.get(id).versions.some((v) => v.n === n);
@@ -44,11 +54,11 @@ function buildApp(opts: AppOptions, portOf: () => number): AppCtx {
       return true; // 读不到项目时保守处理：不删任何东西
     }
   };
-  const bus = new ServerBus((id, n) => store.versionDir(id, n), (t) => keys.redact(t), versionExists);
+  const bus = new ServerBus((id, n) => store.versionDir(id, n), (t) => scrub(keys.redact(t)), versionExists);
   const runs = new RunManager(bus);
   const devPort = opts.devPort ?? (Number(process.env.MINGZHI_DEV_PORT) || undefined);
   const app: AppCtx = {
-    cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore, keys,
+    cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore, keys, scrub,
     deps: buildDeps(opts.cfg, opts.deps), webDir: opts.webDir ?? DEFAULT_WEB_DIR, exportDir: opts.exportDir ?? defaultExportDir(), devPort, port: portOf,
   };
   runs.attach(app);
@@ -56,14 +66,19 @@ function buildApp(opts: AppOptions, portOf: () => number): AppCtx {
   return app;
 }
 
-/** 所有响应都禁止被内嵌（防点击劫持）、禁止猜测内容类型 */
-const SECURITY_HEADERS: Record<string, string> = { 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff' };
+/** 所有响应都禁止被内嵌（防点击劫持）、禁止猜测内容类型、禁止别的网站用 <video>/<img> 跨源引用（成片、缩略图） */
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "frame-ancestors 'none'",
+  'X-Content-Type-Options': 'nosniff',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+};
 
 async function sendError(app: AppCtx, res: ServerResponse, err: unknown): Promise<void> {
   const mapped = asHttpError(err);
   const known = mapped instanceof HttpError;
   const raw = mapped instanceof Error ? mapped.message : String(mapped);
-  const message = app.keys.redact(known ? raw : `服务内部出错：${raw}`);
+  const message = app.scrub(app.keys.redact(known ? raw : `服务内部出错：${raw}`));
   if (!known) console.error(message);
   if (res.headersSent) {
     res.destroy();

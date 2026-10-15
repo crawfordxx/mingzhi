@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SpaceStore, type SpaceSettings } from '../src/workspace/store.js';
+import { projectSpentYuan, SpaceStore, type SpaceSettings } from '../src/workspace/store.js';
 
 const SETTINGS: SpaceSettings = { captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 3, background: { kind: 'preset', id: 'warm' } };
 const NEW_VERSION = { summary: '初版', changedShots: [1, 2], costYuan: 0, status: 'running' as const };
@@ -153,5 +153,26 @@ describe('SpaceStore 写入', () => {
     const { id } = store.create('t', [], SETTINGS);
     writeFileSync(join(root, id, 'space.json'), '{broken');
     expect(() => store.get(id)).toThrow('项目文件已损坏');
+  });
+});
+
+describe('SpaceStore.update 与项目花费', () => {
+  it('update 读最新文件再写回（不用调用方手里的旧快照）；不许改 id；回调抛错时不写', () => {
+    const { id } = store.create('t', [], SETTINGS);
+    store.addVersion(id, NEW_VERSION);
+    const updated = store.update(id, (s) => ({ ...s, chatCostYuan: 0.1 }));
+    expect(updated.versions).toHaveLength(1);
+    expect(store.get(id).chatCostYuan).toBe(0.1);
+    expect(() => store.update(id, (s) => ({ ...s, id: 'other' }))).toThrow('不能改项目 id');
+    expect(() => store.update(id, () => { throw new Error('不许'); })).toThrow('不许');
+    expect(store.get(id).chatCostYuan).toBe(0.1);
+  });
+
+  it('projectSpentYuan = 各版本（含失败的）+ 对话，取整到 0.0001', () => {
+    const { id } = store.create('t', [], SETTINGS);
+    store.addVersion(id, { ...NEW_VERSION, costYuan: 0.1, status: 'failed' });
+    store.addVersion(id, { ...NEW_VERSION, costYuan: 0.2, status: 'done' });
+    store.update(id, (s) => ({ ...s, chatCostYuan: 0.04 }));
+    expect(projectSpentYuan(store.get(id))).toBe(0.34);
   });
 });

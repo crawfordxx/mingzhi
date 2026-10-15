@@ -11,6 +11,7 @@ import { validateStyles } from '../pipeline/finish-step.js';
 import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
 import { brollStage, composeStage, finalQaStage, qaCardsStage } from '../pipeline/stages.js';
+import type { SegmentedResult } from '../compose/segments.js';
 import type { CardQaEntry } from '../qa/visual.js';
 import type { CardSpec, Storyboard } from '../storyboard/schema.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
@@ -20,7 +21,7 @@ import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, resolveBg, reuse
 import { recut, retime, writeAss } from './runner-retime.js';
 
 interface Change { next: VersionState; ops: EditOp[]; dropped: string[]; stages: Set<Stage>; newCover: boolean }
-interface Parent { n: number; dir: string; state: VersionState; project: ProjectFile | null }
+interface Parent { n: number; dir: string; state: VersionState; project: ProjectFile | null; hashes?: string[] }
 interface Made extends Person { plan: CutPlan; captions: TimedCaption[]; storyboard: Storyboard }
 
 const STAGE_LABEL: Record<Stage, string> = { cut: '剪切', matte: '换背景', captions: '字幕', storyboard: '分镜', broll: '素材', compose: '成片' };
@@ -31,7 +32,8 @@ function readParent(env: VersionEnv, n: number): Parent {
   const dir = env.ctx.store.versionDir(env.space.id, n);
   if (meta.status !== 'done' || !existsSync(join(dir, STATE_FILE))) throw new Error(`v${n} 还没有完成，不能在它上面修改`);
   const project = existsSync(join(dir, 'project.json')) ? readJson<ProjectFile>(join(dir, 'project.json'), `v${n} 的工程文件`) : null;
-  return { n, dir, state: readJson<VersionState>(join(dir, STATE_FILE), `v${n} 的版本状态`), project };
+  const state = readJson<VersionState>(join(dir, STATE_FILE), `v${n} 的版本状态`);
+  return { n, dir, state, project, ...(meta.shotHashes ? { hashes: meta.shotHashes } : {}) };
 }
 
 /** 校验并应用修改；付费开关与预算以项目当前设置为准 */
@@ -109,10 +111,20 @@ function cardKey(card: CardSpec): string {
   return stable({ ...card, props });
 }
 
+/**
+ * 本版改动的共同口径：本版第 i 个镜头的内容键不在父版本的内容键里，就算改动（与是否命中渲染缓存无关）。
+ * 画面用分段哈希（含本段帧区间，所以等于比较同一时间位置的画面），卡片自检用卡片内容。
+ */
+function changedAgainst(parentKeys: readonly string[], keys: readonly (string | undefined)[]): number[] {
+  const known = new Set(parentKeys);
+  return keys.flatMap((k, i) => (k !== undefined && !known.has(k) ? [i] : []));
+}
+
 /** 父版本里没有的卡片（新换的、重取素材的）所在的镜头序号 */
 function changedShots(parent: VersionState, storyboard: Storyboard): number[] {
-  const known = new Set(parent.storyboard.shots.flatMap((s) => (s.card ? [cardKey(s.card)] : [])));
-  return storyboard.shots.flatMap((s, i) => (s.layout === 'split' && s.card && !known.has(cardKey(s.card)) ? [i] : []));
+  const parentCards = parent.storyboard.shots.flatMap((s) => (s.card ? [cardKey(s.card)] : []));
+  const cards = storyboard.shots.map((s) => (s.layout === 'split' && s.card ? cardKey(s.card) : undefined));
+  return changedAgainst(parentCards, cards);
 }
 
 /** 卡片自检只查父版本里没有的卡片 */
@@ -122,17 +134,28 @@ function checkChanged(env: VersionEnv, args: PipelineArgs, parent: VersionState,
   return qaCardsStage(args, env.meter, m.storyboard, m.captions, env.complete, changed);
 }
 
-/** 有阶段要跑才渲染（未改动的镜头命中分段缓存）；只换封面或回退时直接引用父版本成片 */
-async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, m: Made): Promise<number[]> {
+interface Rendered { changed: number[]; hashes?: string[] }
+
+/** 画面和父版本比：父版本没记哈希（旧数据）时退回实际重渲的镜头 */
+function diffWithParent(parentHashes: string[] | undefined, res: SegmentedResult): number[] {
+  return parentHashes ? changedAgainst(parentHashes, res.hashes) : res.rendered;
+}
+
+/** 有阶段要跑才渲染（未改动的镜头命中分段缓存）；只换封面或回退时直接引用父版本成片，画面与父版本相同 */
+async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, m: Made): Promise<Rendered> {
   const final = join(env.dir, FINAL_FILE);
   if (c.stages.size === 0) {
     linkFile(join(p.dir, FINAL_FILE), final);
     env.record({ artifacts: { output: final, final } });
-    return [];
+    return { changed: [], ...(p.hashes ? { hashes: p.hashes } : {}) };
   }
-  const res = await composeStage(args, { person: m.person, subject: m.subject, captions: m.captions, storyboard: m.storyboard, outputDurationSec: m.plan.outputDurationSec, raw: join(env.dir, 'final.raw.mp4'), output: final, cacheDir: join(env.base, 'segments') }, env.complete);
+  const input = {
+    person: m.person, subject: m.subject, captions: m.captions, storyboard: m.storyboard, outputDurationSec: m.plan.outputDurationSec,
+    raw: join(env.dir, 'final.raw.mp4'), output: final, cacheDir: join(env.base, 'segments'),
+  };
+  const res = await composeStage(args, input, env.complete);
   env.complete('compose', `分段渲染：重渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
-  return res.rendered;
+  return { changed: diffWithParent(p.hashes, res), hashes: res.hashes };
 }
 
 /** 封面只在换了封面风格时重做，否则引用父版本的封面 */
@@ -154,10 +177,11 @@ export async function produceNext(env: VersionEnv, input: string, parentN: numbe
   const made = await remake(env, args, p, c);
   const { storyboard, cards } = await checkChanged(env, args, p.state, made);
   const m = { ...made, storyboard };
-  const changedShots = await render(env, args, p, c, m);
+  const rendered = await render(env, args, p, c, m);
   await finalQaStage(args, join(env.dir, FINAL_FILE), storyboard, cards, env.complete);
   await cover(env, args, p, c, m);
   env.record({ plan: m.plan, captions: m.captions, storyboard });
   const qaScore = qaScoreOf(cards) ?? env.space.versions.find((v) => v.n === parentN)?.qaScore;
-  return { state: { ...c.next, plan: m.plan, captions: m.captions, storyboard }, changedShots, ...(qaScore !== undefined ? { qaScore } : {}) };
+  const state = { ...c.next, plan: m.plan, captions: m.captions, storyboard };
+  return { state, changedShots: rendered.changed, ...(rendered.hashes ? { shotHashes: rendered.hashes } : {}), ...(qaScore !== undefined ? { qaScore } : {}) };
 }

@@ -52,6 +52,8 @@ export interface AppCtx {
   spacesRoot: string;
   keyStore: KeyStore;
   keys: KeyCache;
+  /** 抹掉文字里的本机绝对路径（事件与错误响应） */
+  scrub: (text: string) => string;
   deps: AppDeps;
   runs: RunManager;
   webDir: string;

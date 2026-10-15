@@ -4,7 +4,8 @@
  * 为了让工作台的「花费」显示可测，每次假调用按名义单价记一笔（标注「假模式」，并没有真的扣费）。
  */
 import { copyFileSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { presetPath } from '../background/presets.js';
 import type { BrollDeps } from '../broll/fulfill.js';
 import type { AppConfig } from '../config.js';
@@ -16,7 +17,8 @@ import type { CoverDeps } from '../pipeline/finish-step.js';
 import type { QaDeps } from '../pipeline/qa-step.js';
 import { hardChecks } from '../qa/hard.js';
 import type { CardQaEntry, CardScore } from '../qa/visual.js';
-import type { AppDeps } from './context.js';
+import { fileKeyStore } from '../workspace/keychain.js';
+import type { AppDeps, AppOptions } from './context.js';
 
 export const FAKE_LLM_ENV = 'MINGZHI_FAKE_LLM';
 export const isFakeMode = (env: NodeJS.ProcessEnv = process.env): boolean => env[FAKE_LLM_ENV] === '1';
@@ -158,4 +160,17 @@ export function fakeDeps(cfg: AppConfig): Partial<AppDeps> {
       brollDeps: fakeBroll, qaDeps: fakeQa(), coverDeps: fakeCovers(cfg),
     },
   };
+}
+
+/**
+ * 假模式的服务选项：必须用独立的数据目录（MINGZHI_DATA_DIR，且不是默认的 ~/.mingzhi），
+ * key 只存数据目录下的文件、不碰系统钥匙串。这样「key 校验恒通过」只在这个隔离目录里生效，
+ * 假版本也不会混进真实项目。
+ */
+export function fakeAppOptions(cfg: AppConfig, env: NodeJS.ProcessEnv = process.env): Pick<AppOptions, 'keyStore' | 'deps'> {
+  const dir = env.MINGZHI_DATA_DIR;
+  if (!dir || resolve(dir) === resolve(homedir(), '.mingzhi')) {
+    throw new Error(`${FAKE_LLM_ENV}=1 时必须用 MINGZHI_DATA_DIR 指定一个独立的数据目录（不能是 ~/.mingzhi）`);
+  }
+  return { keyStore: fileKeyStore(cfg.dataDir), deps: fakeDeps(cfg) };
 }

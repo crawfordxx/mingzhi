@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import type { BrollDeps } from '../broll/fulfill.js';
 import { CancelledError, throwIfCancelled } from '../cancel.js';
 import type { AppConfig } from '../config.js';
-import { CostMeter } from '../cost/meter.js';
+import { CostMeter, roundYuan } from '../cost/meter.js';
 import type { Price } from '../cost/prices.js';
 import type { VersionState } from '../edit/apply.js';
 import type { EditOp } from '../edit/plan.js';
@@ -16,9 +16,9 @@ import { costsOf, makeComplete, type ProgressEvent } from '../pipeline/run.js';
 import type { Complete } from '../pipeline/stages.js';
 import { toWorkEvent, type EventBus } from './events.js';
 import { produceFirst } from './runner-first.js';
-import { FINAL_FILE, SOURCE_FILE, STATE_FILE, writeJsonAtomic } from './runner-files.js';
+import { SOURCE_FILE, STATE_FILE, writeJsonAtomic } from './runner-files.js';
 import { produceNext } from './runner-next.js';
-import type { Space, SpaceStore, VersionMeta } from './store.js';
+import { projectSpentYuan, type Space, type SpaceStore, type VersionMeta } from './store.js';
 
 export { FINAL_FILE } from './runner-files.js';
 
@@ -49,8 +49,8 @@ export interface VersionEnv {
   emit: (e: ProgressEvent) => void;
 }
 
-/** changedShots：本版实际重渲的镜头序号；qaScore：本版卡片自检的平均分（没有自检时沿用父版本） */
-export interface VersionOutcome { state: VersionState; changedShots: number[]; qaScore?: number }
+/** changedShots：和父版本相比画面变了的镜头序号；shotHashes：各镜头的画面内容哈希；qaScore：本版卡片自检的平均分（没有自检时沿用父版本） */
+export interface VersionOutcome { state: VersionState; changedShots: number[]; shotHashes?: string[]; qaScore?: number }
 
 /** 多段口播拼成的合成原片：之后的识别时间戳、剪口误、抠像、各版本修改都把它当作单段原片 */
 const sourceOf = (base: string): string => join(base, SOURCE_FILE);
@@ -61,9 +61,12 @@ function inputOf(ctx: RunnerCtx, space: Space): string {
   return space.inputs.length > 1 ? sourceOf(ctx.store.baseDir(space.id)) : space.inputs[0];
 }
 
+/** 预算按项目计：本版本最多还能花「项目上限 − 此前各版本与对话已花」 */
+const remainingBudget = (space: Space): number => Math.max(0, roundYuan(space.settings.budgetYuan - projectSpentYuan(space)));
+
 function makeEnv(ctx: RunnerCtx, space: Space, n: number): VersionEnv {
   const dir = ctx.store.versionDir(space.id, n);
-  const meter = new CostMeter(ctx.prices ?? {}, space.settings.budgetYuan);
+  const meter = new CostMeter(ctx.prices ?? {}, remainingBudget(space));
   const { llm, task } = ctx.clients(meter);
   const record = projectRecorder(join(dir, 'project.json'), space.inputs[0] ?? '');
   const emit = (e: ProgressEvent): void => { ctx.bus.publish(toWorkEvent(space.id, n, e)); };
@@ -74,12 +77,15 @@ function makeEnv(ctx: RunnerCtx, space: Space, n: number): VersionEnv {
 /** 收尾：先写 state.json（版本完整的标志），再置 done，最后发 done 事件 */
 function finish(env: VersionEnv, out: VersionOutcome): VersionMeta {
   writeJsonAtomic(join(env.dir, STATE_FILE), out.state);
-  const final = join(env.dir, FINAL_FILE);
   env.record({ costs: costsOf(env.meter) });
   const meta = env.ctx.store.updateVersion(env.space.id, env.n, {
-    status: 'done', costYuan: env.meter.total, changedShots: out.changedShots, ...(out.qaScore !== undefined ? { qaScore: out.qaScore } : {}),
+    status: 'done',
+    costYuan: roundYuan(env.meter.total),
+    changedShots: out.changedShots,
+    ...(out.shotHashes ? { shotHashes: out.shotHashes } : {}),
+    ...(out.qaScore !== undefined ? { qaScore: out.qaScore } : {}),
   });
-  env.emit({ step: 'done', message: final });
+  env.emit({ step: 'done', message: '完成' });
   return meta;
 }
 
@@ -87,7 +93,7 @@ function finish(env: VersionEnv, out: VersionOutcome): VersionMeta {
 function fail(env: VersionEnv, err: unknown): unknown {
   const final = env.ctx.signal?.aborted && !(err instanceof CancelledError) ? new CancelledError() : err;
   try { env.record({ costs: costsOf(env.meter) }); } catch { /* 写盘失败不盖掉原错误 */ }
-  try { env.ctx.store.updateVersion(env.space.id, env.n, { status: 'failed', costYuan: env.meter.total }); } catch { /* 同上 */ }
+  try { env.ctx.store.updateVersion(env.space.id, env.n, { status: 'failed', costYuan: roundYuan(env.meter.total) }); } catch { /* 同上 */ }
   return final;
 }
 

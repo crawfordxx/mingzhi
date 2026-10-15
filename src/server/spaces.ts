@@ -1,11 +1,11 @@
-import { renameSync, statSync, writeFileSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { z } from 'zod';
 import { isPresetId } from '../background/presets.js';
 import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
 import { COVER_STYLES } from '../cover/styles.js';
 import { isInside } from '../workspace/runner-files.js';
-import type { Space, SpaceSettings } from '../workspace/store.js';
+import { projectSpentYuan, type Space, type SpaceSettings, type VersionMeta } from '../workspace/store.js';
 import type { AppCtx } from './context.js';
 import { HttpError } from './http.js';
 import type { RunState } from './runs.js';
@@ -81,19 +81,28 @@ const isFile = (path: string): boolean => {
   }
 };
 
-/** 与 SpaceStore 相同的保存方式（先写临时文件再改名）。SpaceStore 没有改输入与设置的接口，且不在本任务范围内 */
-export function saveSpace(app: Pick<AppCtx, 'spacesRoot'>, space: Space): void {
-  const file = join(spaceDir(app, space.id), 'space.json');
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(space, null, 2)}\n`);
-  renameSync(tmp, file);
+/** 给前端的设置：自定义背景只给文件名，不外露本机路径 */
+export function publicSettings(settings: SpaceSettings): SpaceSettings {
+  const bg = settings.background;
+  return bg?.kind === 'file' ? { ...settings, background: { kind: 'file', path: basename(bg.path) } } : settings;
 }
 
-export const round4 = (v: number): number => Math.round(v * 10_000) / 10_000;
+/** 给前端的版本：内容哈希只在服务端比较用，不下发 */
+const publicVersion = ({ shotHashes: _h, ...v }: VersionMeta): Omit<VersionMeta, 'shotHashes'> => v;
 
-/** 返回给前端的项目：输入只给文件名（不泄露本机路径），附当前任务状态与累计花费 */
-export function toDto(space: Space, job: RunState | null): Omit<Space, 'inputs'> & { inputs: string[]; job: RunState | null; chatCostYuan: number; totalCostYuan: number } {
-  const chatCostYuan = space.chatCostYuan ?? 0;
-  const totalCostYuan = round4(space.versions.reduce((s, v) => s + v.costYuan, 0) + chatCostYuan);
-  return { ...space, inputs: space.inputs.map((p) => basename(p)), job, chatCostYuan, totalCostYuan };
+export type SpaceDto = Omit<Space, 'inputs' | 'versions'> & {
+  inputs: string[]; versions: Omit<VersionMeta, 'shotHashes'>[]; job: RunState | null; chatCostYuan: number; totalCostYuan: number;
+};
+
+/** 返回给前端的项目：输入与自定义背景只给文件名（不泄露本机路径），附当前任务状态与累计花费 */
+export function toDto(space: Space, job: RunState | null): SpaceDto {
+  return {
+    ...space,
+    inputs: space.inputs.map((p) => basename(p)),
+    versions: space.versions.map(publicVersion),
+    settings: publicSettings(space.settings),
+    job,
+    chatCostYuan: space.chatCostYuan ?? 0,
+    totalCostYuan: projectSpentYuan(space),
+  };
 }

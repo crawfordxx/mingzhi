@@ -159,6 +159,9 @@ function fileStore(plain: FileKey): KeyStore {
   };
 }
 
+/** 只用数据目录下的 key 文件（600 权限），不读写系统钥匙串：假模型模式用 */
+export const fileKeyStore = (dataDir: string): KeyStore => fileStore(new FileKey(dataDir, 'key'));
+
 export function createKeyStore(dataDir: string, platform: NodeJS.Platform = process.platform, exec: Exec = defaultExec): KeyStore {
   const plain = new FileKey(dataDir, 'key');
   if (platform === 'darwin') return darwinStore(exec, plain);

@@ -59,5 +59,6 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   await makeCover(env, args, init.coverStyle, storyboard, captions, person);
   const state: VersionState = { ...init, plan: a.plan, captions, storyboard };
   const qaScore = qaScoreOf(cards);
-  return { state, changedShots: res.rendered, ...(qaScore !== undefined ? { qaScore } : {}) };
+  // 首个版本没有父版本可比，本版改动为空（界面显示「首版」）
+  return { state, changedShots: [], shotHashes: res.hashes, ...(qaScore !== undefined ? { qaScore } : {}) };
 }

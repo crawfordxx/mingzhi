@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
-import { trackPath, type Track } from '../src/assets/catalog.js';
-import { stageAudio } from '../src/compose/stage-assets.js';
+import { fontPath, loadFonts, sfxPath, trackPath, type Track } from '../src/assets/catalog.js';
+import { CAPTION_STYLES } from '../src/captions/styles.js';
+import { stageAudio, stageCaptionFont } from '../src/compose/stage-assets.js';
 
 const track: Track = { id: 't1', title: 't', zip: 'z', entry: 'e.mp3', mood: 'chill', energy: 1, durationSec: 60 };
 
@@ -41,5 +42,24 @@ describe('stageAudio', () => {
   it('曲目文件缺失时抛出明确错误', async () => {
     const { cfg, workDir } = setup();
     await expect(stageAudio(workDir, cfg, { ...track, id: 'missing' }, [])).rejects.toThrow(/missing/);
+  });
+});
+
+describe('素材落盘用硬链接（每个版本不再复制约 20MB 字体与配乐）', () => {
+  const ino = (p: string): number => statSync(p).ino;
+
+  it('配乐、音效与字幕字体在版本目录里是素材文件的硬链接', async () => {
+    const { cfg, workDir } = setup();
+    const font = loadFonts().find((f) => f.id === CAPTION_STYLES.blade.font)!;
+    mkdirSync(join(fontPath(cfg, font), '..'), { recursive: true });
+    writeFileSync(fontPath(cfg, font), 'FONTDATA');
+    const out = await stageAudio(workDir, cfg, track, [{ sec: 0, sfx: 'click' as const, volume: 0.3 }]);
+    expect(ino(join(workDir, out.bgm!))).toBe(ino(trackPath(cfg, track)));
+    expect(ino(join(workDir, out.sfxFiles[0]))).toBe(ino(sfxPath('click')));
+    const staged = await stageCaptionFont(workDir, cfg, 'blade');
+    expect(ino(join(workDir, 'fonts', staged.file))).toBe(ino(fontPath(cfg, font)));
+    // 再落一次（同一个版本目录重跑）不报错
+    await stageCaptionFont(workDir, cfg, 'blade');
+    await stageAudio(workDir, cfg, track, []);
   });
 });
