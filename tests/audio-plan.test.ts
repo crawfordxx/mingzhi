@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Track } from '../src/assets/catalog.js';
-import { DUCK_DB, OPEN_DB, bgmEnvelope, dbAt, pickTrack, sfxCues } from '../src/audio/plan.js';
+import { DUCK_DB, OPEN_DB, PURE_NUMBER, TIMING, bgmEnvelope, dbAt, pickTrack, sfxCues } from '../src/audio/plan.js';
 import type { CardSpec, Shot } from '../src/storyboard/schema.js';
+import { COUNT_SEC, COUNT_START, PURE_NUMBER as TEMPLATE_PURE_NUMBER } from '../render/templates/BigNumber.js';
+import { FIRST_POP, STAGGER } from '../render/templates/Chips.js';
 import { ctaClickTimes } from '../render/templates/Cta.js';
+import { EXIT_SEC } from '../render/templates/parts.js';
 import { clickTimes } from '../render/templates/Toggles.js';
 
 const cap = (start: number, end: number) => ({ start, end, text: 'x' });
@@ -32,6 +35,17 @@ describe('bgmEnvelope', () => {
     keys.slice(1).forEach((k, i) => expect(k.sec).toBeGreaterThan(keys[i].sec));
     expect(bgmEnvelope([], 10)).toEqual([{ sec: 0, db: -60 }, { sec: 0.5, db: DUCK_DB }, { sec: 8.5, db: DUCK_DB }, { sec: 10, db: -60 }]);
   });
+  it('嵌套、重叠的字幕按累计结束时间判断空隙：说话期间不抬起', () => {
+    expect(bgmEnvelope([cap(0, 9), cap(2, 3), cap(5, 6)], 12).some((k) => k.db === OPEN_DB)).toBe(false);
+    // 嵌套字幕之后真正的空隙（9–10）仍然抬起
+    const keys = bgmEnvelope([cap(0, 9), cap(2, 3), cap(10, 12)], 14);
+    expect(keys.filter((k) => k.db === OPEN_DB).map((k) => k.sec)).toEqual([9.3, 9.7]);
+  });
+  it('超出片长的字幕被忽略，关键帧不晚于片尾', () => {
+    const keys = bgmEnvelope([cap(0, 2), cap(3, 4), cap(20, 22)], 8);
+    expect(keys).toEqual(bgmEnvelope([cap(0, 2), cap(3, 4)], 8));
+    expect(keys[keys.length - 1].sec).toBe(8);
+  });
   it('淡入淡出区间内的空隙忽略；片子太短时两端按比例缩短', () => {
     expect(bgmEnvelope([cap(0, 0.1), cap(1.2, 3)], 10).some((k) => k.db === OPEN_DB)).toBe(false);
     const short = bgmEnvelope([], 1);
@@ -53,6 +67,9 @@ describe('dbAt', () => {
     expect(dbAt(keys, 9)).toBe(-10);
     expect(dbAt([], 1)).toBe(DUCK_DB);
   });
+  it('时间是 NaN 时取第一个关键帧', () => {
+    expect(dbAt(keys, Number.NaN)).toBe(-60);
+  });
 });
 
 describe('sfxCues', () => {
@@ -67,10 +84,23 @@ describe('sfxCues', () => {
     expect(toggles.map((c) => c.sec)).toEqual(clickTimes(2, 6).map((t) => Math.round((10 + t) * 1000) / 1000));
     expect(toggles[0].sec).toBeCloseTo(10.6);
   });
-  it('toggles：镜头很短时与模板同样压缩间隔', () => {
+  it('toggles：镜头 2.2 秒时间隔压缩为 0.375 秒', () => {
     const card: CardSpec = { template: 'toggles', props: { rows: [{ label: 'a', on: true }, { label: 'b', on: true }, { label: 'c', on: true }] } };
-    const toggles = sfxOf([split(0, 2.2, card)], 'toggle');
-    expect(toggles.map((c) => c.sec)).toEqual(clickTimes(3, 2.2).map((t) => Math.round(t * 1000) / 1000).filter((t, i, a) => i === 0 || t - a[i - 1] > 0.05));
+    expect(sfxOf([split(0, 2.2, card)], 'toggle').map((c) => c.sec)).toEqual([0.6, 0.975, 1.35]);
+  });
+  it('toggles：镜头太短，点击压到同一时刻时只留一个', () => {
+    const card: CardSpec = { template: 'toggles', props: { rows: [{ label: 'a', on: true }, { label: 'b', on: true }, { label: 'c', on: true }] } };
+    expect(sfxOf([split(0, 1.5, card)], 'toggle').map((c) => c.sec)).toEqual([0.6]);
+  });
+  it('toggles、cta 的点击时间在各种镜头时长下都与模板函数一致', () => {
+    const toggles = (n: number): CardSpec => ({ template: 'toggles', props: { rows: Array.from({ length: n }, (_, i) => ({ label: `r${i}`, on: true })) } });
+    const cta = (n: number): CardSpec => ({ template: 'cta', props: { actions: ['关注', '点赞', '收藏'].slice(0, n) } });
+    for (const dur of [3, 4.5, 8]) {
+      for (const n of [1, 2, 3]) {
+        expect(sfxOf([split(0, dur, toggles(n))], 'toggle').map((c) => c.sec)).toEqual(clickTimes(n, dur));
+        expect(sfxCues([{ start: 0, end: dur, layout: 'full', card: cta(n) }]).map((c) => c.sec)).toEqual(ctaClickTimes(n, dur));
+      }
+    }
   });
   it('cta：全屏镜头按 actions 数量点击，时间与 ctaClickTimes 一致，不放 enter', () => {
     const card: CardSpec = { template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } };
@@ -103,12 +133,24 @@ describe('sfxCues', () => {
     const confirms = sfxOf([split(0, 6, card)], 'confirm');
     expect(confirms.map((c) => c.sec)).toEqual([0.15, 0.39, 0.63]);
   });
-  it('同一时刻（±0.05 秒）只保留一个，先出现的保留', () => {
+  it('同一时刻（±0.05 秒）只保留更响的：enter 0.35 压过同刻的 tick 0.15', () => {
     const num: CardSpec = { template: 'bigNumber', props: { value: '9', label: 'x' } };
-    // 前一镜头的 tick 落在 4.7，下一镜头 enter 在 4.72：只留前者
+    // 前一镜头的 tick 落在 4.7，下一镜头 enter 在 4.72
     const cues = sfxCues([split(4, 4.8, num), split(4.72, 8, title)]);
-    expect(cues.find((c) => c.sfx === 'enter' && c.sec === 4.72)).toBeUndefined();
+    expect(cues.find((c) => c.sec === 4.7)).toBeUndefined();
+    expect(cues.find((c) => c.sec === 4.72)).toEqual({ sec: 4.72, sfx: 'enter', volume: 0.35 });
     expect(cues.slice(1).every((c, i) => c.sec - cues[i].sec > 0.05)).toBe(true);
+  });
+  it('音量相同时保留更早的', () => {
+    const toggles: CardSpec = { template: 'toggles', props: { rows: [{ label: 'a', on: true }] } };
+    const cta: CardSpec = { template: 'cta', props: { actions: ['关注'] } };
+    // toggle 在 0.6，另一个全屏 cta 的 click 在 0.14 + 0.5 = 0.64（相差 0.04 秒）
+    const cues = sfxCues([split(0, 2, toggles), { start: 0.14, end: 4, layout: 'full', card: cta }]);
+    expect(cues.filter((c) => c.sec > 0.5 && c.sec < 0.7)).toEqual([{ sec: 0.6, sfx: 'toggle', volume: 0.35 }]);
+  });
+  it('chips：入场 enter 与第一个 confirm 不互相去重', () => {
+    const card: CardSpec = { template: 'chips', props: { groups: [{ label: 'g', items: [{ text: 'a', mark: 'yes' }] }] } };
+    expect(sfxCues([split(0, 4, card)]).map((c) => [c.sfx, c.sec])).toEqual([['enter', 0], ['confirm', 0.15]]);
   });
   it('晚于镜头结束的音效丢弃', () => {
     const num: CardSpec = { template: 'bigNumber', props: { value: '9', label: 'x' } };
@@ -129,9 +171,29 @@ describe('pickTrack', () => {
     expect(new Set(picks.map((t) => t.id)).size).toBe(2);
     expect(pickTrack(tracks, 'upbeat', 'any').id).toBe('u1');
   });
+  it('按 id 的码元顺序排序（大写 B 在小写 a 之前），不受本地化排序影响', () => {
+    const fnv = (seed: string): number => [...seed].reduce((h, ch) => Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0, 2166136261);
+    const pool = [mk('a', 'tech'), mk('B', 'tech')];
+    for (const seed of ['k0', 'k1', 'k2', 'k3']) expect(pickTrack(pool, 'tech', seed).id).toBe(['B', 'a'][fnv(seed) % 2]);
+  });
   it('该情绪没有曲目时退到全部曲目；曲库为空报错', () => {
     const noUpbeat = tracks.filter((t) => t.mood !== 'upbeat');
     expect(noUpbeat).toContain(pickTrack(noUpbeat, 'upbeat', 's'));
     expect(() => pickTrack([], 'chill', 's')).toThrow();
+  });
+});
+
+describe('与渲染模板常量对拍', () => {
+  it('卡片出场时长、标签弹入节奏、数字滚动判定与模板一致', () => {
+    expect(TIMING.exitSec).toBe(EXIT_SEC);
+    expect(TIMING.chipsFirst).toBe(FIRST_POP);
+    expect(TIMING.chipsStagger).toBe(STAGGER);
+    expect(PURE_NUMBER.source).toBe(TEMPLATE_PURE_NUMBER.source);
+  });
+  it('tick 落在数字滚动的时间窗内（允许多一个间隔）', () => {
+    const num: CardSpec = { template: 'bigNumber', props: { value: '12', label: 'x' } };
+    const ticks = sfxOf([split(0, 4, num)], 'tick').map((c) => c.sec);
+    expect(ticks[0]).toBeGreaterThanOrEqual(COUNT_START);
+    expect(ticks[ticks.length - 1]).toBeLessThanOrEqual(COUNT_START + COUNT_SEC + 0.1 + 1e-9);
   });
 });

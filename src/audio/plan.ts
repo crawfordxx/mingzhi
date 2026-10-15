@@ -19,11 +19,15 @@ export interface VolumeKey { sec: number; db: number }
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 const EPS = 1e-9;
 
-/** 相邻字幕之间够长的空隙：抬起（空隙开始后 RAMP_SEC 内到顶）、压回（空隙结束前 RAMP_SEC 开始降） */
+/**
+ * 字幕之间够长的空隙：抬起（空隙开始后 RAMP_SEC 内到顶）、压回（空隙结束前 RAMP_SEC 开始降）。
+ * 空隙从“此前所有字幕的最晚结束时间”算起，嵌套、重叠的字幕不会在说话期间造出空隙。
+ */
 function gapKeys(captions: TimedCaption[], fadeIn: number, fadeOut: number): VolumeKey[] {
   const sorted = [...captions].sort((a, b) => a.start - b.start);
+  const ends = sorted.reduce<number[]>((acc, c) => [...acc, Math.max(c.end, acc[acc.length - 1] ?? -Infinity)], []);
   return sorted.slice(1).flatMap((next, i) => {
-    const from = sorted[i].end;
+    const from = ends[i];
     // 空隙太短，或没有完整落在淡入淡出之间，都不抬起
     if (next.start - from < OPEN_GAP_SEC - EPS || from < fadeIn || next.start > fadeOut) return [];
     return [
@@ -66,7 +70,7 @@ export function bgmEnvelope(captions: TimedCaption[], durationSec: number): Volu
 /** 某一时刻的音量（dB）：关键帧之间线性插值，越界取端点；没有关键帧时按压低音量 */
 export function dbAt(keys: VolumeKey[], sec: number): number {
   if (keys.length === 0) return DUCK_DB;
-  if (sec <= keys[0].sec) return keys[0].db;
+  if (Number.isNaN(sec) || sec <= keys[0].sec) return keys[0].db;
   const last = keys[keys.length - 1];
   if (sec >= last.sec) return last.db;
   const i = keys.findIndex((k) => k.sec > sec);
@@ -84,12 +88,12 @@ const DEDUP_SEC = 0.05;
 
 /*
  * 以下节奏与渲染模板保持一致（模板在 .tsx 里依赖 React，这里不引入，复制最小常量；
- * tests/audio-plan.test.ts 会与模板里的真实函数对拍，改动模板时测试会报警）：
- * - 卡片出场时长：render/templates/parts.tsx 的 EXIT_SEC
- * - 开关点击：render/templates/Toggles.tsx 的 clickTimes
- * - CTA 点击：render/templates/Cta.tsx 的 ctaClickTimes
- * - 标签弹入：render/templates/Chips.tsx 的 0.15 + 序号 * STAGGER
- * - 数字滚动：render/templates/BigNumber.tsx 的 countUp（仅纯数字滚动）
+ * tests/audio-plan.test.ts 与模板源头对拍，改动模板时测试会报警）：
+ * - 卡片出场时长：render/templates/parts.tsx 的 EXIT_SEC（对拍 TIMING.exitSec）
+ * - 开关点击：render/templates/Toggles.tsx 的 clickTimes（按函数结果对拍）
+ * - CTA 点击：render/templates/Cta.tsx 的 ctaClickTimes（按函数结果对拍）
+ * - 标签弹入：render/templates/Chips.tsx 的 FIRST_POP + 序号 * STAGGER（对拍 TIMING.chips*）
+ * - 数字滚动：render/templates/BigNumber.tsx 的 PURE_NUMBER 与 COUNT_START/COUNT_SEC（tick 落在窗内）
  */
 const EXIT_SEC = 0.25;
 const TOGGLE_FIRST = 0.6;
@@ -104,7 +108,9 @@ const CHIPS_FIRST = 0.15;
 const CHIPS_STAGGER = 0.12;
 const TICK_COUNT = 7;
 const TICK_GAP = 0.1;
-const PURE_NUMBER = /^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/;
+export const PURE_NUMBER = /^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/;
+/** 供测试与模板源头对拍的常量 */
+export const TIMING = { exitSec: EXIT_SEC, chipsFirst: CHIPS_FIRST, chipsStagger: CHIPS_STAGGER } as const;
 
 function toggleTimes(k: number, dur: number): number[] {
   const room = dur - EXIT_SEC - TOGGLE_DONE_BEFORE_EXIT - TOGGLE_SWITCH_SEC - TOGGLE_FIRST;
@@ -148,10 +154,14 @@ function startCue(shot: Shot & { card: CardSpec }): SfxCue[] {
   return shot.layout === 'split' ? [cue(0, 'enter')] : [];
 }
 
-/** 按时间排序，±DEDUP_SEC 内只保留先出现的一个 */
+/** 按时间排序，±DEDUP_SEC 内只保留更响的一个，音量相同保留更早的 */
 function dedupe(cues: SfxCue[]): SfxCue[] {
   const sorted = [...cues].sort((a, b) => a.sec - b.sec);
-  return sorted.reduce<SfxCue[]>((acc, c) => (acc.length > 0 && c.sec - acc[acc.length - 1].sec <= DEDUP_SEC + EPS ? acc : [...acc, c]), []);
+  return sorted.reduce<SfxCue[]>((acc, c) => {
+    const last = acc[acc.length - 1];
+    if (!last || c.sec - last.sec > DEDUP_SEC + EPS) return [...acc, c];
+    return c.volume > last.volume ? [...acc.slice(0, -1), c] : acc;
+  }, []);
 }
 
 /** 所有带卡片镜头的音效触发点（秒，相对整片）；晚于镜头结束的点丢弃 */
@@ -175,7 +185,8 @@ function hash(seed: string): number {
 /** 同情绪里按 seed 的哈希稳定选曲；该情绪没有曲目时退到全部曲目 */
 export function pickTrack(tracks: Track[], mood: Mood, seed: string): Track {
   const sameMood = tracks.filter((t) => t.mood === mood);
-  const pool = [...(sameMood.length > 0 ? sameMood : tracks)].sort((a, b) => a.id.localeCompare(b.id));
+  // 按码元顺序排序（不用 localeCompare），结果不随运行环境的本地化设置变化
+  const pool = [...(sameMood.length > 0 ? sameMood : tracks)].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   if (pool.length === 0) throw new Error('没有可选的配乐曲目');
   return pool[hash(seed) % pool.length];
 }

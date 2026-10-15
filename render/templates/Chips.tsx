@@ -16,7 +16,9 @@ const PILL_PAD = 50;
 const ROW_PAD_Y = 28;
 const CARD_PAD_Y = 12;
 const LABEL_LH = 1.3;
-const STAGGER = 0.12;
+/** 第一个胶囊弹入的时间与相邻胶囊的间隔（秒）；音效触发点（src/audio/plan.ts）与之对拍 */
+export const FIRST_POP = 0.15;
+export const STAGGER = 0.12;
 const MARKS: Record<Mark, { bg: string; fg: string }> = {
   yes: { bg: '#E3F3E8', fg: THEME.badge['收益'] },
   no: { bg: '#FBE5E4', fg: THEME.red },
@@ -80,7 +82,7 @@ const Row: React.FC<{ group: Group; first: number; divider: boolean; local: numb
   <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: `${ROW_PAD_Y}px 0`, borderTop: divider ? '2px solid #EFEDE9' : 'none' }}>
     <div style={{ width: LABEL_W, flex: 'none', fontSize: labelPx(group.label), fontWeight: 600, color: THEME.sub, lineHeight: LABEL_LH, ...clampLines(2) }}>{group.label}</div>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: PILL_GAP }}>
-      {group.items.map((it, i) => <Pill key={i} text={it.text} mark={it.mark} p={springAt(local, 0.15 + (first + i) * STAGGER, fps, { damping: 12, mass: 0.6 })} />)}
+      {group.items.map((it, i) => <Pill key={i} text={it.text} mark={it.mark} p={springAt(local, FIRST_POP + (first + i) * STAGGER, fps, { damping: 12, mass: 0.6 })} />)}
     </div>
   </div>
 );

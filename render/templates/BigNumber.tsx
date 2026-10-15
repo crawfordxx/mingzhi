@@ -11,8 +11,11 @@ const CELL_H = 68;
 const SIDE_GAP = 36;
 const SIDE_MIN_PX = 24;
 const GREEN = THEME.badge['收益'];
+/** 数字滚动的开始时间与时长（秒）；音效触发点（src/audio/plan.ts）与之对拍 */
+export const COUNT_START = 0.05;
+export const COUNT_SEC = 0.6;
 /** 纯数字（可带千分位与小数）才做滚动 */
-const PURE_NUMBER = /^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/;
+export const PURE_NUMBER = /^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/;
 
 /** 数字在 0.6 秒内从 0 滚到目标值；非纯数字直接显示；滚完显示原字符串（保留前导零等写法） */
 export function countUp(value: string, p: number): string {
@@ -61,7 +64,7 @@ export const BigNumber: React.FC<TemplateProps<'bigNumber'>> = ({ props, local }
   return (
     <SafeArea>
       <Reveal p={springAt(local, 0, fps)} dy={20}>
-        <Header value={props.value} unit={props.unit} label={props.label} p={easeAt(local, 0.05, 0.6)} />
+        <Header value={props.value} unit={props.unit} label={props.label} p={easeAt(local, COUNT_START, COUNT_SEC)} />
       </Reveal>
       {chips.length > 0 ? (
         <div style={{ marginTop: 52, display: 'grid', gridTemplateColumns: `repeat(${COLS}, 1fr)`, gap: GAP }}>
