@@ -96,6 +96,20 @@ describe('项目级预算（I1）', () => {
     expect(chatty.calls.images).toEqual([]);
   });
 
+  it('修改版本的花费提示：「上限」写项目上限，剩余额度另写「剩余 ¥x」', async () => {
+    const f = await afterV1({ budgetYuan: 5 });
+    const spentV1 = metaOf(f, 1).costYuan;
+    await runNextVersion(f.ctx, f.spaceId, 1, [card(splitShots(stateOf(f, 1))[0], '新标题')], '换卡片');
+    const costs = f.events.filter((e) => e.detail?.kind === 'cost');
+    expect(costs.length).toBeGreaterThan(0);
+    const last = costs.at(-1)!;
+    const total = (last.detail?.data as { total: number }).total;
+    expect(last.message).toBe(`已花费 ¥${total.toFixed(2)}（项目上限 ¥5.00 · 剩余 ¥${(5 - spentV1 - total).toFixed(2)}）`);
+    const data = last.detail?.data as { budget: number; cap: number };
+    expect(data.cap).toBe(5);
+    expect(data.budget).toBeCloseTo(5 - spentV1);
+  });
+
   it('首个版本失败后重开：失败版本已花的钱也算进项目', async () => {
     const f = makeFixture({ budgetYuan: 2 });
     f.hooks.onSegment = () => { throw new Error('渲染炸了'); };

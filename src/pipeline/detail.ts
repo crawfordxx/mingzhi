@@ -117,9 +117,9 @@ export function hardDetail(hard: HardCheck[]): ProgressDetail {
   return { kind: 'qa', data: { phase: 'hard', ok: hard.every((c) => c.ok), checks: hard.map((c) => ({ id: c.id, ok: c.ok, detail: c.detail })) } };
 }
 
-/** 当前总花费与上限（元）；不限预算时 budget 为 null */
-export function costDetail(total: number, budget: number | null): ProgressDetail {
-  return { kind: 'cost', data: { total, budget } };
+/** 当前总花费与上限（元）；不限预算时 budget 为 null；工作台另带项目上限 cap（budget 是本版开始时的剩余额度） */
+export function costDetail(total: number, budget: number | null, cap?: number): ProgressDetail {
+  return { kind: 'cost', data: { total, budget, ...(cap !== undefined ? { cap } : {}) } };
 }
 
 /** 抠像 / 渲染百分比；抠像另带帧数 */
