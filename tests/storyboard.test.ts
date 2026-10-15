@@ -139,7 +139,7 @@ describe('normalizeStoryboard：CTA 保留', () => {
       [0, 4, 'split', 'title'],
       [4, 10, 'full', 'cta'],
     ]);
-    expect(dropped).toBe(1);
+    expect(dropped).toBe(0); // 被吸收的空镜头不是无效输出，不计入 dropped
     expect(demoted).toBe(0);
   });
 });
