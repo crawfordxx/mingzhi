@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { spentOf, type Space } from '../api';
 import { yuan } from '../lib/media';
 import { Ico, SOFT, SPRING, Tap } from '../ui';
+import { Logo } from './Logo';
 
 export const ART = ['/art/01-studio.webp', '/art/02-garden.webp', '/art/03-cinema.webp'];
 
@@ -34,7 +35,7 @@ export function SpacesRail({ spaces, currentId, onSelect, onNew }: Props) {
   const [hover, setHover] = useState<string>();
   return (
     <nav className="rail" aria-label="Spaces">
-      <motion.div className="mark" title="明知AI剪辑" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={SPRING}>明</motion.div>
+      <motion.div className="mark" title="明知AI剪辑" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={SPRING}><Logo size={36} /></motion.div>
       <div className="rail-cap">Spaces</div>
       <div className="rail-list">
         {spaces.map((s, i) => {

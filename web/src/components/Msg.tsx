@@ -2,6 +2,7 @@
 import { motion } from 'motion/react';
 import type { ReactNode, RefObject } from 'react';
 import { SOFT } from '../ui';
+import { Logo } from './Logo';
 
 interface MsgProps { root: RefObject<HTMLDivElement>; children: ReactNode; delay?: number; user?: boolean; id?: string }
 
@@ -14,4 +15,4 @@ export function Msg({ root, children, delay = 0, user, id }: MsgProps) {
   );
 }
 
-export const Who = ({ children }: { children: ReactNode }) => <div className="who"><i>明</i>{children}</div>;
+export const Who = ({ children }: { children: ReactNode }) => <div className="who"><Logo size={20} title="明知" />{children}</div>;
