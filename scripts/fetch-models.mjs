@@ -12,6 +12,7 @@ const SV = 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17';
 const dir = join(process.env.MINGZHI_DATA_DIR || join(homedir(), '.mingzhi'), 'models');
 mkdirSync(dir, { recursive: true });
 
+// Node 内置 fetch 默认不走系统代理；需要代理时设置 NODE_USE_ENV_PROXY=1 并配置 http_proxy/https_proxy
 /** 先下载到 <dest>.part，完整下载后再改名，避免中断留下半截文件被当成已就绪 */
 async function download(url, dest) {
   console.log(`下载 ${url}`);

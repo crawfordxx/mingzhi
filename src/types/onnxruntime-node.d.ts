@@ -4,7 +4,6 @@ declare module 'onnxruntime-node' {
     class Tensor {
       constructor(type: 'float32', data: Float32Array, dims: readonly number[]);
       readonly data: Float32Array | ArrayLike<number>;
-      readonly dims: readonly number[];
     }
     interface InferenceSession {
       run(feeds: Record<string, Tensor>): Promise<Record<string, Tensor>>;

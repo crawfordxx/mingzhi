@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
@@ -38,4 +38,34 @@ describe.skipIf(!hasRvm())('matteVideo（需要 RVM 模型）', () => {
     expect(progress[progress.length - 1]).toBe(45);
     expect(res.gains).toHaveLength(3);
   });
+
+  async function makeClip(cfg: ReturnType<typeof loadConfig>, dir: string): Promise<string> {
+    const input = join(dir, 'clip.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x808080:s=180x320:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input]);
+    return input;
+  }
+
+  it('输出目录不存在时报错退出，不挂起也不产生未处理的 rejection', async () => {
+    const cfg = loadConfig({});
+    const dir = mkdtempSync(join(tmpdir(), 'mz-rvm-err-'));
+    const input = await makeClip(cfg, dir);
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown): void => { unhandled.push(e); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      await expect(matteVideo({ input, output: join(dir, 'no-such-dir', 'out.mp4'), backgroundPath: presetPath('cafe'), cfg })).rejects.toThrow(/失败|错误/);
+      await new Promise((r) => setTimeout(r, 200));
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(unhandled).toEqual([]);
+  }, 20000);
+
+  it('输入不是视频时以中文错误拒绝', async () => {
+    const cfg = loadConfig({});
+    const dir = mkdtempSync(join(tmpdir(), 'mz-rvm-bad-'));
+    const input = join(dir, 'x.mp4');
+    writeFileSync(input, 'not a video');
+    await expect(matteVideo({ input, output: join(dir, 'out.mp4'), backgroundPath: presetPath('cafe'), cfg })).rejects.toThrow(/[\u4e00-\u9fa5]/);
+  }, 20000);
 });
