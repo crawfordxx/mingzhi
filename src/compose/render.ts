@@ -1,5 +1,6 @@
-import { rmSync } from 'node:fs';
-import { availableParallelism } from 'node:os';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { availableParallelism, tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundle } from '@remotion/bundler';
@@ -7,6 +8,8 @@ import { renderMedia, renderStill, selectComposition } from '@remotion/renderer'
 import type { CardSpec, TalkProps } from '../storyboard/schema.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { CoverProps } from '../cover/styles.js';
+import { loadConfig } from '../config.js';
+import { run } from '../media/exec.js';
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'render', 'index.ts');
 const DEFAULT_CONCURRENCY = 8;
@@ -58,6 +61,37 @@ export async function renderCardStill(opts: { workDir: string; card: CardSpec; o
     const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
     await renderStill({ composition, serveUrl, inputProps, output: opts.output, frame: 24 });
   });
+}
+
+const STRIP_EDGE_SEC = 0.3;
+const CARD_FPS = 30;
+
+/** 自检取样时刻：进场后 0.3 秒、中点、出场前 0.3 秒（镜头不足 0.6 秒时三点收拢到中点附近），换算成帧并夹在合成范围内 */
+export function cardSampleFrames(durationSec: number): number[] {
+  const last = Math.max(0, Math.round(durationSec * CARD_FPS) - 1);
+  const edge = Math.min(STRIP_EDGE_SEC, durationSec / 2);
+  return [edge, durationSec / 2, durationSec - edge].map((t) => Math.min(last, Math.max(0, Math.round(t * CARD_FPS))));
+}
+
+/** 视觉自检用的三联图：卡片在 0.3 秒、中点、结束前 0.3 秒的静帧，同一次打包渲染，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径 */
+export async function renderCardFrames(workDir: string, card: CardSpec, durationSec: number): Promise<string> {
+  const tmp = mkdtempSync(join(tmpdir(), 'mz-strip-'));
+  const outDir = join(workDir, 'qa');
+  mkdirSync(outDir, { recursive: true });
+  const output = join(outDir, `card-${randomUUID()}.png`);
+  try {
+    const stills = cardSampleFrames(durationSec).map((frame, i) => ({ frame, file: join(tmp, `f${i}.png`) }));
+    await withBundle(workDir, async (serveUrl) => {
+      const inputProps = { card, dur: durationSec };
+      const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
+      for (const s of stills) await renderStill({ composition, serveUrl, inputProps, output: s.file, frame: s.frame, imageFormat: 'png' });
+    });
+    const inputs = stills.flatMap((s) => ['-i', s.file]);
+    await run(loadConfig().ffmpeg, ['-v', 'error', '-y', ...inputs, '-filter_complex', 'hstack=inputs=3,scale=1620:480', '-frames:v', '1', output]);
+    return output;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 /** 字幕样式预览静帧（1080×600，一行示例字幕；bg 为相对 workDir 的底图，可省略） */

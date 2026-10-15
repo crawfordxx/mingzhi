@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
@@ -9,7 +9,7 @@ import { availableParallelism } from 'node:os';
 import { bgmEnvelope, sfxCues } from '../src/audio/plan.js';
 import { trackPath, type Track } from '../src/assets/catalog.js';
 import { stageAudio } from '../src/compose/stage-assets.js';
-import { defaultConcurrency, renderCardStill, renderTalk, withBundle } from '../src/compose/render.js';
+import { cardSampleFrames, defaultConcurrency, renderCardFrames, renderCardStill, renderTalk, withBundle } from '../src/compose/render.js';
 
 describe('renderTalk（真实 Remotion 渲染，首次运行会下载 Chrome Headless Shell）', () => {
   it('2 秒：分屏卡片 + 全屏，输出 1080×1920 30fps 带音轨', async () => {
@@ -84,6 +84,20 @@ describe('renderTalk（真实 Remotion 渲染，首次运行会下载 Chrome Hea
     await renderCardStill({ workDir, output, card: { template: 'title', props: { title: '标题卡' } } });
     expect(existsSync(output)).toBe(true);
     expect(statSync(output).size).toBeGreaterThan(1000);
+  }, 300_000);
+});
+
+describe('renderCardFrames', () => {
+  it('取样帧：0.3 秒、中点、结束前 0.3 秒；短镜头收拢且不越界', () => {
+    expect(cardSampleFrames(3)).toEqual([9, 45, 81]);
+    expect(cardSampleFrames(0.4)).toEqual([6, 6, 6]);
+  });
+  it('三联图 1620×480 PNG，位于 workDir/qa', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-frames-'));
+    const out = await renderCardFrames(workDir, { template: 'title', props: { title: '三联图', subtitle: '进场 停留 出场' } }, 2);
+    expect(out.startsWith(join(workDir, 'qa'))).toBe(true);
+    const ihdr = readFileSync(out); // PNG 的宽高在第 16、20 字节起（各 4 字节大端）
+    expect([ihdr.readUInt32BE(16), ihdr.readUInt32BE(20)]).toEqual([1620, 480]);
   }, 300_000);
 });
 
