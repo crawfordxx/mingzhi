@@ -1,6 +1,7 @@
 import { createWriteStream, renameSync, rmSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import type { CostMeter } from '../cost/meter.js';
 
 export const KEXIANG_TASK_BASE = 'https://kexiangai.com/api/v1/user_task';
 const FAILED = new Set(['failed', 'fail', 'error', 'cancelled']);
@@ -10,7 +11,7 @@ const MAX_POLL_FAILURES = 3;
 
 export interface TaskInput { modelName: string; modelType: string; [key: string]: unknown }
 export interface TaskResult { taskId: string; url: string; cost?: number }
-export interface TaskRunOptions { kind: 'image' | 'video'; timeoutMs?: number; onStatus?: (status: string) => void }
+export interface TaskRunOptions { kind: 'image' | 'video'; timeoutMs?: number; onStatus?: (status: string) => void; /** 记账时显示的用途说明，缺省用模型名 */ label?: string }
 export interface TaskClient { run(input: TaskInput, opts: TaskRunOptions): Promise<TaskResult> }
 
 interface TaskQuery { task_status?: string; cost?: number | string; service_output?: { imgUrl?: string; videoUrl?: string; failReason?: string } }
@@ -28,7 +29,7 @@ export class KexiangTaskClient implements TaskClient {
   private readonly key: string;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(apiKey: string, private readonly fetchImpl: typeof fetch = fetch, private readonly sleep = defaultSleep, private readonly pollMs = 5000) {
+  constructor(apiKey: string, private readonly fetchImpl: typeof fetch = fetch, private readonly sleep = defaultSleep, private readonly pollMs = 5000, private readonly meter?: CostMeter) {
     if (!apiKey) throw new Error('未配置可想 AI key，请设置环境变量 MINGZHI_KX_KEY');
     this.key = apiKey.replace(/^sk-/, '');
   }
@@ -39,7 +40,7 @@ export class KexiangTaskClient implements TaskClient {
     return next;
   }
 
-  private async runOnce(input: TaskInput, { kind, timeoutMs = 20 * 60_000, onStatus }: TaskRunOptions): Promise<TaskResult> {
+  private async runOnce(input: TaskInput, { kind, timeoutMs = 20 * 60_000, onStatus, label }: TaskRunOptions): Promise<TaskResult> {
     const submitted = await this.request<{ id?: number | string | null }>(`${KEXIANG_TASK_BASE}/asyncCreateWithCost`, { method: 'POST', body: JSON.stringify({ user_input: input }) });
     if (submitted.id == null) throw new Error(`可想任务提交失败：${JSON.stringify(submitted).slice(0, 200)}`);
     const taskId = String(submitted.id);
@@ -59,7 +60,11 @@ export class KexiangTaskClient implements TaskClient {
       const status = String(q.task_status ?? '').toLowerCase();
       if (out.failReason || FAILED.has(status)) throw new Error(`可想任务失败：${out.failReason ?? status}`);
       const url = kind === 'image' ? out.imgUrl : out.videoUrl;
-      if (url) return { taskId, url, ...costOf(q.cost) };
+      if (url) {
+        const result = { taskId, url, ...costOf(q.cost) };
+        this.meter?.addTask(input.modelName, result.cost, label);
+        return result;
+      }
       if (SUCCEEDED.has(status)) throw new Error(`可想任务 ${taskId} 已完成但没有返回${kind === 'image' ? '图片' : '视频'}地址`);
       onStatus?.(status);
     }

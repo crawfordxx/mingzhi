@@ -1,3 +1,5 @@
+import type { CostMeter } from '../cost/meter.js';
+
 export const SEARCH_MODEL = 'openai/gpt-5.6-luna';
 export const KEXIANG_RESPONSES_URL = 'https://kexiangai.com/api/v1/responses';
 const DEFAULT_MAX = 3;
@@ -17,11 +19,13 @@ interface ResponsesMessageContent {
 interface ResponsesBody {
   output?: { type?: string; content?: ResponsesMessageContent[] }[];
   output_text?: unknown;
+  usage?: unknown;
 }
 
 export interface SearchOptions {
   fetchImpl?: typeof fetch;
   max?: number;
+  meter?: CostMeter;
 }
 
 /** 去掉网址末尾的标点与星号；右括号只有在网址里有配对的左括号时才保留 */
@@ -185,5 +189,6 @@ export async function searchUrls(apiKey: string, query: string, opts: SearchOpti
   } catch {
     throw new Error('联网搜索返回格式异常：响应不是合法 JSON');
   }
+  opts.meter?.addChat(SEARCH_MODEL, data.usage, '联网搜索');
   return dedupe(collectUrls(data).filter(isWebPage).map(stripTracking)).slice(0, max);
 }

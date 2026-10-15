@@ -1,3 +1,5 @@
+import type { CostMeter } from '../cost/meter.js';
+
 export const KEXIANG_CHAT_URL = 'https://kexiangai.com/api/v1/chat/completions';
 const MAX_ATTEMPTS = 3;
 
@@ -9,6 +11,8 @@ export interface ChatOptions {
   timeoutMs?: number;
   /** 随用户消息一起发送的图片（data URI），模型需支持读图 */
   images?: string[];
+  /** 记账时显示的用途说明，缺省用模型名 */
+  label?: string;
 }
 
 export interface LlmClient {
@@ -45,7 +49,7 @@ function networkReason(err: unknown): string {
 export class KexiangClient implements LlmClient {
   private readonly auth: string;
 
-  constructor(apiKey: string, private readonly fetchImpl: typeof fetch = fetch, private readonly sleep = defaultSleep) {
+  constructor(apiKey: string, private readonly fetchImpl: typeof fetch = fetch, private readonly sleep = defaultSleep, private readonly meter?: CostMeter) {
     if (!apiKey) throw new Error('未配置可想 AI key，请设置环境变量 MINGZHI_KX_KEY');
     this.auth = `Bearer ${apiKey.startsWith('sk-') ? apiKey : `sk-${apiKey}`}`;
   }
@@ -62,7 +66,7 @@ export class KexiangClient implements LlmClient {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
       if (attempt > 0) await this.sleep(1000 * 2 ** (attempt - 1)); // 只在两次请求之间退避，最后一次失败后不再等待
       try {
-        return await this.requestOnce(body, opts.timeoutMs ?? 180_000);
+        return await this.requestOnce(body, opts);
       } catch (err) {
         if (!(err instanceof RetryableError)) throw err;
         lastError = err;
@@ -72,21 +76,21 @@ export class KexiangClient implements LlmClient {
   }
 
   /** 发一次请求；可重试的失败抛 RetryableError */
-  private async requestOnce(body: string, timeoutMs: number): Promise<unknown> {
+  private async requestOnce(body: string, opts: ChatOptions): Promise<unknown> {
     let res: Response;
     try {
       res = await this.fetchImpl(KEXIANG_CHAT_URL, {
         method: 'POST',
         headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
         body,
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 180_000),
       });
     } catch (err) {
       throw new RetryableError(`可想 AI 暂时不可用：${networkReason(err)}`);
     }
     if (res.status === 429 || res.status >= 500) throw new RetryableError(`可想 AI 暂时不可用 ${res.status}：${(await res.text()).slice(0, 200)}`);
     if (!res.ok) throw new Error(`可想 AI 请求失败 ${res.status}：${(await res.text()).slice(0, 200)}`);
-    let data: { choices?: { message?: { content?: unknown } }[] };
+    let data: { choices?: { message?: { content?: unknown } }[]; usage?: unknown };
     try {
       data = (await res.json()) as typeof data;
     } catch {
@@ -94,6 +98,7 @@ export class KexiangClient implements LlmClient {
     }
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== 'string') throw new Error('可想 AI 返回格式异常：缺少 choices[0].message.content');
+    this.meter?.addChat(opts.model, data.usage, opts.label); // 响应已成功，先记账（即使内容解析失败，token 也已花掉）
     return parseJsonContent(content);
   }
 }
