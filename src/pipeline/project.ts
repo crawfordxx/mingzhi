@@ -14,6 +14,8 @@ import type { Mood } from '../assets/catalog.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { CoverAspect } from '../cover/generate.js';
 import type { CoverStyleId } from '../cover/styles.js';
+import type { HardCheck } from '../qa/hard.js';
+import type { CardQaEntry } from '../qa/visual.js';
 
 export interface ProjectArtifacts { wav?: string; cut?: string; person?: string; ass?: string; output?: string; final?: string; cover43?: string; cover34?: string }
 
@@ -55,6 +57,8 @@ export interface ProjectFile {
   loudness?: { before: number; after: number };
   /** 本次出片的实际花费（P4）：累计、预算上限（不限时为 null）与逐条账目 */
   costs?: { total: number; budget: number | null; entries: CostEntry[] };
+  /** 自检（P4）：卡片视觉自检报告与成片硬检查；加 --no-qa 时缺省 */
+  qa?: { cards: CardQaEntry[]; hard: HardCheck[] };
   artifacts: ProjectArtifacts;
 }
 

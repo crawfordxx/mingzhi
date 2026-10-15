@@ -4,12 +4,9 @@ import { captionAt, shotAt } from '../../src/compose/layout.js';
 import type { Shot } from '../../src/storyboard/schema.js';
 import type { TimedCaption } from '../../src/captions/lines.js';
 import { CANVAS } from '../../src/storyboard/schema.js';
-import { CAPTION_SIDE_MARGIN, CAPTION_STYLES, fitCaptionSize, splitHighlight, type CaptionStyle, type CaptionStyleId } from '../../src/captions/styles.js';
+import { CAPTION_SIDE_MARGIN, CAPTION_STYLES, FULL_CAPTION_Y, fitCaptionSize, splitHighlight, type CaptionStyle, type CaptionStyleId } from '../../src/captions/styles.js';
 import { THEME } from '../theme.js';
 import { useCaptionFont } from '../fonts.js';
-
-/** 分屏时字幕中心压在分界线上，全屏时在 y≈1400 */
-const FULL_CAPTION_Y = 1400;
 
 /** 单条字幕的样式化文本（含自动缩字号、底框、关键数字染色），供成片与样式预览共用 */
 export const CaptionText: React.FC<{ text: string; style: CaptionStyle }> = ({ text, style }) => {

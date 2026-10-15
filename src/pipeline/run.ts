@@ -28,8 +28,10 @@ import { prepareAudio, validateAudio, type AudioOptions } from './audio-step.js'
 import { runCover, runLoudness, validateStyles, type CoverDeps, type CoverOptions } from './finish-step.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
+import type { CardQaEntry } from '../qa/visual.js';
+import { runQaCards, runQaFinal, type PipelineQa, type QaDeps } from './qa-step.js';
 
-export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose' | 'loudness' | 'cover' | 'done';
+export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'qa-cards' | 'compose' | 'loudness' | 'qa-final' | 'cover' | 'done';
 export interface ProgressEvent { step: PipelineStep; message: string }
 export interface PipelineArgs {
   input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; broll?: BrollOptions; brollDeps?: BrollDeps;
@@ -43,9 +45,13 @@ export interface PipelineArgs {
   coverDeps?: CoverDeps;
   /** 统一记账（预算以它为准）；缺省时不限预算，B-roll 仍按 broll.budgetYuan 在本步内检查 */
   meter?: CostMeter;
+  /** 卡片视觉自检与成片硬检查；缺省 true，false 跳过两个自检步骤 */
+  qa?: boolean;
+  /** 仅供测试注入的自检实现 */
+  qaDeps?: QaDeps;
   onProgress?: (e: ProgressEvent) => void;
 }
-export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard }
+export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard; qa: PipelineQa }
 
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
 type Complete = (step: PipelineStep, message: string, patch?: ProjectPatch) => ProjectFile;
@@ -207,19 +213,28 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
     return project;
   };
   try {
-    return await runSteps(args, projectPath, complete);
+    return await runSteps(args, projectPath, complete, meter);
   } finally {
     // 无论成败都把最新账目落盘：失败时钱已经花了；写盘失败不能盖掉原错误
     try { record({ costs: costsOf(meter) }); } catch { /* 忽略：保留 try 块里的原始错误 */ }
   }
 }
 
-/** 分析 → 制作 → 成片 → 封面 */
-async function runSteps(args: PipelineArgs, projectPath: string, complete: Complete): Promise<PipelineResult> {
+/** 卡片自检（可跳过）：返回改写后的制作结果与报告 */
+async function qaCardsStep(args: PipelineArgs, meter: CostMeter, p: Produced, complete: Complete): Promise<{ produced: Produced; cards: CardQaEntry[] }> {
+  if (args.qa === false) return { produced: p, cards: [] };
+  const ctx = { llm: args.llm, workDir: args.workDir, meter, qaCards: args.qaDeps?.qaCards, onProgress: (message: string) => args.onProgress?.({ step: 'qa-cards', message }) };
+  const res = await runQaCards(ctx, p.storyboard, p.captions, complete);
+  return { produced: { ...p, storyboard: res.storyboard }, cards: res.report };
+}
+
+/** 分析 → 制作 → 卡片自检 → 成片 → 成片检查 → 封面 */
+async function runSteps(args: PipelineArgs, projectPath: string, complete: Complete, meter: CostMeter): Promise<PipelineResult> {
   const analysis = await analyze(args, complete);
-  const produced = await produce(args, analysis, complete);
+  const { produced, cards } = await qaCardsStep(args, meter, await produce(args, analysis, complete), complete);
   await compose(args, analysis, produced, complete);
+  const hard = args.qa === false ? [] : await runQaFinal({ cfg: args.cfg, hardChecks: args.qaDeps?.hardChecks }, args.output, produced.storyboard, cards, complete);
   await runCover({ workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter: args.meter }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
   complete('done', args.output);
-  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: produced.captions, storyboard: produced.storyboard };
+  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: produced.captions, storyboard: produced.storyboard, qa: { cards, hard } };
 }
