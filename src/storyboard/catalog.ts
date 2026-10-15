@@ -62,6 +62,6 @@ export const CATALOG: readonly CatalogEntry[] = [
   {
     id: 'cta',
     use: '结尾号召（关注、点赞、收藏），只用于最后一个镜头，layout 用 full',
-    props: 'actions（1-3 个动作，每个 ≤6 字；默认 ["关注","点赞","收藏"]）',
+    props: 'actions 固定写 ["关注","点赞","收藏"]，不要改动',
   },
 ];

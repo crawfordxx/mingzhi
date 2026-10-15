@@ -5,6 +5,8 @@ import type { SubjectBox } from '../matting/composite.js';
 /** 画布与版式常量：分界线 y=960 来自参考片实测 */
 export const CANVAS = { width: 1080, height: 1920, fps: 30, seam: 960 } as const;
 export const MIN_SHOT_SEC = 1;
+/** 带卡片的镜头最长 8 秒，超出部分改为人物全屏 */
+export const MAX_SHOT_SEC = 8;
 export const HOOK_WINDOW_SEC = 15;
 
 export const TEMPLATE_IDS = ['hook', 'title', 'bigNumber', 'chips', 'compareBars', 'evidenceList', 'terminal', 'toggles', 'strikeList', 'browser', 'photo', 'cta'] as const;

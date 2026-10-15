@@ -1,4 +1,4 @@
-import { HOOK_WINDOW_SEC, MIN_SHOT_SEC, ShotSchema, type CardSpec, type Shot, type Storyboard } from './schema.js';
+import { HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, ShotSchema, type CardSpec, type Shot, type Storyboard } from './schema.js';
 
 export interface NormalizeResult {
   storyboard: Storyboard;
@@ -6,6 +6,8 @@ export interface NormalizeResult {
   dropped: number;
   /** 因版式规则（hook 超窗或超量、cta 非末尾）或短镜头并入前一个而失去卡片的镜头 */
   demoted: number;
+  /** 因超过 MAX_SHOT_SEC 被截短的带卡片镜头数 */
+  capped: number;
 }
 
 const MAX_HOOKS = 3;
@@ -76,6 +78,18 @@ function extendCta(shots: Shot[], durationSec: number): Shot[] {
   return [...shots.slice(0, ctaIdx), { ...shots[ctaIdx], end: round(durationSec) }];
 }
 
+/** 带卡片的镜头限长 MAX_SHOT_SEC：普通镜头留开头，末尾的 cta 留结尾；余下由 fillGaps 补为全屏。余下不足 MIN_SHOT_SEC 时少留一点，避免被 mergeShort 并回 */
+function capLongShots(shots: Shot[]): { shots: Shot[]; capped: number } {
+  const out = shots.map((s, i): Shot => {
+    const len = round(s.end - s.start);
+    if (!s.card || len <= MAX_SHOT_SEC) return s;
+    const keep = len - MAX_SHOT_SEC < MIN_SHOT_SEC ? Math.min(MAX_SHOT_SEC, len - MIN_SHOT_SEC) : MAX_SHOT_SEC;
+    const tail = s.card.template === 'cta' && i === shots.length - 1;
+    return tail ? { ...s, start: round(s.end - keep) } : { ...s, end: round(s.start + keep) };
+  });
+  return { shots: out, capped: out.filter((s, i) => s !== shots[i]).length };
+}
+
 /** 补齐空隙为全屏镜头，并补到片长 */
 function fillGaps(shots: Shot[], durationSec: number): Shot[] {
   const out: Shot[] = [];
@@ -121,17 +135,19 @@ function applyPlacementRules(shots: Shot[]): Shot[] {
 export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[]): NormalizeResult {
   if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error(`分镜归一化失败：片长无效（${durationSec}）`);
   const items = (raw as { shots?: unknown } | null)?.shots;
-  if (!Array.isArray(items)) return { storyboard: { shots: [{ start: 0, end: round(durationSec), layout: 'full' }] }, dropped: 0, demoted: 0 };
+  if (!Array.isArray(items)) return { storyboard: { shots: [{ start: 0, end: round(durationSec), layout: 'full' }] }, dropped: 0, demoted: 0, capped: 0 };
 
   const images = new Set(availableImages);
   const valid = items.flatMap((i) => { const p = ShotSchema.safeParse(i); return p.success ? [p.data as Shot] : []; });
   const usable = valid.flatMap((s) => { const c = sanitizeShot(s, images); return c ? [c] : []; });
   const { placed, dropped: overlapDropped } = clampAndResolve(usable, durationSec);
-  const shots = applyPlacementRules(mergeShort(fillGaps(extendCta(placed, durationSec), durationSec)));
+  const { shots: capped, capped: cappedCount } = capLongShots(extendCta(placed, durationSec));
+  const shots = applyPlacementRules(mergeShort(fillGaps(capped, durationSec)));
 
   return {
     storyboard: { shots },
     dropped: items.length - usable.length + overlapDropped,
     demoted: countCards(placed) - countCards(shots),
+    capped: cappedCount,
   };
 }

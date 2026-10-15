@@ -50,3 +50,52 @@ describe('generateStoryboard', () => {
     await expect(generateStoryboard(client, caps, 9, [])).rejects.toThrow('超时');
   });
 });
+
+const bad = { shots: [{ start: 0, end: 5, layout: 'split', card: { template: 'title', props: {} } }, { start: 5, end: 9, layout: 'split', card: { template: 'nope', props: {} } }] };
+const oneCard = { shots: [{ start: 0, end: 9, layout: 'split', card: { template: 'title', props: { title: '只有一个' } } }] };
+
+describe('generateStoryboard：重试保护与择优', () => {
+  it('重试请求失败时返回首次结果，attempts 为 2 并带 retryError', async () => {
+    let n = 0;
+    const client: LlmClient = { chatJson: async () => { n += 1; if (n === 1) return bad; throw new Error('超时'); } };
+    const res = await generateStoryboard(client, caps, 9, []);
+    expect(res.attempts).toBe(2);
+    expect(res.retryError).toContain('超时');
+    expect(res.dropped).toBe(2);
+  });
+  it('第二次更差时保留首次；dropped 相同则取带卡片更多的', async () => {
+    const worse = { shots: [{ start: 0, end: 9, layout: 'split', card: { template: 'nope', props: {} } }] };
+    const first = await generateStoryboard(scripted(oneCard, worse).client, caps, 9, []);
+    expect(first.storyboard.shots[0].card?.template).toBe('title');
+    expect(first.attempts).toBe(2);
+    const tie = await generateStoryboard(scripted(oneCard, good).client, caps, 9, []);
+    expect(tie.storyboard.shots.filter((s) => s.card)).toHaveLength(2);
+  });
+  it('带卡片镜头不足 2 个触发重试，提示按原因区分；非数组回复也触发', async () => {
+    const { client, calls } = scripted(oneCard, good);
+    await generateStoryboard(client, caps, 9, []);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].user).toContain('带卡片的镜头只有 1 个');
+    expect(calls[1].user).not.toContain('个镜头不合格');
+    const arr = scripted('不是对象', good);
+    await generateStoryboard(arr.client, caps, 9, []);
+    expect(arr.calls).toHaveLength(2);
+  });
+  it('重试消息带前几个 zod 错误摘要', async () => {
+    const { client, calls } = scripted(bad, good);
+    await generateStoryboard(client, caps, 9, []);
+    expect(calls[1].user).toContain('2 个镜头不合格');
+    expect(calls[1].user).toContain('card.props.title');
+  });
+  it('可用图片为空时写「可用图片：无」，且不再含镜头数提示', async () => {
+    const { client, calls } = scripted(good);
+    await generateStoryboard(client, caps, 9, []);
+    expect(calls[0].user).toContain('可用图片：无');
+    expect(calls[0].user).not.toContain('镜头数约');
+  });
+  it('cta 的 actions 固定为 关注/点赞/收藏', async () => {
+    const withCta = { shots: [...good.shots.slice(0, 1), { start: 5, end: 9, layout: 'full', card: { template: 'cta', props: { actions: ['联系我'] } } }] };
+    const res = await generateStoryboard(scripted(withCta).client, caps, 9, []);
+    expect(res.storyboard.shots[res.storyboard.shots.length - 1].card).toEqual({ template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } });
+  });
+});

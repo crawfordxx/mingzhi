@@ -115,14 +115,15 @@ describe('normalizeStoryboard：CTA 保留', () => {
     ]);
     expect(demoted).toBe(0);
   });
-  it('cta 9.2–10 在 title 0–9.2 之后：cta 保留（短于 1 秒也不并入前一个）', () => {
+  it('cta 9.2–10 在 title 2–9.2 之后：cta 保留（短于 1 秒也不并入前一个）', () => {
     const raw = { shots: [
-      { start: 0, end: 9.2, layout: 'split', card: title('A') },
+      { start: 2, end: 9.2, layout: 'split', card: title('A') },
       { start: 9.2, end: 10, layout: 'split', card: cta(['关注']) },
     ] };
     const { storyboard, demoted, dropped } = normalizeStoryboard(raw, 10, []);
     expect(shotRows(storyboard.shots)).toEqual([
-      [0, 9.2, 'split', 'title'],
+      [0, 2, 'full', null],
+      [2, 9.2, 'split', 'title'],
       [9.2, 10, 'full', 'cta'],
     ]);
     expect(demoted).toBe(0);
@@ -243,5 +244,35 @@ describe('CardSpecSchema：字段长度收紧', () => {
     const bn = (n: number) => ({ template: 'bigNumber', props: { value: '3', label: '标签', chips: Array.from({ length: n }, () => '词') } });
     expect(CardSpecSchema.safeParse(bn(18)).success).toBe(true);
     expect(CardSpecSchema.safeParse(bn(19)).success).toBe(false);
+  });
+});
+
+describe('normalizeStoryboard：镜头限长 8 秒', () => {
+  it('17 秒卡片镜头只保留前 8 秒，余下补为全屏，capped 计 1', () => {
+    const raw = { shots: [{ start: 0, end: 17, layout: 'split', card: title('A') }] };
+    const { storyboard, capped } = normalizeStoryboard(raw, 17, []);
+    expect(shotRows(storyboard.shots)).toEqual([[0, 8, 'split', 'title'], [8, 17, 'full', null]]);
+    expect(capped).toBe(1);
+  });
+  it('过长的 cta（延伸到片尾）保留最后 8 秒，起点后移', () => {
+    const raw = { shots: [{ start: 2, end: 20, layout: 'split', card: cta(['关注']) }] };
+    const { storyboard, capped } = normalizeStoryboard(raw, 20, []);
+    expect(shotRows(storyboard.shots)).toEqual([[0, 12, 'full', null], [12, 20, 'full', 'cta']]);
+    expect(capped).toBe(1);
+  });
+  it('长度 8.5 秒：余下不足 1 秒，改为保留 7.5 秒，避免被并回', () => {
+    const raw = { shots: [{ start: 0, end: 8.5, layout: 'split', card: title('A') }] };
+    const { storyboard, capped } = normalizeStoryboard(raw, 8.5, []);
+    expect(shotRows(storyboard.shots)).toEqual([[0, 7.5, 'split', 'title'], [7.5, 8.5, 'full', null]]);
+    expect(capped).toBe(1);
+  });
+  it('恰好 8 秒的卡片镜头与超长的无卡片镜头都不动', () => {
+    const raw = { shots: [
+      { start: 0, end: 8, layout: 'split', card: title('A') },
+      { start: 8, end: 30, layout: 'full' },
+    ] };
+    const { storyboard, capped } = normalizeStoryboard(raw, 30, []);
+    expect(shotRows(storyboard.shots)).toEqual([[0, 8, 'split', 'title'], [8, 30, 'full', null]]);
+    expect(capped).toBe(0);
   });
 });
