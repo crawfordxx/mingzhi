@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>一笔 · 方向 C</title>
+<style>
+/* 字体：仓库自带 @fontsource（OFL），不走 CDN */
+@font-face { font-family: 'IBM Plex Serif'; font-style: italic; font-weight: 200; src: url('../../node_modules/@fontsource/ibm-plex-serif/files/ibm-plex-serif-latin-200-italic.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Serif'; font-style: italic; font-weight: 300; src: url('../../node_modules/@fontsource/ibm-plex-serif/files/ibm-plex-serif-latin-300-italic.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; src: url('../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; src: url('../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2') format('woff2'); }
+
+/* G1 token（照抄 web/src/theme.css） */
+:root {
+  --bg-1: #fff; --bg-2: #f7f7f7; --bg-3: #f5f5f5; --bg-4: #eee; --bg-5: #e0e0e0;
+  --text-1: #000000e6; --text-2: #000000b3; --text-3: #0000008f;
+  --brand-1: #d6dff5; --brand-2: #adc0eb; --brand-3: #85a0e0; --brand-4: #5c81d6; --brand-5: #3361cc; --brand-6: #294ea3;
+  --shadow-1: 0 0 0 1px #0000000f;
+  --shadow-2: 0 8px 32px 4px #0000000f;
+  --shadow-win: 0 0 0 1px #0000000f, 0 30px 60px -18px rgba(40, 20, 0, .55), 0 8px 18px -6px rgba(40, 20, 0, .25);
+  --sans: system-ui, -apple-system, 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --serif-i: 'IBM Plex Serif', 'Songti SC', Georgia, serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --term: #1f1f22; --term-bar: #2a2a2e; --term-1: #e8e8ea; --term-2: #a3a3a8;
+  --stroke: #3361cc;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--bg-2); }
+body { font: 400 16px/1.55 var(--sans); color: var(--text-1); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; position: relative; }
+.it { font-family: var(--serif-i); font-style: italic; font-weight: 200; font-synthesis: none; }
+.mono { font-family: var(--mono); }
+img { display: block; }
+
+/* ───────── 舞台 ───────── */
+.stage { position: absolute; inset: 0 0 160px 0; }
+
+/* 左栏：稿纸 */
+.slate { position: absolute; left: 72px; top: 56px; display: flex; align-items: center; gap: 12px; font: 500 15px/1 var(--sans); color: var(--text-2); }
+.logo { width: 30px; height: 30px; border-radius: 50%; background: #000; color: #fff; display: grid; place-items: center; font: 600 15px/1 var(--sans); }
+.slate .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); }
+.rec { display: inline-flex; align-items: center; gap: 7px; font: 500 14px/1 var(--mono); color: var(--text-2); letter-spacing: .02em; }
+.rec i { width: 8px; height: 8px; border-radius: 50%; background: #d65c5c; box-shadow: 0 0 0 3px #d65c5c26; animation: rec 1.6s ease-in-out infinite; }
+
+.hero-line { position: absolute; left: 72px; top: 122px; font: 600 50px/1.18 var(--sans); letter-spacing: -.01em; color: #000; }
+.hero-line .it { font-weight: 200; color: var(--brand-6); letter-spacing: -.01em; }
+
+.tc { position: absolute; left: 66px; top: 214px; display: flex; align-items: baseline; gap: 26px; white-space: nowrap; }
+.tc .a { position: relative; font: 600 172px/1 var(--sans); letter-spacing: -.045em; color: #000; }
+.tc .a::after { content: ''; position: absolute; left: -10px; right: -14px; top: 50%; height: 8px; margin-top: -2px; border-radius: 8px; background: var(--stroke); transform-origin: 0 50%; transform: rotate(-2.2deg); animation: bigstrike 5.2s cubic-bezier(.65,0,.35,1) infinite; }
+.tc .arr { font: 200 84px/1 var(--sans); color: var(--text-3); transform: translateY(-18px); }
+.tc .b { font-size: 186px; line-height: 1; color: var(--brand-5); letter-spacing: -.03em; }
+.tc-note { position: absolute; left: 74px; top: 412px; display: flex; gap: 10px; align-items: center; font: 400 16px/1 var(--sans); color: var(--text-2); }
+.pill { display: inline-flex; align-items: center; background: var(--brand-1); color: var(--brand-6); font: 600 16px/1 var(--sans); border-radius: 8px; padding: 7px 10px; }
+.sep { color: var(--text-3); }
+
+/* 转录稿：口误被一笔划掉 */
+.script { position: absolute; left: 72px; top: 476px; width: 860px; }
+.script-h { display: flex; justify-content: space-between; align-items: center; font: 500 15px/1 var(--sans); color: var(--text-3); padding-bottom: 14px; border-bottom: 1px solid var(--bg-5); margin-bottom: 18px; }
+.script-h .cut { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); }
+.script-h .cut b { display: inline-block; width: 22px; height: 2px; background: var(--stroke); border-radius: 2px; }
+.ln { display: flex; align-items: baseline; gap: 22px; font: 400 31px/1.58 var(--sans); color: var(--text-1); white-space: nowrap; }
+.ln .t { font: 400 14px/1 var(--mono); color: var(--text-3); width: 48px; flex: none; transform: translateY(-6px); }
+.x { position: relative; display: inline-block; color: #0000008f; margin-right: 6px; }
+.x::after { content: ''; position: absolute; left: -4px; right: -4px; top: 54%; height: 3px; border-radius: 3px; background: var(--stroke); transform-origin: 0 50%; animation: strike 5.2s cubic-bezier(.65,0,.35,1) infinite; }
+.x.late::after { animation-delay: .5s; }
+.x .tagx { position: absolute; left: 50%; top: -20px; transform: translateX(-50%); font: 500 14px/1 var(--sans); color: var(--brand-6); background: var(--brand-1); border-radius: 999px; padding: 4px 8px; white-space: nowrap; }
+
+/* 对话输入框：一句话 */
+.ask { position: absolute; left: 72px; top: 744px; width: 860px; height: 128px; background: #fff; border-radius: 26px; box-shadow: var(--shadow-1), var(--shadow-2); padding: 22px 24px; }
+.ask .q { display: flex; align-items: center; gap: 10px; font: 400 25px/1.3 var(--sans); color: var(--text-1); }
+.ref { display: inline-flex; align-items: center; gap: 6px; background: var(--brand-1); color: var(--brand-6); font: 600 17px/1 var(--sans); border-radius: 999px; padding: 7px 12px; }
+.ref .it { font-weight: 300; font-size: 19px; }
+.caret { display: inline-block; width: 2.5px; height: 30px; background: var(--brand-5); border-radius: 2px; margin-left: -6px; animation: blink 1s steps(1) infinite; }
+.chips { position: absolute; left: 24px; bottom: 18px; display: flex; gap: 8px; }
+.chip { background: var(--bg-4); color: var(--text-2); font: 500 14px/1 var(--sans); border-radius: 999px; padding: 8px 12px; }
+.send { position: absolute; right: 18px; bottom: 16px; width: 46px; height: 46px; border-radius: 50%; background: #000; display: grid; place-items: center; }
+.send svg { width: 20px; height: 20px; }
+.ripple { position: absolute; right: 41px; bottom: 39px; width: 0; height: 0; }
+.ripple i { position: absolute; left: 0; top: 0; border-radius: 50%; border: 1.5px solid var(--brand-4); transform: translate(-50%, -50%); width: 68px; height: 68px; opacity: .55; animation: ring 2.6s cubic-bezier(.2,.7,.3,1) infinite; }
+.ripple i + i { width: 96px; height: 96px; opacity: .28; animation-delay: .1s; }
+.cursor { position: absolute; left: 877px; top: 836px; width: 26px; height: 34px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.28)); animation: tap 2.6s ease-in-out infinite; }
+
+/* 右栏：油画 + 立在画上的 9:16 浮窗 */
+.canvas { position: absolute; left: 1000px; top: 52px; width: 848px; height: 820px; border-radius: 28px; overflow: hidden; box-shadow: var(--shadow-1); background: #8a5a2b; }
+.canvas .paint { position: absolute; left: -18px; top: -6px; height: 860px; width: auto; max-width: none; animation: drift 14s ease-in-out infinite alternate; }
+.canvas::after { content: ''; position: absolute; inset: 0; background: radial-gradient(120% 90% at 68% 46%, transparent 55%, rgba(40, 18, 0, .28) 100%); pointer-events: none; }
+
+.vers { position: absolute; left: 24px; top: 24px; z-index: 3; display: flex; gap: 4px; padding: 5px; border-radius: 999px; background: rgba(255,255,255,.82); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); box-shadow: var(--shadow-1); }
+.vers span { font: 500 15px/1 var(--sans); color: var(--text-2); padding: 9px 14px; border-radius: 999px; display: inline-flex; align-items: center; gap: 7px; }
+.vers .on { background: #fff; color: #000; box-shadow: var(--shadow-1), 0 2px 6px -2px #0000002a; }
+.vers .on i { width: 7px; height: 7px; border-radius: 50%; background: var(--brand-4); animation: pulse 2.2s ease-in-out infinite; }
+
+.phone { position: absolute; left: 1392px; top: 104px; width: 384px; border-radius: 24px; background: #fff; box-shadow: var(--shadow-win); overflow: hidden; z-index: 2; }
+.tb { height: 38px; display: flex; align-items: center; gap: 7px; padding: 0 14px; position: relative; }
+.tb i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.tb i:nth-child(1) { background: #ff5f57; } .tb i:nth-child(2) { background: #febc2e; } .tb i:nth-child(3) { background: #28c840; }
+.tb .tt { position: absolute; left: 0; right: 0; text-align: center; font: 500 14px/38px var(--sans); color: var(--text-3); }
+.tb .tt b { color: #000; font-weight: 600; }
+.video { position: relative; margin: 0 8px; height: 590px; border-radius: 12px; overflow: hidden; background: #2b1d14; }
+.video .top { position: absolute; left: 0; right: 0; top: 0; height: 50%; background: #fbfaf6; padding: 0 16px; display: flex; align-items: center; }
+.video .top .card { width: 100%; }
+.card { background: #fff; border-radius: 12px; box-shadow: 0 0 0 1px #0000000d, 0 10px 26px -8px #00000026; padding: 20px 20px 20px; position: relative; animation: settle 5.2s cubic-bezier(.2,1.25,.3,1) infinite; }
+.card .k { font: 500 14px/1 var(--sans); color: var(--text-3); display: flex; justify-content: space-between; }
+.card .k b { color: var(--brand-6); font-weight: 600; }
+.card h3 { margin-top: 16px; font: 800 50px/1.08 var(--sans); letter-spacing: -.02em; color: #000; }
+.card h3 em { font-style: normal; color: var(--brand-5); }
+.card p { margin-top: 14px; font: 500 15px/1.4 var(--sans); color: var(--text-2); }
+.card .ringx { position: absolute; inset: -5px; border-radius: 16px; box-shadow: 0 0 0 2px var(--brand-4), 0 0 0 6px #d6dff5aa; pointer-events: none; animation: ringx 5.2s ease-out infinite; }
+.video .bot { position: absolute; left: 0; right: 0; bottom: 0; height: 50%; overflow: hidden; }
+.video .bot .bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 58% 40%; filter: blur(2.5px) saturate(1.05); transform: scale(1.05); }
+.video .bot .sil { position: absolute; left: 50%; bottom: -8px; width: 250px; transform: translateX(-50%); opacity: .62; filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 6px 14px rgba(0,0,0,.25)); }
+.video .cap { position: absolute; left: 0; right: 0; top: calc(50% + 14px); text-align: center; font: 800 25px/1 var(--sans); color: #fff; letter-spacing: .02em; -webkit-text-stroke: 5px #000; paint-order: stroke fill; z-index: 2; }
+.ft { padding: 12px 14px 14px; }
+.bar { display: flex; align-items: center; gap: 10px; }
+.play { width: 30px; height: 30px; border-radius: 50%; background: #000; display: grid; place-items: center; flex: none; }
+.time { font: 500 14px/1 var(--sans); color: #000; white-space: nowrap; }
+.time span { color: var(--text-3); font-weight: 400; }
+.segs { flex: 1; display: flex; gap: 2px; height: 5px; }
+.segs i { flex: 1; border-radius: 2px; background: var(--bg-4); }
+.segs i.done { background: #cfcfcf; }
+.segs i.hot { background: var(--brand-4); box-shadow: 0 0 0 2px var(--brand-1); }
+.meta { display: flex; justify-content: space-between; margin-top: 10px; font: 400 14px/1 var(--sans); color: var(--text-3); }
+.meta b { color: #000; font-weight: 600; }
+
+/* 终端：剪辑直播逐行打印 */
+.term { position: absolute; left: 948px; top: 576px; width: 442px; border-radius: 14px; background: var(--term); box-shadow: 0 0 0 1px #ffffff14, 0 28px 56px -16px rgba(20, 10, 0, .65); overflow: hidden; z-index: 4; }
+.term .th { height: 34px; background: var(--term-bar); display: flex; align-items: center; gap: 7px; padding: 0 12px; position: relative; }
+.term .th i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.term .th i:nth-child(1) { background: #ff5f57; } .term .th i:nth-child(2) { background: #febc2e; } .term .th i:nth-child(3) { background: #28c840; }
+.term .th .tt { position: absolute; left: 0; right: 0; text-align: center; font: 400 14px/34px var(--mono); color: var(--term-2); }
+.term pre { padding: 12px 16px 14px; font: 400 15px/1.72 var(--mono); color: var(--term-1); white-space: pre; }
+.term .ok { color: #8fd18f; }
+.term .d { color: var(--term-2); }
+.term .hl { color: #b9c9f2; }
+.term .pg { display: inline-block; width: 120px; height: 6px; border-radius: 3px; background: #ffffff1f; vertical-align: 2px; margin: 0 8px; overflow: hidden; }
+.term .pg i { display: block; height: 100%; width: 72%; background: var(--brand-3); border-radius: 3px; animation: fill 5.2s cubic-bezier(.33,0,.15,1) infinite; }
+.term .bk { display: inline-block; width: 9px; height: 17px; background: var(--term-1); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
+
+/* 花费：实时跳动 */
+.cost { position: absolute; left: 948px; top: 478px; z-index: 3; background: rgba(255,255,255,.9); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 16px; box-shadow: var(--shadow-1), 0 14px 30px -10px rgba(40,20,0,.45); padding: 12px 16px 12px; }
+.cost .l { font: 500 14px/1 var(--sans); color: var(--text-3); }
+.cost .v { margin-top: 6px; font: 600 34px/1 var(--sans); color: #000; letter-spacing: -.01em; }
+.cost .v .it { font-weight: 300; font-size: 36px; color: var(--brand-6); }
+
+/* ───────── 底部说明带 ───────── */
+.band { position: absolute; left: 0; right: 0; bottom: 0; height: 160px; background: #fff; border-top: 1px solid var(--bg-5); display: grid; grid-template-columns: 300px 1fr 1fr 520px; gap: 0; padding: 26px 72px 24px; }
+.band > div { padding-right: 32px; }
+.band > div + div { padding-left: 32px; border-left: 1px solid var(--bg-4); }
+.lb { font: 500 14px/1 var(--mono); color: var(--text-3); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 12px; }
+.dir { font: 700 40px/1 var(--sans); color: #000; letter-spacing: -.01em; }
+.dir .it { font-size: 30px; font-weight: 300; color: var(--brand-6); margin-left: 8px; letter-spacing: 0; }
+.dir-s { margin-top: 12px; font: 400 15px/1.4 var(--sans); color: var(--text-2); }
+.bt { font: 400 15px/1.6 var(--sans); color: var(--text-2); }
+.bt b { color: #000; font-weight: 600; }
+.bt .hlx { background: var(--brand-1); color: var(--brand-6); font-weight: 600; border-radius: 6px; padding: 1px 6px; }
+.sw { display: flex; gap: 6px; }
+.sw div { flex: 1; }
+.sw i { display: block; height: 46px; border-radius: 8px; box-shadow: inset 0 0 0 1px #0000001a; }
+.sw span { display: block; margin-top: 8px; font: 400 14px/1 var(--mono); color: var(--text-2); }
+
+@keyframes bigstrike { 0%, 30% { transform: rotate(-2.2deg) scaleX(0); } 46%, 100% { transform: rotate(-2.2deg) scaleX(1); } }
+@keyframes strike { 0% { transform: scaleX(0); } 22%, 100% { transform: scaleX(1); } }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes rec { 50% { opacity: .35; } }
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px #5c81d633; } }
+@keyframes ring { 0% { transform: translate(-50%, -50%) scale(.3); opacity: .7; } 60%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0; } }
+@keyframes tap { 0%, 100% { transform: translate(0, 0); } 8% { transform: translate(0, 0) scale(.88); } 14% { transform: translate(0, 0) scale(1); } }
+@keyframes drift { from { transform: translateX(0) scale(1.0); } to { transform: translateX(-10px) scale(1.012); } }
+@keyframes fill { 0% { width: 8%; } 80%, 100% { width: 72%; } }
+@keyframes settle { 0%, 40% { transform: translateY(0); } 48% { transform: translateY(-6px); } 60%, 100% { transform: translateY(0); } }
+@keyframes ringx { 0%, 40% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: .75; } }
+
+/* 静帧模式：#still 时全部动画停在定格态 */
+.still *, .still *::before, .still *::after { animation: none !important; }
+.still .ripple i { opacity: .5; transform: translate(-50%, -50%) scale(.82); }
+.still .ripple i + i { opacity: .22; transform: translate(-50%, -50%) scale(.9); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; } }
+</style>
+</head>
+<body>
+<script>if (location.hash === '#still') document.documentElement.classList.add('still');</script>
+
+<div class="stage">
+  <!-- 左：稿纸 -->
+  <div class="slate">
+    <div class="logo">明</div>
+    <span style="color:#000">明知AI剪辑</span><span class="dot"></span>
+    <span>剪辑直播 — 第 2 期_口播.mp4</span><span class="dot"></span>
+    <span class="rec"><i></i>LIVE 00:21</span>
+  </div>
+
+  <div class="hero-line">把一条口播，变成 <span class="it">finished cut.</span></div>
+
+  <div class="tc">
+    <span class="a">2:12</span><span class="arr">→</span><span class="b it">2:02</span>
+  </div>
+  <div class="tc-note">
+    删除 <span class="pill">2 处口误</span><span class="sep">·</span>7 项成片检查全过<span class="sep">·</span>开源 <span class="it" style="font-size:18px">(MIT)</span><span class="sep">·</span>在你自己的电脑上跑
+  </div>
+
+  <div class="script">
+    <div class="script-h"><span>转录 <span class="it" style="font-size:17px">(本机识别)</span></span><span class="cut"><b></b>剪掉的口误</span></div>
+    <div class="ln"><span class="t">00:03</span><span>一条视频，<span class="x">那个，那个，</span>要磨两三个小时。</span></div>
+    <div class="ln"><span class="t">00:07</span><span>剪气口、加字幕、找素材、做封面，</span></div>
+    <div class="ln"><span class="t">00:12</span><span><span class="x late">就是说，</span>现在我只录这一条。</span></div>
+  </div>
+
+  <div class="ask">
+    <div class="q"><span class="ref">@<span class="it">00:29</span> 标题卡</span><span>这张卡太弱了</span><span class="caret"></span></div>
+    <div class="chips"><span class="chip">节奏再快一点</span><span class="chip">换一张 B-roll</span><span class="chip">背景换成夜景落地窗</span></div>
+    <div class="send"><svg viewBox="0 0 20 20" fill="none"><path d="M10 15.5V4.5M5 9.5l5-5 5 5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="ripple"><i></i><i></i></div>
+  </div>
+  <svg class="cursor" viewBox="0 0 26 34"><path d="M2 2v25l6.5-6 4.2 9.6 4.4-1.9-4.1-9.4H22z" fill="#000" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+
+  <!-- 右：画上诞生的成片 -->
+  <div class="canvas">
+    <img class="paint" src="../assets/art/01-studio.webp" alt="">
+    <div class="vers"><span>v1</span><span class="on"><i></i>v2</span></div>
+  </div>
+
+  <div class="phone">
+    <div class="tb"><i></i><i></i><i></i><div class="tt"><b>v2</b> — 00:29 标题卡</div></div>
+    <div class="video">
+      <div class="top">
+        <div class="card">
+          <div class="ringx"></div>
+          <div class="k"><span>第 7 / 14 段</span><b>只重渲这一段</b></div>
+          <h3>少花 <em>30%</em><br>冤枉钱</h3>
+          <p>650 条，每条都有出处</p>
+        </div>
+      </div>
+      <div class="bot">
+        <img class="bg" src="../../assets/backgrounds/08-library.jpg" alt="">
+        <img class="sil" src="../assets/art/silhouette.webp" alt="">
+      </div>
+      <div class="cap">现在我只录这一条</div>
+    </div>
+    <div class="ft">
+      <div class="bar">
+        <div class="play"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 1.5v9l7.5-4.5z" fill="#fff"/></svg></div>
+        <div class="time">00:29 <span>/ 02:02</span></div>
+        <div class="segs"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="hot"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="meta"><span>标题卡 · 第 7/14 段</span><span>成片检查 <b>7/7</b></span></div>
+    </div>
+  </div>
+
+  <div class="cost">
+    <div class="l">样片实花</div>
+    <div class="v">¥<span class="it">3.76</span></div>
+  </div>
+
+  <div class="term">
+    <div class="th"><i></i><i></i><i></i><div class="tt">剪辑直播 — v2</div></div>
+<pre><span class="ok">✓</span> 识别    <span class="d">音频不出本机</span>
+<span class="ok">✓</span> 剪口误  <span class="d">2 处 · 2:12 → 2:02</span>
+<span class="ok">✓</span> 换背景  <span class="d">合成 5.8s（原来 35s）</span>
+<span class="hl">#</span> 改卡    <span class="hl">@00:29 标题卡 · 只重渲 1 段</span>
+<span class="hl">⠿</span> 渲染<span class="pg"><i></i></span><span class="d">72%</span> <span class="bk"></span></pre>
+  </div>
+</div>
+
+<!-- 底部说明带 -->
+<div class="band">
+  <div>
+    <div class="lb">方向 C</div>
+    <div class="dir">一笔<span class="it">One Stroke</span></div>
+    <div class="dir-s">口误被划掉的那一笔，就是剪刀</div>
+  </div>
+  <div>
+    <div class="lb">设计思维 · ManvsMachine（伦敦）</div>
+    <div class="bt">给 Apple、Nike 做产品片的工作室：<b>一个物件、一束光、一个动作</b>，把看不见的技术拍成摸得着的东西。AI 剪辑也看不见，所以只拍「划掉」这一个手势。</div>
+  </div>
+  <div>
+    <div class="lb">气质 / form 从哪来</div>
+    <div class="bt">像编辑拿铅笔改稿：<b>安静、笃定，一笔就够</b>。form 来自<span class="hlx">转录稿里划掉口误的那条线</span>：它从字里划到时长上，是全片唯一的强调色动作。</div>
+  </div>
+  <div>
+    <div class="lb">色板 · G1 token + 油画暖光</div>
+    <div class="sw">
+      <div><i style="background:#f7f7f7"></i><span>f7f7f7</span></div>
+      <div><i style="background:#000"></i><span>000</span></div>
+      <div><i style="background:#d6dff5"></i><span>d6dff5</span></div>
+      <div><i style="background:#5c81d6"></i><span>5c81d6</span></div>
+      <div><i style="background:#3361cc"></i><span>3361cc</span></div>
+      <div><i style="background:#294ea3"></i><span>294ea3</span></div>
+      <div><i style="background:#c9732e"></i><span>c9732e</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

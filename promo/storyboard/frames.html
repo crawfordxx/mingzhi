@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>Mingzhi Storyboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@1,200;1,300&family=Press+Start+2P&display=block" rel="stylesheet">
+<style>
+@font-face{font-family:"FusionPixel";src:url(fonts/fusion-pixel-12px-proportional-zh_hans.otf.woff2) format("woff2");font-display:block}
+:root{
+  /* G1 产品 token */
+  --w0:#fff; --w1:#f7f7f7; --w2:#f5f5f5; --w3:#eee; --w4:#e0e0e0;
+  --t1:#000000e6; --t2:#000000b3; --t3:#0000008f;
+  --b1:#d6dff5; --b2:#adc0eb; --b3:#85a0e0; --b4:#5c81d6; --b5:#3361cc; --b6:#294ea3;
+  /* logo 电光蓝：只给英雄与关键强调 */
+  --hero:#014DF9; --hero-d:#0035B8;
+  /* 像素层 */
+  --ink:#1b1206; --cut:#c8402a; --cut-l:#e2614a; --cut-d:#8e2414; --shade:#d8e1f7; --gold:#e9c77a;
+  --px:'Press Start 2P', ui-monospace, monospace;
+  --pz:'FusionPixel', 'PingFang SC', monospace;
+  --serif:'IBM Plex Serif', Georgia, serif;
+  --mono:'IBM Plex Mono', ui-monospace, monospace;
+  --zh:-apple-system, 'PingFang SC', 'Hiragino Sans GB', system-ui, sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#fff}
+body{font-family:var(--zh);color:var(--t1);-webkit-font-smoothing:antialiased}
+#frame{position:relative;width:1920px;height:1080px;overflow:hidden;background:#fff}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0}
+#hud{position:absolute;left:0;top:0;width:1920px;height:1080px;pointer-events:none;z-index:50}
+.abs{position:absolute}
+img.pix,canvas.pix{image-rendering:pixelated;display:block}
+.pz{font-family:var(--pz);-webkit-font-smoothing:none;font-weight:400;letter-spacing:0}
+.step{clip-path:polygon(0 12px,6px 12px,6px 6px,12px 6px,12px 0,calc(100% - 12px) 0,calc(100% - 12px) 6px,calc(100% - 6px) 6px,calc(100% - 6px) 12px,100% 12px,100% calc(100% - 12px),calc(100% - 6px) calc(100% - 12px),calc(100% - 6px) calc(100% - 6px),calc(100% - 12px) calc(100% - 6px),calc(100% - 12px) 100%,12px 100%,12px calc(100% - 6px),6px calc(100% - 6px),6px calc(100% - 12px),0 calc(100% - 12px))}
+.step-s{clip-path:polygon(0 6px,6px 6px,6px 0,calc(100% - 6px) 0,calc(100% - 6px) 6px,100% 6px,100% calc(100% - 6px),calc(100% - 6px) calc(100% - 6px),calc(100% - 6px) 100%,6px 100%,6px calc(100% - 6px),0 calc(100% - 6px))}
+
+/* HUD：照工作台顶栏浅蓝条 */
+.hudbar{position:absolute;left:0;top:0;width:1920px;height:64px;background:var(--b1);display:flex;align-items:center;padding:0 40px}
+.hudbar::after{content:"";position:absolute;left:0;right:0;bottom:-6px;height:6px;background:repeating-linear-gradient(90deg,var(--b1) 0 12px,transparent 12px 24px)}
+.hudbar .brand{display:flex;align-items:center;gap:12px;font:600 19px/1 var(--zh);margin-right:auto}
+.hudbar .brand img{width:34px;height:34px;border-radius:8px}
+.hudbar .brand small{font:300 italic 16px/1 var(--serif);color:var(--t2)}
+.hudbar .it{display:flex;align-items:center;gap:12px;margin-left:40px}
+.hudbar .k{font:13px/1 var(--px);color:var(--b6)}
+.hudbar .k.zh{font:600 15px/1 var(--zh)}
+.hudbar .v{font:18px/1 var(--px);color:var(--t1)}
+.hudbar .v i{font-style:normal;color:var(--b5)}
+.hudbar .pips{display:flex;gap:4px}
+.hudbar .pips b{width:12px;height:18px;background:var(--b2);display:block}
+.hudbar .pips b.on{background:var(--b5)}
+.hudbar .flash{background:#fff;outline:3px solid var(--hero);outline-offset:6px;box-shadow:0 0 0 6px #fff}
+
+/* 关卡牌 / 文件牌 */
+.tag{position:absolute;font:14px/1 var(--px);color:#fff;background:var(--ink);padding:9px 12px 8px;z-index:20}
+.tag span{font:500 15px/1 var(--zh);margin-left:10px}
+
+/* 地面 */
+.tile{position:absolute;width:60px;height:60px;background:#fff;box-shadow:inset 6px 6px 0 #fff,inset -6px -6px 0 var(--w4);outline:3px solid var(--ink);outline-offset:-3px;display:grid;place-items:center;font:36px/1 var(--pz);color:var(--ink);-webkit-font-smoothing:none}
+.tile.raw{background:#c9ccd2;box-shadow:inset 6px 6px 0 #d8dade,inset -6px -6px 0 #a9adb5}
+.tile.dim{background:#f1f1f1;color:#b9b9b9;box-shadow:inset -6px -6px 0 #e4e4e4;outline-color:#cfcfcf}
+.tile.dim.raw{background:#b4b8bf;box-shadow:inset -6px -6px 0 #a7abb3;outline-color:#9ca0a8;color:transparent}
+.tile.reuse{filter:saturate(.2) brightness(.96)}
+.soil{position:absolute;height:120px;background:linear-gradient(var(--ink),var(--ink)) 0 0/100% 3px no-repeat,repeating-linear-gradient(90deg,transparent 0 57px,#cfcfcf 57px 60px),repeating-linear-gradient(180deg,var(--w3) 0 27px,#d6d6d6 27px 30px)}
+.soil.raw{background:linear-gradient(var(--ink),var(--ink)) 0 0/100% 3px no-repeat,repeating-linear-gradient(90deg,transparent 0 57px,#9da1a8 57px 60px),repeating-linear-gradient(180deg,#b7bac0 0 27px,#a7abb2 27px 30px)}
+.pit{position:absolute;width:60px;height:180px;background:var(--ink)}
+
+/* 口误小怪：变红的字幕砖 */
+.mon{position:absolute;height:54px;background:var(--cut);outline:3px solid var(--ink);outline-offset:-3px;box-shadow:inset 6px 6px 0 var(--cut-l),inset -6px -6px 0 var(--cut-d);display:grid;place-items:center;font:36px/1 var(--pz);color:#fff;-webkit-font-smoothing:none}
+.mon .eye{position:absolute;top:-12px;width:12px;height:12px;background:#fff;outline:3px solid var(--ink)}
+.mon .eye::after{content:"";position:absolute;left:6px;top:6px;width:6px;height:6px;background:var(--ink)}
+.mon .fang{position:absolute;bottom:-6px;width:6px;height:6px;background:var(--ink)}
+.pop{position:absolute;font:16px/1 var(--px);color:#fff;background:var(--ink);padding:9px 12px 8px;z-index:30;white-space:nowrap}
+.pop s{font:24px/1 var(--pz);text-decoration:none;position:relative;margin-left:10px;-webkit-font-smoothing:none}
+.pop s::after{content:"";position:absolute;left:-3px;right:-3px;top:50%;height:4px;background:var(--cut)}
+
+.trail b{position:absolute;width:12px;height:12px;background:#fff;outline:3px solid var(--ink)}
+.burst b{position:absolute;background:#fff;outline:3px solid var(--ink)}
+
+/* 白色像素面板（标题对话框） */
+.panel{position:absolute;background:#fff;z-index:20}
+.panel-sh{position:absolute;background:var(--b6);z-index:19}
+.kicker{display:flex;align-items:center;gap:14px;font:16px/1 var(--zh);color:var(--t2)}
+.kicker .p{font:14px/1 var(--px);color:var(--b5)}
+.big{font:96px/1.05 var(--pz);color:#141414;-webkit-font-smoothing:none}
+.mid{font:72px/1.1 var(--pz);color:#141414;-webkit-font-smoothing:none}
+.cap{background:var(--b1);color:var(--b6);font:200 italic 64px/1 var(--serif);padding:2px 20px 10px 14px}
+.chip{display:inline-flex;align-items:center;gap:10px;background:var(--b1);color:var(--b6);font:600 20px/1 var(--zh);padding:10px 16px}
+.chip em{font:300 italic 24px/1 var(--serif)}
+
+/* 产品浮窗（真实截图裁切） */
+.win{position:absolute;border-radius:22px;overflow:hidden;background:#fff;box-shadow:0 30px 60px rgba(0,0,0,.28),0 6px 16px rgba(0,0,0,.16)}
+.win .shot{position:absolute;left:0;top:0;background-repeat:no-repeat}
+.wbar{position:absolute;left:0;top:0;right:0;height:38px;background:#fff;display:flex;align-items:center;padding:0 16px;gap:7px;font:13px/1 var(--zh);color:#707070}
+.wbar i{width:12px;height:12px;border-radius:50%;display:block}
+.wbar .t{flex:1;text-align:center;margin-right:40px}
+.lock{position:absolute;width:30px;height:30px;border:6px solid var(--hero)}
+
+/* 终端（产品剪辑直播里的 Terminal） */
+.term{position:absolute;background:#1f1f22;border-radius:14px;box-shadow:0 24px 48px rgba(0,0,0,.3);color:#e8e8e8;font:15px/1.9 var(--mono);padding:0 0 14px}
+.term .tb{height:34px;display:flex;align-items:center;gap:7px;padding:0 14px;color:#9a9a9a;font:13px/1 var(--mono)}
+.term .tb i{width:11px;height:11px;border-radius:50%}
+.term .tb span{margin-left:12px}
+.term p{padding:0 18px;white-space:nowrap}
+.term .ok{color:#7fd18b}.term .d{color:#8f8f8f}.term .hl{color:#9fb6ff}
+
+/* RPG 对话框 */
+.rpg{position:absolute;background:#fff;outline:6px solid var(--ink);outline-offset:-6px;z-index:30}
+.rpg .who{position:absolute;left:30px;top:-27px;background:var(--ink);color:#fff;font:16px/1 var(--px);padding:10px 14px 9px}
+.rpg .who span{font:600 17px/1 var(--zh);margin-left:8px}
+.caret{display:inline-block;width:14px;height:52px;background:var(--hero);vertical-align:-8px;margin-left:4px}
+.atchip{display:inline-flex;align-items:center;background:var(--b1);color:var(--b6);font:48px/1 var(--pz);padding:6px 12px 6px;margin-right:16px;-webkit-font-smoothing:none}
+
+/* 信息卡（产品分镜卡 HTML 重建） */
+.card{position:absolute;background:#fff;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.14);padding:22px 24px;font:700 30px/1.25 var(--zh);color:#111}
+.card small{display:block;margin-top:8px;font:400 17px/1.3 var(--zh);color:#777}
+
+/* 结算格 */
+.bento{position:absolute;display:grid;gap:18px}
+.cell{background:#fff;position:relative;padding:28px 30px}
+.cell h6{font:13px/1 var(--px);color:var(--b5);font-weight:400;margin-bottom:18px}
+.cell .n{font:300 italic 76px/1 var(--serif);color:var(--t1);letter-spacing:-1px}
+.cell .n em{font-style:italic;color:var(--b5)}
+.cell .n s{text-decoration:none;color:var(--t3)}
+.cell p{margin-top:14px;font:18px/1.4 var(--zh);color:var(--t2)}
+</style>
+</head>
+<body>
+<div id="frame"><div id="stage"></div><div id="hud"></div></div>
+<script>
+/* ───────── 基础工具 ───────── */
+const Q=new URLSearchParams(location.search), K=Q.get('k')||'01';
+const stage=document.getElementById('stage'), hud=document.getElementById('hud');
+const INK='#1b1206';
+function el(tag,cls,css,html,parent){const e=document.createElement(tag); if(cls)e.className=cls; if(css)e.style.cssText=css; if(html!=null)e.innerHTML=html; (parent||stage).appendChild(e); return e;}
+function seeded(s){return ()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+function img(src,css,parent,cls='pix'){const i=el('img',cls,css,null,parent);i.src=src;return i;}
+
+/* ASCII 像素图 → canvas（自动 4 邻域描边 + 下沿阴影） */
+function sprite(rows,pal,cell=6,{outline=true,shade=true}={}){
+  rows=rows.map(r=>r.replace(/\s/g,''));
+  const h=rows.length,w=Math.max(...rows.map(r=>r.length)), P=outline?1:0;
+  const W=w+2*P,H=h+2*P;
+  const g=Array.from({length:H},()=>Array(W).fill(null));
+  rows.forEach((r,y)=>[...r].forEach((ch,x)=>{if(ch!=='.')g[y+P][x+P]=ch;}));
+  const c=document.createElement('canvas'); c.width=W; c.height=H; const x=c.getContext('2d');
+  for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){
+    const ch=g[yy][xx];
+    if(ch){let col=pal[ch]; if(shade&&ch==='#'&&yy+1<H&&!g[yy+1][xx])col=pal.s||col; x.fillStyle=col; x.fillRect(xx,yy,1,1);}
+    else if(outline){const n=[[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dy])=>{const a=g[yy+dy]&&g[yy+dy][xx+dx];return a&&a!=='o';}); if(n){x.fillStyle=pal.k||INK;x.fillRect(xx,yy,1,1);}}
+  }
+  c.className='pix'; c.style.width=W*cell+'px'; c.style.height=H*cell+'px'; return c;
+}
+
+/* ───────── 英雄：logo 小象像素化（24×22 格，来自 logo.svg 的 BOX 降采样后手修） ───────── */
+const ELE_BASE=[
+'................######..',
+'.............##########.',
+'..........##############',
+'......#############ee###',
+'...################ee###',
+'.#######################',
+'########################',
+'########################',
+'##############....######',
+'##############.....#####',
+'##############.....#####',
+'#####.########.....#####',
+'#####..#######.....#####',
+'####...#######.....#####',
+'####....######.....#####',
+'####....######.....#####',
+'###......####......#####',
+'###......####......#####',
+'###.......###......#####',
+'##........###......#####',
+'##.........##......#####',
+'...................####.'];
+function elePose(p){
+  let r=ELE_BASE.slice();
+  const set=(y,s)=>{r[y]=s;};
+  if(p==='walk'){ // 摆腿帧：后腿抬一格、中腿前移、鼻尖后摆
+    set(19,'.##.......###......#####'); set(20,'..##.......##......#####'); set(21,'..................####..');
+  }
+  if(p==='jump'){ // 腾空：腿收起、鼻子甩前
+    r=r.slice(0,18); r.push('.##.......##.......#####'); r.push('...................######'); r.push('......................##');
+  }
+  if(p==='squash'){ // 落地压扁：去掉两行身体，鼻尖外甩
+    r=r.filter((_,i)=>i!==6&&i!==13); r[r.length-1]='..................######';
+  }
+  if(p==='cheer'){ // 庆祝：腾空 + 眯眼（眼睛压成一条线），鼻尖上甩
+    r=r.slice(0,18); r.push('.##.......##.......#####'); r.push('...................######'); r.push('.....................###');
+    r[3]=r[3].replace('ee','##'); r[4]=r[4].replace('ee','ee');
+    r[3]=r[3].slice(0,19)+'ee'+r[3].slice(21); r[4]=r[4].slice(0,19)+'##'+r[4].slice(21);
+  }
+  return r;
+}
+const ELE_PAL={'#':'#FAFAFA',e:'#014DF9',h:'#FAFAFA',s:'#d8e1f7',k:INK};
+function elephant(pose='stand',cell=6){return sprite(elePose(pose),ELE_PAL,cell);}
+function place(node,l,t,z,parent){const d=el('div','abs',`left:${l}px;top:${t}px;${z?'z-index:'+z:''}`,null,parent);d.appendChild(node);return d;}
+
+/* ───────── 世界层 ───────── */
+function world(type,ox,{oy=0,parent}={}){ // type: color | raw ; ox = 世界横向偏移（1x 像素）
+  if(type==='raw') return img('px/world-raw.png',`position:absolute;left:${-ox}px;top:${-oy}px;width:3248px;height:1088px`,parent);
+  return img('px/world-color.png',`position:absolute;left:${-ox}px;top:${-oy}px;width:3240px;height:1080px`,parent);
+}
+function foreground(ox,dy=330,parent){return img('px/fg-foliage.png',`position:absolute;left:${-ox*1.4}px;top:${dy}px;width:3240px;height:1080px;z-index:40`,parent);}
+function haze(css,parent){return el('div','abs',`left:0;top:0;width:1920px;height:1080px;${css}`,null,parent);}
+
+/* 真实转录（第 2 期样片，测试模式截图里的剪辑直播转录） */
+const LINE=[{c:'他就',bad:1},...'他就建议我少喝饮料每天喝两瓶饮料以上的人'].concat([{c:'呃',bad:1},...'风险会明显变高想要的朋友呢就在评论区留言']);
+const LINE2='想要的朋友呢就在评论区留言他就建议我少喝饮料每天喝两瓶饮料以上的人风险会明显变高';
+/* 地面：mode 决定每块砖的状态 */
+function ground({x0=0,y=840,from=0,count=34,mode='text',rawFrom=99999,monsters=true,gapAt=null,closed=false,second=true,parent,soilRaw=false,skipBad=false,secondX0=null}={}){
+  const g=el('div','abs',`left:0;top:0;width:1920px;height:1080px;z-index:10`,null,parent);
+  const rnd=seeded(7);
+  let i=from,x=x0, n=0;
+  const seq=skipBad?LINE.filter(t=>!(t.bad)):LINE;
+  while(n<count){
+    const t=seq[i%seq.length]; i++; n++;
+    if(typeof t==='object'){ // 口误小怪
+      const w=t.c.length*60;
+      if(x>=rawFrom){ for(let q=0;q<t.c.length;q++){const tl=el('div','tile raw',`left:${x+q*60}px;top:${y}px`,'',g); el('div','abs',`left:24px;top:12px;width:12px;height:36px;background:#5d626b`,null,tl);} x+=w; continue; }
+      if(monsters){const m=el('div','mon',`left:${x}px;top:${y+6}px;width:${w}px`,t.c,g); m.innerHTML+=`<i class="eye" style="left:${w/2-27}px"></i><i class="eye" style="left:${w/2+15}px"></i><i class="fang" style="left:12px"></i><i class="fang" style="left:${w/2-3}px"></i><i class="fang" style="right:12px"></i>`; m.dataset.bad=t.c;}
+      x+=w; continue;
+    }
+    const isRaw=(x>=rawFrom);
+    const tile=el('div','tile'+(isRaw?' raw':''),`left:${x}px;top:${y}px`,isRaw?'':t,g);
+    if(isRaw){ // 原始音频波形砖
+      const hgt=6+Math.round(rnd()*7)*6; el('div','abs',`left:24px;top:${30-hgt/2}px;width:12px;height:${hgt}px;background:#5d626b`,null,tile);
+    }
+    x+=60;
+  }
+  if(second){ // 第二行：下一句转录，淡
+    const sx0=secondX0??x0;
+    [...LINE2+LINE2].forEach((ch,j)=>{ if(sx0+j*60>2400||sx0+j*60<-60)return; el('div','tile dim',`left:${sx0+j*60}px;top:${y+60}px`,soilRaw?'':ch,g).className+=soilRaw?' raw':'';});
+  }
+  el('div','soil'+(soilRaw?' raw':''),`left:-240px;top:${y+120}px;width:2640px`,null,g);
+  return g;
+}
+
+/* HUD */
+function hudbar({time='2:12',bad='0/2',yen='0.00',check=0,checkText=false,stage='v1',flash=null}={}){
+  const b=el('div','hudbar',null,null,hud);
+  b.innerHTML=`<div class="brand"><img src="../../assets/brand/logo.svg">明知AI剪辑 <small>(Mingzhi · MIT)</small></div>
+  <div class="it ${flash==='time'?'flash':''}"><span class="k">TIME</span><span class="v">${time}</span></div>
+  <div class="it ${flash==='bad'?'flash':''}"><span class="k zh">口误</span><span class="v">${bad}</span></div>
+  <div class="it"><span class="k">¥</span><span class="v">${yen}</span></div>
+  <div class="it ${flash==='check'?'flash':''}"><span class="k">CHECK</span><span class="pips">${Array.from({length:7},(_,i)=>`<b class="${i<check?'on':''}"></b>`).join('')}</span>${checkText?`<span class="v">${check}/7</span>`:''}</div>
+  <div class="it ${flash==='stage'?'flash':''}"><span class="k">STAGE</span><span class="v">${stage}</span></div>`;
+  return b;
+}
+function bigPanel(l,t,w,inner,{sh=true,parent}={}){
+  const p=el('div','panel step',`left:${l}px;top:${t}px;width:${w}px;padding:30px 40px 32px`,inner,parent);
+  if(sh){requestAnimationFrame(()=>{});const s=el('div','panel-sh step',`left:${l+12}px;top:${t+12}px;width:${w}px;height:0`,null,parent); s.dataset.follow='1'; s._p=p;}
+  return p;
+}
+function fixShadows(){document.querySelectorAll('.panel-sh').forEach(s=>{if(s._p)s.style.height=s._p.offsetHeight+'px';});}
+function trail(P0,P1,P2,n=10,parent,skipEnd=1){const t=el('div','trail abs','left:0;top:0;z-index:25',null,parent);for(let i=1;i<n-skipEnd+1;i++){const u=i/n;const x=(1-u)**2*P0[0]+2*(1-u)*u*P1[0]+u*u*P2[0],y=(1-u)**2*P0[1]+2*(1-u)*u*P1[1]+u*u*P2[1];el('b',null,`left:${Math.round(x/6)*6}px;top:${Math.round(y/6)*6}px`,null,t);}return t;}
+function burst(cx,cy,parent,s=1){const b=el('div','burst abs',`left:${cx}px;top:${cy}px;z-index:26`,null,parent);[[-72,-6,30,6],[54,-6,30,6],[-54,-42,6,18],[60,-42,6,18],[-60,24,18,6],[48,24,18,6]].forEach(a=>el('b',null,`left:${a[0]*s}px;top:${a[1]*s}px;width:${a[2]}px;height:${a[3]}px`,null,b));return b;}
+function dust(x,y,parent){[[0,0,18],[-30,6,12],[36,6,12],[-54,12,6],[60,12,6]].forEach(([dx,dy,s])=>el('div','abs',`left:${x+dx}px;top:${y+dy}px;width:${s}px;height:${s}px;background:#fff;outline:3px solid ${INK};z-index:24`,null,parent));}
+function confetti(n,box,seed,parent){const r=seeded(seed);const cols=['#014DF9','#ffffff','#c8402a','#e9c77a','#85a0e0','#5f6b1e'];for(let i=0;i<n;i++){const w=[6,12,12,18][Math.floor(r()*4)];el('div','abs',`left:${Math.round((box[0]+r()*box[2])/6)*6}px;top:${Math.round((box[1]+r()*box[3])/6)*6}px;width:${w}px;height:${w===18?6:w}px;background:${cols[Math.floor(r()*cols.length)]};outline:${r()<.5?'3px solid '+INK:'none'};z-index:28;transform:rotate(${r()<.3?45:0}deg)`,null,parent);}}
+
+/* 产品浮窗：从真实截图裁切（1440×900 截图坐标） */
+function uiWin(l,t,w,h,src,sx,sy,scale=1,parent,extra=''){
+  const wn=el('div','win',`left:${l}px;top:${t}px;width:${w}px;height:${h}px;${extra}`,null,parent);
+  el('div','shot',`width:${1440*scale}px;height:${900*scale}px;background-image:url(${src});background-size:${1440*scale}px ${900*scale}px;left:${-sx*scale}px;top:${-sy*scale}px`,null,wn);
+  return wn;
+}
+function locks(l,t,w,h,parent,c='var(--hero)'){[[0,0,'border-right:0;border-bottom:0'],[1,0,'border-left:0;border-bottom:0'],[0,1,'border-right:0;border-top:0'],[1,1,'border-left:0;border-top:0']].forEach(([a,b,s])=>el('i','lock',`left:${l+a*w-18+(a?-12:0)}px;top:${t+b*h-18+(b?-12:0)}px;${s};border-color:${c};z-index:35`,null,parent));}
+
+/* 下半屏人像：像素化背景预设 + 无面孔磨砂剪影（产品的「抠像换背景」结果） */
+function portrait(parent,l,t,w,h,preset='01-study',css=''){
+  const box=el('div','abs',`left:${l}px;top:${t}px;width:${w}px;height:${h}px;overflow:hidden;${css}`,null,parent);
+  img(`px/preset-${preset}.png`,`position:absolute;left:0;top:${-(w*16/9-h)/2}px;width:${w}px;height:${w*16/9}px`,box);
+  img('px/silhouette.png',`position:absolute;left:${w*0.06}px;top:${h*0.04}px;width:${w*0.88}px;height:${w*0.88*72/54}px`,box);
+  return box;
+}
+/* 「卡片」方块（替代问号砖：白色小卡图标） */
+const BLOCK=['kkkkkkkkkkkk','kBBBBBBBBBBk','kBwwwwwwwwBk','kBwbbbbbbwBk','kBwwwwwwwwBk','kBwbbbbwwwBk','kBwwwwwwwwBk','kBwwwwwwwwBk','kBBBBBBBBBBk','kddddddddddk','kkkkkkkkkkkk'];
+function block(used=false){return sprite(BLOCK,{k:INK,B:used?'#8a8f99':'#014DF9',w:used?'#c9ccd2':'#fff',b:used?'#8a8f99':'#5c81d6',d:used?'#5d626b':'#0035B8'},7,{outline:false,shade:false});}
+
+/* ───────── 镜头 ───────── */
+const SHOTS={};
+
+/* S01 · 标志降采样 */
+SHOTS['01']=()=>{
+  el('div','abs','left:0;top:0;width:1920px;height:1080px;background:#014DF9');
+  const cell=18, ew=26*cell, eh=24*cell, L=960-ew/2, T=500-eh/2;
+  el('div','abs',`left:0;top:0;width:1920px;height:1080px;background-image:linear-gradient(rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.10) 1px,transparent 1px);background-size:${cell}px ${cell}px;background-position:${L%cell-1}px ${T%cell-1}px;-webkit-mask-image:radial-gradient(ellipse 34% 46% at 50% 46%,#000 40%,transparent 100%)`);
+  const s=sprite(elePose('stand'),{'#':'#FAFAFA',e:'#014DF9',h:'#FAFAFA',s:'#FAFAFA',k:'#014DF9'},cell,{outline:false,shade:false});
+  place(s,L+cell,T+cell,5);
+  // 降采样过程条：矢量 → 64 → 32 → 24
+  const strip=el('div','abs','left:0;top:840px;width:1920px;display:flex;justify-content:center;align-items:flex-end;gap:72px;z-index:6');
+  const step=(node,label)=>{const d=el('div','',`display:flex;flex-direction:column;align-items:center;gap:14px`,null,strip);d.appendChild(node);el('div','',`font:12px/1 var(--px);color:rgba(255,255,255,.7)`,label,d);};
+  const v=document.createElement('img'); v.src='../../assets/brand/logo-mark.svg'; v.style.cssText='width:96px;height:86px;filter:brightness(0) invert(1)'; step(v,'SVG');
+  [[4,'64'],[3,'32'],[2.6,'24']].forEach(([c,lab],i)=>{const sp=sprite(elePose('stand'),{'#':'#FAFAFA',e:'#014DF9',h:'#FAFAFA',s:'#FAFAFA',k:'#014DF9'},[3,2.6,2.6][i],{outline:false,shade:false}); sp.style.width='94px'; sp.style.height='86px'; if(i<2)sp.style.imageRendering='auto'; step(sp,lab+' PX');});
+  el('div','abs','left:80px;top:72px;font:600 22px/1 var(--zh);color:#fff;display:flex;gap:14px;align-items:baseline','明知AI剪辑 <span style="font:300 italic 20px/1 var(--serif);opacity:.8">(Mingzhi)</span>');
+  el('div','abs','right:80px;top:76px;font:14px/1 var(--px);color:rgba(255,255,255,.8)','OPEN SOURCE · MIT');
+};
+
+/* S02 · 1-1 原片开局 */
+SHOTS['02']=()=>{
+  world('raw',0);
+  haze('background:linear-gradient(180deg,rgba(40,44,52,.12),rgba(40,44,52,0) 40%)');
+  el('div','tag','left:96px;top:96px','1-1<span>原片 · 书房</span>');
+  el('div','abs','left:96px;top:150px;display:flex;align-items:center;gap:12px;font:16px/1 var(--px);color:#fff;z-index:15;background:rgba(27,18,6,.55);padding:10px 14px','<i style="width:16px;height:16px;background:#e2412c;display:block"></i>REC <span style="font:500 17px/1 var(--zh);margin-left:6px">talk.mp4</span><span style="opacity:.85;margin-left:6px">2:12</span>');
+  ground({x0:0,from:2,count:32,rawFrom:0,soilRaw:true});
+  const e=elephant('squash'); place(e,360,840-parseInt(e.style.height),22);
+  dust(372,822); dust(486,822);
+  bigPanel(1032,214,760,`<div class="kicker"><span class="p">STAGE 1-1</span>乱糟糟的原片，丢进来就行</div><div class="big" style="margin-top:22px">一条口播，</div>`);
+  hudbar({});
+};
+
+/* S03 · 转录铺路 */
+SHOTS['03']=()=>{
+  // 1.5x 低机位：转录的「波前」——左边已成字，右边还是波形，正在一块块翻面
+  const cam=el('div','abs','left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;transform:translate(-300px,-560px) scale(1.5)');
+  world('raw',240,{parent:cam});
+  ground({x0:-60,from:0,count:40,rawFrom:1020,parent:cam,secondX0:-60});
+  // 翻面中的砖：上半白、下半波形，像翻牌
+  el('div','abs',`left:1020px;top:840px;width:60px;height:30px;background:#fff;outline:3px solid ${INK};outline-offset:-3px;z-index:12;transform:perspective(200px) rotateX(38deg);transform-origin:50% 100%`,null,cam);
+  [[1032,812,6],[1062,800,6],[1046,786,6]].forEach(([x,y,s])=>el('div','abs',`left:${x}px;top:${y}px;width:${s}px;height:${s}px;background:#fff;outline:2px solid ${INK};z-index:12`,null,cam));
+  const e=elephant('walk'); place(e,800,840-parseInt(e.style.height),22,cam);
+  el('div','term',`left:1180px;top:110px;width:640px;z-index:60`,`<div class="tb"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span>Terminal — 剪辑直播</span></div>
+   <p><span class="d">$</span> mingzhi talk.mp4</p>
+   <p><span class="ok">✓</span> 抽音频　<span class="d">16kHz · 只在本机</span></p>
+   <p><span class="ok">✓</span> 识别　　<span class="d">本机模型 · 不上传</span></p>
+   <p><span class="hl">▸</span> 转录　　<span class="d">逐行铺成地砖…</span><i style="display:inline-block;width:9px;height:17px;background:#9fb6ff;vertical-align:-3px;margin-left:4px"></i></p>`,hud);
+  el('div','abs','left:96px;top:120px;z-index:60',`<div class="panel step" style="position:relative;padding:24px 32px 28px"><div class="kicker"><span class="p">LOCAL ONLY</span>字幕在你电脑上识别</div><div class="mid" style="margin-top:16px">音频不出本机</div></div>`,hud);
+  hudbar({});
+};
+
+/* S04 · 踩口误（1.5x 跟拍） */
+SHOTS['04']=()=>{
+  // 全景 1x：完整跳跃弧，踩扁第一只口误「他就」
+  const cam=el('div','abs','left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;transform:translate(-180px,0) scale(1)');
+  world('raw',0,{parent:cam});
+  ground({x0:600,from:0,count:30,parent:cam,secondX0:0});
+  // 左侧补齐已转录的地砖（上一句）
+  for(let i=0;i<10;i++) el('div','tile',`left:${i*60}px;top:840px`,'言评论区留言就在评论区'[i],cam.lastChild);
+  const m1=[...cam.querySelectorAll('.mon')].find(m=>m.dataset.bad==='他就'); m1.remove();
+  // 扁掉的小怪 + 英雄落在它头上
+  el('div','abs',`left:600px;top:${840+36}px;width:120px;height:24px;background:var(--cut);outline:3px solid ${INK};outline-offset:-3px;box-shadow:inset 0 6px 0 var(--cut-l);z-index:11`,null,cam);
+  [[612,882],[690,882]].forEach(([x,y])=>el('div','abs',`left:${x}px;top:${y}px;width:12px;height:6px;background:#fff;z-index:12`,null,cam));
+  trail([380,800],[470,560],[600,700],10,cam,2);
+  const e=elephant('squash'); place(e,588,876-parseInt(e.style.height),22,cam);
+  burst(660,872,cam,0.9);
+  el('div','pop',`left:612px;top:${700-150}px`,'CUT<s>他就</s>',cam);
+  hudbar({bad:'1/2',flash:'bad'});
+  el('div','abs','left:96px;top:120px;z-index:60',`<div class="panel step" style="position:relative;padding:22px 30px 26px"><div class="kicker"><span class="p">STOMP</span>AI 剪掉口误和气口</div><div class="mid" style="margin-top:14px;font-size:60px">踩掉口误</div></div>`,hud);
+};
+
+/* S05 · 合缝：2:12 → 2:02（2x 近景） */
+SHOTS['05']=()=>{
+  // 2x 近景：「呃」被剪掉，地砖合缝
+  const cam=el('div','abs','left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;transform:translate(-1180px,-1080px) scale(2)');
+  world('raw',380,{parent:cam});
+  const g=el('div','abs','left:0;top:0;width:3000px;height:1200px;z-index:10',null,cam);
+  const L='饮料以上的人', R='风险会明显变高';
+  [...L].forEach((c,i)=>el('div','tile',`left:${780+i*60}px;top:840px`,c,g));
+  const gx=780+L.length*60; // 缝：还剩 24px
+  el('div','abs',`left:${gx}px;top:840px;width:24px;height:180px;background:${INK}`,null,g);
+  [...R].forEach((c,i)=>el('div','tile',`left:${gx+24+i*60}px;top:840px`,c,g));
+  // 速度线（跟在右段后面）
+  [[0,858,42],[0,876,24],[0,894,54]].forEach(([_,y,w],i)=>el('div','abs',`left:${gx+24+R.length*60+12+i*6}px;top:${y-6}px;width:${w}px;height:6px;background:#fff;outline:2px solid ${INK}`,null,g));
+  // 下落的小怪碎片
+  [[gx+4,930,12],[gx+6,970,6],[gx-2,1004,6]].forEach(([x,y,s])=>el('div','abs',`left:${x}px;top:${y}px;width:${s}px;height:${s}px;background:var(--cut);z-index:9`,null,g));
+  el('div','pop',`left:${gx-40}px;top:924px;z-index:30`,'CUT<s>呃</s>',g);
+  el('div','abs',`left:560px;top:900px;width:1400px;height:200px;background:linear-gradient(var(--ink),var(--ink)) 0 0/100% 3px no-repeat,repeating-linear-gradient(180deg,var(--w3) 0 27px,#d6d6d6 27px 30px)`,null,g);
+  const e=elephant('stand'); place(e,800,840-parseInt(e.style.height),22,cam);
+  el('div','abs','left:1000px;top:200px;z-index:30',`<div class="step" style="background:var(--hero);color:#fff;padding:26px 40px 30px;display:flex;flex-direction:column;gap:14px;box-shadow:inset 0 -12px 0 var(--hero-d)">
+    <div style="font:16px/1 var(--px);opacity:.85">TIME</div>
+    <div style="font:300 italic 132px/1 var(--serif);letter-spacing:-2px">2:12 <span style="opacity:.6">→</span> 2:02</div>
+    <div style="font:600 22px/1 var(--zh);opacity:.92">剪掉口误 2 处 · 缝自己合上</div></div>`,hud);
+  hudbar({time:'2:02',bad:'2/2',flash:'time'});
+};
+
+/* S06 · 换背景传送门 */
+SHOTS['06']=()=>{
+  const OX=820;
+  world('color',OX);
+  // 左半边仍是原片
+  const left=el('div','abs','left:0;top:0;width:820px;height:1080px;overflow:hidden;z-index:2');
+  world('raw',OX,{parent:left});
+  el('div','abs','left:814px;top:0;width:6px;height:1080px;background:#fff;z-index:3;opacity:.9');
+  ground({x0:-20,from:24,count:34,skipBad:true});
+  // 9:16 浮窗传送门：10 种预设像老虎机一样滚
+  const pw=360,ph=640,pl=820,pt=840-ph-12;
+  const win=el('div','win',`left:${pl}px;top:${pt}px;width:${pw}px;height:${ph}px;z-index:20;border-radius:22px`);
+  el('div','wbar',null,'<i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span class="t">背景 — 10 种预设</span>',win);
+  const reel=el('div','abs',`left:12px;top:44px;width:${pw-24}px;height:${ph-56}px;overflow:hidden;border-radius:12px;background:#111`,null,win);
+  const ps=['06-japanese','05-tech-dark','07-balcony','08-library'];
+  img('px/preset-06-japanese.png',`position:absolute;left:0;top:-470px;width:336px;height:597px;filter:blur(0) brightness(.7)`,reel);
+  img('px/preset-07-balcony.png',`position:absolute;left:0;top:-20px;width:336px;height:597px`,reel);
+  img('px/preset-08-library.png',`position:absolute;left:0;top:560px;width:336px;height:597px;filter:brightness(.7)`,reel);
+  // 运动拖影条
+  for(let i=0;i<7;i++)el('div','abs',`left:${18+i*46}px;top:0;width:6px;height:${40+i%3*30}px;background:rgba(255,255,255,.55)`,null,reel);
+  el('div','abs',`left:24px;bottom:22px;font:600 18px/1 var(--zh);color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.5)`,'绿植阳台 <span style="font:13px/1 var(--px);margin-left:8px;opacity:.8">07/10</span>',reel);
+  locks(pl,pt,pw,ph);
+  // 英雄跃入
+  trail([520,800],[640,560],[800,640],10,null,3);
+  const e=elephant('jump'); const d=place(e,700,560,22);
+  const p=bigPanel(1290,190,520,`<div class="kicker"><span class="p">STAGE 1-2</span>抠像 · 换背景</div><div class="mid" style="margin-top:20px">换个世界</div><div style="margin-top:26px;display:flex;align-items:baseline;gap:14px;font:600 22px/1 var(--zh);color:var(--t2)">合成 <span style="font:300 italic 64px/1 var(--serif);color:var(--b6)">5.8s</span><span style="font:300 italic 26px/1 var(--serif);color:var(--t3)">(原来 35s)</span></div>`);
+  hudbar({time:'2:02',bad:'2/2',check:1});
+};
+
+/* S07 · 分镜卡片升级 */
+SHOTS['07']=()=>{
+  const OX=1180;
+  world('color',OX);
+  ground({x0:-40,from:5,count:34,skipBad:true});
+  foreground(OX,420);
+  const B=[[300,430,1],[480,412,0],[660,430,0]];
+  B.forEach(([x,y,used],i)=>place(block(used||i===1),x,y,20));
+  [[468,372,12],[552,366,12],[510,350,6]].forEach(([x,y,s])=>el('div','abs',`left:${x}px;top:${y}px;width:${s}px;height:${s}px;background:var(--hero);outline:3px solid ${INK};z-index:21`));
+  const e=elephant('jump'); place(e,446,520,22);
+  el('div','card',`left:640px;top:200px;width:330px;transform:rotate(-7deg);z-index:30`,'省下的都是赚到的');
+  trail([540,380],[600,220],[690,260],8,null,1);
+  const fl=1300,ft=110,fw=396,fh=704;
+  const f=el('div','win',`left:${fl}px;top:${ft}px;width:${fw}px;height:${fh}px;z-index:25`);
+  el('div','wbar',null,'<i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span class="t">v1 — 自动分镜</span>',f);
+  const SW=fw-24, SH=fh-56;
+  const scr=el('div','abs',`left:12px;top:44px;width:${SW}px;height:${SH}px;border-radius:12px;overflow:hidden;background:#fffdf6`,null,f);
+  el('div','card',`left:16px;top:28px;width:${SW-32}px;font-size:26px`,'少喝饮料<small>每天两瓶以上的人</small>',scr);
+  el('div','abs',`left:16px;top:160px;width:${SW-32}px;height:110px;border:4px dashed var(--b3);border-radius:10px;display:grid;place-items:center;font:14px/1 var(--px);color:var(--b5)`,'NEXT CARD',scr);
+  portrait(scr,0,SH/2,SW,SH/2,'01-study');
+  el('div','abs',`left:0;top:${SH/2-3}px;width:100%;height:6px;background:var(--hero)`,null,scr);
+  bigPanel(96,120,520,`<div class="kicker"><span class="p">POWER UP</span>上半屏信息卡 · 下半屏人像</div><div class="mid" style="margin-top:20px">自动分镜</div>`);
+  hudbar({time:'2:02',bad:'2/2',check:3});
+};
+
+/* S08 · 呼吸字卡 */
+SHOTS['08']=()=>{
+  el('div','abs','left:0;top:0;width:1920px;height:1080px;background:var(--w1)');
+  el('div','abs','left:0;top:430px;width:1920px;text-align:center','<div class="big" style="font-size:120px">不是剪辑软件。</div>');
+  el('div','abs','left:0;top:600px;width:1920px;text-align:center;font:500 30px/1 var(--zh);color:var(--t2)','没有时间线，没有轨道。');
+  el('div','abs','left:0;top:840px;width:1920px;height:6px;background:'+INK);
+  const e=elephant('walk',4); place(e,1460,840-parseInt(e.style.height),5);
+};
+
+/* S09 · 一句话（RPG 对话框，逐字输入） */
+SHOTS['09']=()=>{
+  const OX=1180;
+  world('color',OX);
+  haze('background:rgba(255,255,255,.16)');
+  const fl=1180,ft=96,fw=396,fh=640, SW=fw-24, SH=fh-56;
+  const f=el('div','win',`left:${fl}px;top:${ft}px;width:${fw}px;height:${fh}px;z-index:25`);
+  el('div','wbar',null,'<i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span class="t">v1 — 00:29 分镜卡</span>',f);
+  const scr=el('div','abs',`left:12px;top:44px;width:${SW}px;height:${SH}px;border-radius:12px;overflow:hidden;background:#fffdf6`,null,f);
+  el('div','card',`left:16px;top:28px;width:${SW-32}px;font-size:26px`,'省下的都是赚到的',scr);
+  portrait(scr,0,SH/2,SW,SH/2,'01-study');
+  locks(fl+24,ft+66,fw-48,96);
+  el('div','abs',`left:${fl-150}px;top:${ft+96}px;z-index:36`,'<span class="chip step-s" style="background:var(--hero);color:#fff">@00:29</span>');
+  // 光标：弧线移到目标卡，刚点下（双圈 ripple）
+  el('div','abs',`left:${fl+300}px;top:${ft+150}px;width:44px;height:44px;border-radius:50%;border:3px solid var(--hero);opacity:.55;z-index:37;transform:translate(-50%,-50%)`);
+  el('div','abs',`left:${fl+300}px;top:${ft+150}px;width:76px;height:76px;border-radius:50%;border:3px solid var(--hero);opacity:.25;z-index:37;transform:translate(-50%,-50%)`);
+  el('div','abs',`left:${fl+298}px;top:${ft+146}px;z-index:38`,`<svg width="30" height="40" viewBox="0 0 15 20"><path d="M1 1 L1 16 L5 12 L8 19 L10.5 18 L7.5 11 L13 11 Z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>`);
+  const box=el('div','rpg',`left:96px;top:790px;width:1728px;height:220px;padding:62px 56px 0`);
+  el('div','who',null,'YOU<span>你说</span>',box);
+  box.insertAdjacentHTML('beforeend',`<div style="display:flex;align-items:center;font:48px/1 var(--pz);color:#141414;-webkit-font-smoothing:none"><span class="atchip">@00:29</span>这张卡太弱了<span class="caret"></span></div>
+   <div style="position:absolute;right:56px;bottom:34px;font:14px/1 var(--px);color:var(--b5)">ENTER ▸</div>
+   <div style="position:absolute;left:56px;bottom:34px;font:500 18px/1 var(--zh);color:var(--t3)">用一句话改 · 不用剪辑软件</div>`);
+  const e=elephant('stand'); place(e,980,790-parseInt(e.style.height)+6,40);
+  hudbar({time:'2:02',bad:'2/2',check:5});
+};
+
+/* S10 · 只重渲改动的那一段 */
+SHOTS['10']=()=>{
+  const OX=1320;
+  world('color',OX);
+  haze('background:linear-gradient(180deg,rgba(255,255,255,.62),rgba(255,255,255,.30))');
+  const N=14, W=114, G=12, L0=(1920-(N*W+(N-1)*G))/2, T=600, H=Math.round(W*16/9);
+  for(let i=0;i<N;i++){
+    const x=L0+i*(W+G), hot=(i===6);
+    const s=el('div','abs',`left:${x}px;top:${T}px;width:${W}px;height:${H}px;background:${hot?'#fffdf6':'#eceef2'};outline:6px solid ${hot?'var(--hero)':'#b9bec8'};outline-offset:-6px;overflow:hidden;z-index:12;${hot?'box-shadow:0 0 0 6px #fff,0 18px 40px rgba(1,77,249,.35)':''}`);
+    el('div','abs',`left:12px;top:14px;width:${W-24}px;height:34px;background:#fff;border-radius:4px;box-shadow:0 2px 0 ${hot?'var(--b2)':'#d6d6d6'}`,`<i style="position:absolute;left:8px;top:10px;width:${hot?56:40}px;height:6px;background:${hot?'#111':'#9aa0aa'}"></i><i style="position:absolute;left:8px;top:21px;width:30px;height:4px;background:${hot?'#888':'#c2c6cc'}"></i>`,s);
+    if(!hot) portrait(s,6,H/2,W-12,H/2-6,['01-study','08-library','07-balcony'][i%3],'filter:grayscale(1) contrast(.8) brightness(1.08);opacity:.75');
+    else{
+      const done=Math.round(H*0.30);
+      portrait(s,6,H/2,W-12,done,'01-study');
+      el('div','abs',`left:6px;top:${H/2+done}px;width:${W-12}px;height:${H/2-done-6}px;background-image:linear-gradient(var(--b2) 2px,transparent 2px),linear-gradient(90deg,var(--b2) 2px,transparent 2px);background-size:12px 12px;background-color:#fff`,null,s);
+      el('div','abs',`left:0;top:${H/2+done-3}px;width:100%;height:6px;background:var(--hero)`,null,s);
+    }
+    el('div','abs',`left:${x}px;top:${T+H+16}px;width:${W}px;text-align:center;z-index:12`,`<span style="display:inline-block;padding:7px 8px 6px;font:11px/1 var(--px);background:${hot?'var(--hero)':'rgba(255,255,255,.9)'};color:${hot?'#fff':'#5d626b'}">${hot?'RENDER':'REUSE'}</span>`);
+  }
+  const e=elephant('stand',5); place(e,L0+6*(W+G)+W/2-65,T-parseInt(e.style.height)+3,22);
+  const box=el('div','rpg',`left:96px;top:150px;width:1080px;height:200px;padding:52px 48px 0 220px`);
+  el('div','who',null,'MINGZHI<span>明知</span>',box);
+  img('../../assets/brand/logo-180.png','position:absolute;left:48px;top:40px;width:132px;height:132px;border-radius:14px',box,'');
+  box.insertAdjacentHTML('beforeend',`<div style="font:36px/1.45 var(--pz);color:#141414;-webkit-font-smoothing:none">明白，只改这一张卡，<br>其余镜头原样复用。</div>`);
+  el('div','abs','left:1260px;top:160px;z-index:30',`<div class="kicker" style="margin-bottom:16px"><span class="p">RE-RENDER</span></div><div class="mid">只重渲<br>这一段</div>`);
+  hudbar({time:'2:02',bad:'2/2',check:6});
+};
+
+/* S11 · 存档 v2 + 双版本对比 */
+SHOTS['11']=()=>{
+  const OX=1300;
+  world('color',OX);
+  ground({x0:-20,from:12,count:34,skipBad:true});
+  foreground(OX,430);
+  // 存档旗
+  el('div','abs',`left:582px;top:330px;width:12px;height:510px;background:#fff;outline:3px solid ${INK};z-index:14`);
+  el('div','abs step-s',`left:570px;top:300px;width:36px;height:36px;background:var(--hero);outline:3px solid ${INK};z-index:15`);
+  el('div','abs',`left:594px;top:346px;width:228px;height:114px;background:var(--hero);outline:3px solid ${INK};outline-offset:-3px;box-shadow:inset 0 6px 0 #4d80ff,inset 0 -9px 0 var(--hero-d);z-index:14;display:grid;place-items:center`,`<span style="font:52px/1 var(--px);color:#fff">v2</span>`);
+  const e=elephant('cheer'); place(e,330,800-parseInt(e.style.height),22);
+  [[300,640,12],[520,600,6],[318,580,6],[486,676,12]].forEach(([x,y,s])=>el('div','abs',`left:${x}px;top:${y}px;width:${s}px;height:${s}px;background:#fff;outline:3px solid ${INK};z-index:23`));
+  confetti(18,[840,180,120,520],11);
+  // 双版本对比：真实截图（对比态）裁切；标题栏与底栏 HTML 重建（去掉截图里与本片无关的数字）
+  const src='../assets/ui/t8-f2-compare-1440x900.png';
+  [[0,'v1'],[1,'v2']].forEach(([i,v])=>{
+    const sx=[705,1048][i], l=1000+i*400, t=150;
+    const w=uiWin(l,t,318,655,src,sx,143,1,null,'z-index:20');
+    el('div','abs','left:0;top:0;width:100%;height:40px;background:#fff',`<div style="display:flex;align-items:center;gap:7px;padding:14px 16px 0"><i style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></i><i style="width:12px;height:12px;border-radius:50%;background:#febc2e"></i><i style="width:12px;height:12px;border-radius:50%;background:#28c840"></i><span style="flex:1;text-align:center;font:14px/1 var(--zh);color:#707070;margin-right:40px">${v} — 00:29 分镜卡</span></div>`,w);
+    el('div','abs',`left:22px;top:76px;width:274px;height:62px;background:#fff;border-radius:8px;box-shadow:0 6px 14px rgba(0,0,0,.08);display:flex;align-items:center;padding-left:20px;font:700 ${i?28:22}px/1 var(--zh);color:#111`,i?'少花冤枉钱':'省下的都是赚到的',w);
+    el('div','abs','left:0;top:575px;width:100%;height:80px;background:#fff',`<div style="display:flex;align-items:center;gap:12px;padding:14px 12px 0"><i style="width:30px;height:30px;border-radius:50%;background:#111;display:block"></i><div style="flex:1;height:3px;background:#e6e6e6;position:relative"><b style="position:absolute;left:44%;top:-5px;width:13px;height:13px;border-radius:50%;background:${i?'var(--hero)':'#111'}"></b></div></div><div style="padding:12px 14px 0;font:13px/1 var(--zh);color:#777;display:flex;justify-content:space-between"><span>分镜卡 · 00:29</span><span style="color:${i?'var(--b5)':'#999'}">${i?'只重渲这一段':'原版'}</span></div>`,w);
+    if(i) locks(l+22,t+76,274,62);
+  });
+  el('div','abs','left:1196px;top:96px;z-index:30;background:#fff;border-radius:999px;padding:12px 24px;font:500 19px/1 var(--zh);box-shadow:0 8px 20px rgba(0,0,0,.12)','同步播放 · 只有 <b style="color:var(--b5)">1 段</b>不同');
+  el('div','abs','left:96px;top:120px;z-index:30;background:rgba(255,255,255,.94);padding:24px 32px 28px',`<div class="kicker" style="margin-bottom:14px"><span class="p">SAVE</span>每一版都存档</div><div class="mid">存档 v2</div><div style="margin-top:16px;font:500 21px/1 var(--zh);color:var(--t2)">可对比 · 可回退 · 可导出</div>`);
+  hudbar({time:'2:02',bad:'2/2',check:6,stage:'v1 <i>▸</i> v2',flash:'stage'});
+};
+
+/* S12 · 成片通关 · 影院（climax） */
+SHOTS['12']=()=>{
+  // 终点关：影院内景（03-cinema 8px 降采样）；观众只有背影
+  img('px/cinema.png','position:absolute;left:0;top:-60px;width:1920px;height:1280px');
+  haze('background:radial-gradient(ellipse 50% 55% at 50% 44%,rgba(255,236,190,0),rgba(20,10,4,.38))');
+  // 银幕上的成片：9:16，真实成片画面（对比态右窗的画面区）
+  const sw=262, sh=466, sl=964-sw/2, st=272;
+  el('div','abs',`left:${sl-220}px;top:${st-60}px;width:${sw+440}px;height:${sh+120}px;background:radial-gradient(closest-side,rgba(255,246,222,.9),rgba(255,246,222,0));z-index:4`);
+  const w=uiWin(sl,st,sw,sh,'../assets/ui/t8-f2-compare-1440x900.png',1056,182,sw/302,null,'z-index:6;border-radius:4px;box-shadow:0 0 0 6px rgba(255,250,235,.95),0 0 120px rgba(255,240,200,.8)');
+  el('div','abs',`left:0;bottom:0;width:100%;height:40px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.55));display:flex;align-items:flex-end;padding:0 10px 9px;font:10px/1 var(--px);color:#fff`,'FINISHED CUT · 9:16',w);
+  confetti(26,[1340,100,480,420],5); confetti(14,[560,90,700,140],8);
+  const e=elephant('cheer'); place(e,1230,820-parseInt(e.style.height),22);
+  [[1200,720,12],[1410,690,6],[1220,660,6],[1400,760,12]].forEach(([x,y,s])=>el('div','abs',`left:${x}px;top:${y}px;width:${s}px;height:${s}px;background:#fff;outline:3px solid ${INK};z-index:23`));
+  el('div','abs','left:96px;top:150px;z-index:30',`<div style="font:28px/1 var(--px);color:#fff;text-shadow:4px 4px 0 ${INK}">STAGE CLEAR</div><div class="big" style="color:#fff;margin-top:26px;text-shadow:6px 6px 0 ${INK}">成片，<br>通关。</div><div style="margin-top:28px;font:500 24px/1.4 var(--zh);color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.6)">一条可以直接发布的 9:16</div>`);
+  hudbar({time:'2:02',bad:'2/2',yen:'3.76',check:7,checkText:true,stage:'v2',flash:'check'});
+};
+
+/* S13 · 结算格（bento） */
+SHOTS['13']=()=>{
+  img('px/cinema.png','position:absolute;left:0;top:-60px;width:1920px;height:1280px;filter:blur(8px) brightness(.55) saturate(.85)');
+  const b=el('div','bento',`left:150px;top:150px;width:1620px;height:820px;grid-template-columns:1.25fr 1fr 1fr;grid-template-rows:72px 1fr 1fr;z-index:20`);
+  el('div','',`grid-column:1/4;display:flex;align-items:center;gap:22px;color:#fff`,`<span style="font:22px/1 var(--px)">RESULT</span><span style="font:600 24px/1 var(--zh);opacity:.9">样片成绩单</span><span style="font:14px/1 var(--px);opacity:.7;margin-left:12px">ALL REAL NUMBERS</span>`,b);
+  const c=(html,css='')=>el('div','cell step',css,html,b);
+  c(`<h6>COST</h6><div style="font:600 26px/1 var(--zh);color:var(--t2)">样片实花</div><div class="n" style="font-size:196px;margin-top:40px;color:var(--hero)">¥3.76</div><p style="margin-top:40px;font-size:20px">开源免费，在你电脑上运行<br>模型按量付费</p>`,'grid-row:2/4;padding:44px 48px');
+  c(`<h6>TIME</h6><div class="n">2:12 <em>→</em> 2:02</div><p>剪掉口误 2 处</p>`);
+  c(`<h6>BACKGROUND</h6><div class="n">5.8s <s style="font-size:34px">(原来 35s)</s></div><p>抠像换背景合成</p>`);
+  c(`<h6>RE-RENDER</h6><div class="n">61s <em>→</em> 1.8s</div><p>改节奏，只重渲改动的那一段</p>`);
+  c(`<h6>CHECK</h6><div style="display:flex;align-items:flex-end;gap:22px"><div style="display:flex;gap:8px">${'<b style="width:26px;height:64px;background:var(--b5);display:block"></b>'.repeat(7)}</div><div class="n" style="font-size:64px">7/7</div></div><p>成片检查全过</p>`);
+  const e=elephant('cheer',5); place(e,1580,150+72-parseInt(e.style.height)-6+0,30);
+  hudbar({time:'2:02',bad:'2/2',yen:'3.76',check:7,checkText:true,stage:'v2'});
+};
+
+/* S14 · 片尾 */
+SHOTS['14']=()=>{
+  el('div','abs','left:0;top:0;width:1920px;height:1080px;background:#fff');
+  el('div','abs','left:160px;top:330px;font:600 104px/1.22 var(--zh);color:#111;letter-spacing:-1px',`把一条口播，<br>变成 <span class="cap" style="font-size:118px;padding:0 26px 14px 18px;vertical-align:-6px">finished cut.</span>`);
+  el('div','abs','left:160px;top:720px;display:flex;gap:16px;align-items:center',`<span style="background:#111;color:#fff;border-radius:999px;padding:20px 30px;font:500 26px/1 var(--mono)">github.com/crawfordxx/mingzhi</span><span style="background:#eee;color:#111;border-radius:999px;padding:20px 28px;font:600 24px/1 var(--zh)">MIT · 开源免费</span>`);
+  el('div','abs','left:160px;top:820px;font:400 22px/1 var(--zh);color:var(--t2)','在你的电脑上运行 · 音频不出本机 · 用一句话改');
+  // 收束：像素小象「升采样」回矢量 logo
+  img('../../assets/brand/logo.svg','position:absolute;left:1340px;top:300px;width:420px;height:420px;border-radius:92px;box-shadow:0 40px 80px rgba(1,77,249,.22)',null,'');
+  el('div','abs','left:1340px;top:752px;width:420px;display:flex;justify-content:space-between;font:12px/1 var(--px);color:var(--t3)','<span>24 × 22</span><span>▸</span><span>SVG</span>');
+  el('div','abs','left:160px;top:120px;display:flex;align-items:center;gap:12px;font:600 22px/1 var(--zh)','明知AI剪辑 <span style="font:300 italic 20px/1 var(--serif);color:var(--t2)">(Mingzhi)</span>');
+  el('div','abs','left:0;top:1008px;width:1920px;height:1px;background:var(--w4)');
+  el('div','abs','left:160px;top:1030px;font:13px/1 var(--px);color:var(--t3)','MINGZHI · MIT LICENSE');
+  el('div','abs','right:160px;top:1030px;font:13px/1 var(--px);color:var(--t3)','RENDERED WITH REMOTION');
+};
+
+(SHOTS[K]||SHOTS['01'])();
+Promise.all([document.fonts.ready,...[...document.images].map(i=>i.complete?1:new Promise(r=>{i.onload=i.onerror=r;}))]).then(()=>{fixShadows();document.body.dataset.ready='1';});
+</script>
+</body>
+</html>
