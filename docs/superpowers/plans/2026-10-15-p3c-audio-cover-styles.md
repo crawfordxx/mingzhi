@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 成片带上自动挑选、随人声压低的背景音乐和卡片音效，响度统一到 -14 LUFS；字幕有 6 套样式（字体打包本地）；同时出 4:3 与 3:4 两张封面。
+**Goal:** 成片带上自动挑选、随人声压低的背景音乐和卡片音效，响度统一到 -14 LUFS；字幕有 6 套样式（字体打包本地）；用 GPT Image 2 按用户选的风格（10 种预设）出 4:3 与 3:4 两张封面。
 
 **Architecture:** 素材（19 首 CC0 配乐、6 款 OFL 字体）由 `scripts/fetch-assets.mjs` 下载到 `~/.mingzhi/assets`，清单（含 sha256）入库；8 个 CC0 音效直接入库。分镜模型顺带给出配乐情绪；Node 侧用纯函数算出背景音乐的音量包络（说话时压低、停顿时抬起）与音效触发点，连同所需素材复制进工作目录，交给 Remotion 用 `<Audio>` 合成；渲染后 ffmpeg 两遍 loudnorm 统一响度；封面用 Remotion `renderStill` 出图。
 
@@ -25,7 +25,14 @@
   - 站酷庆科黄油体 `https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf`（8.3MB）
   - 霞鹜文楷 `https://github.com/lxgw/LxgwWenKai/releases/download/v1.522/LXGWWenKai-Medium.ttf`（25.4MB）
   - 得意黑 `https://github.com/atelier-anchor/smiley-sans/releases/download/v2.0.1/smiley-sans-v2.0.1.zip`（5.8MB，取其中 `SmileySans-Oblique.ttf`）
-  - sha256 由 Task 1 实现者下载后计算写入清单（清单是校验依据，之后的下载都要校验）
+  - sha256（2026-10-15 控制者实测下载计算）：
+    - `NotoSansSC[wght].ttf` → 存为 `NotoSansSC-VF.ttf`：`a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`
+    - `NotoSerifSC[wght].ttf` → 存为 `NotoSerifSC-VF.ttf`：`050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9`
+    - `ZCOOLKuaiLe-Regular.ttf`：`812a6fc1fe54b6d73a419245c32dfeba8aa33104d5be90d1cf6af082007cb71d`
+    - `ZCOOLQingKeHuangYou-Regular.ttf`：`54f0c0df4308cd74cd0f2fd3494ae054dbc4a1fd6fa7d71f4807eb4cdd8b4136`
+    - `LXGWWenKai-Medium.ttf`：`d4bdeb38a39151d74d084cba5090f8cb7d20bf83eedb78c35939ae70b9f4e3f6`
+    - `smiley-sans-v2.0.1.zip`（校验压缩包，取其中 `SmileySans-Oblique.ttf`）：`299c0be6c960ae37361762eca76f7d0cd516615435bb96c0d4b98a1e70178a07`
+  - 清单是校验依据，之后的下载都要校验；下载脚本不需要「空 sha256 时打印」的分支
 - 响度：成片 -14 LUFS（integrated），true peak ≤ -1.5 dBTP，LRA 11；用 ffmpeg `loudnorm` 两遍法；视频流直接拷贝
 - 人声压低：人声期间背景乐 -22 dB（相对原曲），停顿超过 0.8 秒时在 0.3 秒内抬到 -14 dB，开头 0.5 秒淡入、结尾 1.5 秒淡出
 - 成片动画与音频全部帧驱动（Remotion）；音效默认音量 0.35
@@ -79,7 +86,7 @@
 
 JSON 结构：`{ "license": "CC0 1.0（HoliznaCC0，OpenGameArt）", "zips": { "chill": { "url": …, "sha256": … }, … }, "tracks": [ … ] }`。
 
-**`scripts/fetch-assets.mjs`**：下载三个音乐压缩包到 `<assets>/tmp/`（`.part` 再改名，sha256 校验，不符删除报错）→ 用系统 `unzip -p` 取出清单里的 entry，ffmpeg 转码为 `music/<id>.mp3`（`-ac 2 -ar 44100 -b:a 128k`）→ 删除压缩包；字体逐个下载到 `fonts/`（得意黑从 zip 取 `zipEntry`），sha256 校验；已存在且大小大于 0 的跳过。首次运行若清单里某个字体的 `sha256` 为空字符串，打印计算出的值并以非 0 退出，提示把值写回清单（Task 1 实现者用这一步得到值并写进 `assets/fonts.json`，最终清单不允许空 sha256）。
+**`scripts/fetch-assets.mjs`**：下载三个音乐压缩包到 `<assets>/tmp/`（`.part` 再改名，sha256 校验，不符删除报错）→ 用系统 `unzip -p` 取出清单里的 entry，ffmpeg 转码为 `music/<id>.mp3`（`-ac 2 -ar 44100 -b:a 128k`）→ 删除压缩包；字体逐个下载到 `fonts/`（得意黑从 zip 取 `zipEntry`），sha256 校验；已存在且大小大于 0 的跳过。字体 sha256 见 Global Constraints（得意黑校验的是压缩包本身）。
 
 - [ ] **Step 1**：用 curl 下载 8 个音效与 LICENSE.txt 到 `assets/sfx/`；写好两份清单
 - [ ] **Step 2: 测试**（`tests/assets.test.ts`）：两份清单通过 zod 校验；19 首、三种情绪都至少 4 首；`SFX` 里每个文件在 `assets/sfx/` 存在；字体 6 款、sha256 均为 64 位十六进制；`musicReady`/`fontsReady` 对空数据目录返回 false
@@ -162,24 +169,34 @@ JSON 结构：`{ "license": "CC0 1.0（HoliznaCC0，OpenGameArt）", "zips": { "
 
 ---
 
-### Task 6: 封面 4:3 与 3:4
+### Task 6: GPT Image 2 风格封面（10 种预设）
+
+**用户要求（2026-10-15）**：封面自动用 GPT Image 2 生成，风格可选（如包豪斯），多做几种预设。
+
+**实测（2026-10-15）**：`GPT-Image-2-Official` text2img（`size: "3:4"`，`resolution: "1k"`，`quality: "medium"`，`output_format: "png"`）约 50 秒、¥0.6/张；提示词要求「左上大号中文标题 + 小标题 + 右下留大片空白放人物、画面不要出现人物」时，中文标题逐字正确、包豪斯构图到位。img2img 的参考图必须是 http(s) 地址（data URI 报 `Request URL is missing an 'http://' or 'https://' protocol`），可想没有上传接口 → **不上传人脸**，人物用本地 RVM 抠像合成。
 
 **Files:**
-- Create: `render/Cover.tsx`、`src/compose/cover.ts`
-- Modify: `render/Root.tsx`（`Cover43` 1440×1080、`Cover34` 1080×1440 两个合成）
+- Create: `src/cover/styles.ts`、`src/cover/generate.ts`、`src/cover/person.ts`、`render/Cover.tsx`
+- Modify: `render/Root.tsx`（`Cover34` 1080×1440、`Cover43` 1440×1080 两个合成）、`src/matting/rvm.ts`（新增单帧抠像导出 RGBA PNG）
 - Test: `tests/cover.test.ts`
 
 **Interfaces:**
-- Produces:
-  - `export interface CoverProps { title: string; highlight: string[]; kicker?: string; personImage: string /* 相对 workDir */; captionStyle: CaptionStyleId; captionFontFile: string }`
-  - `export function coverTitle(storyboard: Storyboard, captions: TimedCaption[]): { title: string; highlight: string[]; kicker?: string }`（取第一张 hook 卡的 headline/highlight/kicker；没有 hook 时取第一句字幕，最长 16 字）
-  - `export async function extractPersonFrame(video: string, sec: number, output: string, cfg: AppConfig): Promise<void>`（ffmpeg 取帧 PNG）
-  - `export async function renderCovers(workDir: string, props: CoverProps): Promise<{ cover43: string; cover34: string }>`（输出 `workDir/cover-4x3.png`、`cover-3x4.png`）
-- 版式：人物照片铺满（4:3 放右侧 55%，3:4 放下半），大标题用所选字幕样式字体 120–150px，`highlight` 染荧光黄绿 `#D4F23C`，kicker 小胶囊；参考 `top-hook1.png` 的配色
-- [ ] **Step 1: 测试**：`coverTitle` 两种来源；`renderCovers` 输出两张 PNG，尺寸分别 1440×1080、1080×1440（ffprobe 校验）
-- [ ] Steps 2–4；**Step 5: Commit** `git commit -m "feat: 4:3 与 3:4 封面"`
+- `src/cover/styles.ts`：`export const COVER_STYLES = { bauhaus, swiss, memphis, editorial, neon, guochao, risograph, neobrutal, y2k, japanese } as const`、`export type CoverStyleId = keyof typeof COVER_STYLES`、`export const DEFAULT_COVER_STYLE: CoverStyleId = 'bauhaus'`。每套：`{ name: string /* 中文名 */; prompt: string /* 风格描述：配色、构图、材质、字体气质 */; personSlot: { x: number; y: number; w: number; h: number } /* 0–1，相对画布，人物放置区，与提示词里「留白位置」一致 */; personStyle: { outline?: { px: number; color: string }; shadow?: string; duotone?: [string, string] } }`
+  - 10 套：包豪斯（红黄蓝黑几何色块、粗网格；右下留白）、瑞士国际主义（严格网格、红黑白、Helvetica 气质大字；右侧留白）、孟菲斯（撞色波点、波浪线、俏皮几何；底部居中留白）、杂志极简（大留白、高级灰、细衬线大标题；右侧留白）、赛博霓虹（暗底霓虹光、扫描线、科技感；右下留白、人物加青色描边光）、国潮（朱红与金、云纹、书法感标题；右侧留白）、孔版印刷（颗粒质感、套色错位、两色印刷；右下留白、人物双色调）、新粗野主义（高饱和纯色、粗黑描边、硬投影；右下留白、人物加 8px 黑描边与硬投影）、千禧 Y2K（铬金属字、蓝紫渐变、气泡与星形；底部居中留白）、日系清新（浅色、胶片颗粒、柔和手写感小字；右侧留白）
+- `src/cover/generate.ts`：
+  - `export const COVER_MODEL = 'GPT-Image-2-Official'`
+  - `export function coverPrompt(style: CoverStyleId, title: string, subtitle: string | undefined, aspect: '3:4' | '4:3'): string`（固定要求：标题用指定中文原文、逐字不改；小标题；在 personSlot 对应方位留出大片干净空白；画面中不要出现任何人物、人脸或手；印刷级质感；无水印、无多余文字）
+  - `export async function generateCoverArt(task: TaskClient, style, title, subtitle, aspect, dest, download?): Promise<{ cost?: number }>`
+  - `export async function verifyTitle(client: LlmClient, png: string, title: string): Promise<boolean>`（gemini-3.5-flash 读图，返回识别到的标题；归一化（去空格与标点、全角半角）后与原文相等才算通过；`ChatOptions` 需支持 `images`——若 P4 尚未实现多模态，本任务在 `KexiangClient` 加 `images?: string[]`（data URI）并补测试）
+  - `export function coverTitle(storyboard: Storyboard, captions: TimedCaption[]): { title: string; subtitle?: string }`（第一张 hook 的 headline 压缩到 ≤ 12 字作标题由调用方另行用 LLM 精炼；本函数只做兜底：取 hook headline，没有时取第一句字幕，截断到 14 字）
+- `src/cover/person.ts`：`export async function pickPersonFrame(video: string, cfg: AppConfig, client: LlmClient, candidates?: number): Promise<number>`（均匀取 6 帧，拼成一张图交给 Gemini 选「眼睛睁开、表情自然、口型不夸张」的一帧，返回秒数；模型失败时取第 1/3 处）、`export async function cutoutPerson(video: string, sec: number, out: string, cfg: AppConfig): Promise<void>`（抽帧 → RVM 单帧推理（循环状态清零）→ RGBA PNG，按 alpha 外接框裁切）
+- `render/Cover.tsx`：底图铺满；人物 PNG 按 `personSlot` 等比放入并底对齐；按 `personStyle` 加描边/投影/双色调；不再叠加任何文字（标题已在底图里）
+- `export async function makeCovers(opts: { workDir; style: CoverStyleId; title; subtitle?; personVideo; cfg; task; client; meter? }): Promise<{ cover34: string; cover43: string; attempts: number; costYuan: number }>`：两种比例各生成一次底图，`verifyTitle` 不通过则重生一次，仍不通过保留第二次结果并在返回里标注；然后合成人物，输出 `workDir/cover-3x4.png`（1080×1440）、`cover-4x3.png`（1440×1080）
 
----
+- [ ] **Step 1: 测试**：`coverPrompt` 含标题原文、留白方位与「不要出现人物」；10 套风格的 personSlot 都在 0–1 内；`verifyTitle` 归一化比较（假 LlmClient）；`makeCovers` 用假 TaskClient（下载函数写入 lavfi 生成的纯色 PNG）与假 LlmClient（第一次识别错、第二次对）→ attempts=2，两张输出尺寸正确（ffprobe）；`cutoutPerson` 在 `hasRvm()` 时对测试视频输出带 alpha 的 PNG（`pix_fmt` 含 `a`）
+- [ ] **Step 2–4**：RED → 实现 → `pnpm vitest run tests/cover.test.ts && pnpm typecheck`
+- [ ] **Step 5: 目视**：用真实 key 对 `work/raw1` 生成 3 种风格（包豪斯、赛博霓虹、国潮）的两种比例封面，存 `work/covers/`，逐张检查标题文字与人物融合，写进报告（花费约 ¥3.6–7.2）
+- [ ] **Step 6: Commit** `git commit -m "feat: GPT Image 2 风格封面（10 种预设、标题核对、本地抠像合成人物）"`
 
 ### Task 7: 接入出片流程
 
@@ -189,7 +206,7 @@ JSON 结构：`{ "license": "CC0 1.0（HoliznaCC0，OpenGameArt）", "zips": { "
 
 **Interfaces:**
 - `PipelineStep` 在 `'compose'` 之后增加 `'loudness' | 'cover'`
-- `PipelineArgs` 增加 `audio?: { bgm: 'auto' | 'none' | string /* track id */ }`、`captionStyle?: CaptionStyleId`、`cover?: boolean`；CLI：`--bgm auto|none|<曲目id>`（默认 auto）、`--caption-style <id>`（默认 blade）、`--no-cover`
+- `PipelineArgs` 增加 `audio?: { bgm: 'auto' | 'none' | string /* track id */ }`、`captionStyle?: CaptionStyleId`、`cover?: { style: CoverStyleId } | false`；CLI：`--bgm auto|none|<曲目id>`（默认 auto）、`--caption-style <id>`（默认 blade）、`--cover-style <id>`（默认 bauhaus）、`--no-cover`；封面标题由分镜模型顺带给出（`Storyboard` 增加 `coverTitle: { title ≤12 字, subtitle ≤16 字 }`），缺省时用 `coverTitle()` 兜底
 - `ProjectFile` 增加 `audio?: { track: string | null; mood: Mood; sfxCount: number }`、`loudness?: { before: number; after: number }`、`artifacts.cover43?`、`artifacts.cover34?`
 - 素材未下载时：配乐/字体缺失不报错，降级为无配乐、PingFang SC，并在进度消息里提示「运行 pnpm fetch-assets 可启用配乐与字体」
 - 渲染输出先写 `final.raw.mp4`，loudness 后得到最终 `output`，删除 raw
