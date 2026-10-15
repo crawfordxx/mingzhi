@@ -1,0 +1,41 @@
+[package]
+name = "mingzhi-launcher"
+version = "0.1.0"
+edition = "2021"
+description = "明知AI剪辑 启动器核心：下载、续传、校验、解包"
+license = "MIT"
+publish = false
+
+[lib]
+name = "mingzhi_launcher"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mingzhi-launcher"
+path = "src/main.rs"
+
+# 依赖版本全部钉死（=），保证各平台 CI 构建结果一致
+[dependencies]
+tiny_http = "=0.12.0"
+# 只开 rustls（ring），不带 gzip 等多余特性
+ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
+sha2 = "=0.10.9"
+tar = "=0.4.46"
+zstd = "=0.13.3"
+flate2 = "=1.1.10"
+xz2 = "=0.1.7"
+# 只需要 deflate（Chrome / Windows 版 Node 的 zip 都是 deflate）
+zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+# 进度页用系统浏览器打开（Task 3 使用）
+open = "=5.4.4"
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
+codegen-units = 1
