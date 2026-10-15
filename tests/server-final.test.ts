@@ -120,10 +120,12 @@ describe('服务重启与并发写', () => {
     const id = await spaceWithInput(t);
     t.app.store.addVersion(id, { summary: '首个版本', changedShots: [], costYuan: 0, status: 'running' });
     t.app.bus.publish({ t: Date.now(), spaceId: id, version: 1, step: 'compose', message: '渲染 40%' });
+    writeFileSync(join(t.app.store.versionDir(id, 1), 'project.json'), JSON.stringify({ costs: { total: 1.23, budget: 10, entries: [] } }));
     await t.close();
     const again = await startApp({ cfg: { ...loadConfig({}), dataDir: join(t.root, 'data') }, keyStore: memoryKeyStore(GOOD_KEY), webDir: t.webDir }, 0);
     try {
       expect(again.app.store.get(id).versions[0].status).toBe('failed');
+      expect(again.app.store.get(id).versions[0].costYuan).toBeCloseTo(1.23); // 重启前已花的钱计入项目预算
       const last = again.app.bus.history(id, 1).at(-1);
       expect(last).toMatchObject({ step: 'failed', message: '服务重启，任务中断', seq: 2 });
     } finally {

@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -31,10 +31,23 @@ export const INTERRUPTED = '服务重启，任务中断';
  * 服务重启后，上次没跑完的版本（状态还停在 running）改记为失败，并补发 failed 事件：
  * 前端按事件判断进度，没有终止事件会一直计时。重启前还在排队的任务没有建版本，随进程丢失（项目回到可重新开始的状态）。
  */
+/** 中断版本已经花掉的钱：每步完成时 project.json 都会落盘当前账目，读不到按 0 计 */
+function spentBeforeCrash(dir: string): number {
+  const file = join(dir, 'project.json');
+  if (!existsSync(file)) return 0;
+  try {
+    const total = (JSON.parse(readFileSync(file, 'utf8')) as { costs?: { total?: unknown } }).costs?.total;
+    return typeof total === 'number' && Number.isFinite(total) && total > 0 ? total : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function failInterrupted(app: AppCtx): void {
   for (const space of app.store.list()) {
     for (const v of space.versions.filter((x) => x.status === 'running')) {
-      app.store.updateVersion(space.id, v.n, { status: 'failed' });
+      const spent = spentBeforeCrash(app.store.versionDir(space.id, v.n));
+      app.store.updateVersion(space.id, v.n, { status: 'failed', ...(spent > v.costYuan ? { costYuan: spent } : {}) });
       app.bus.publish({ t: Date.now(), spaceId: space.id, version: v.n, step: 'failed', message: INTERRUPTED });
     }
   }
