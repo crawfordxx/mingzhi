@@ -11,6 +11,9 @@ importers:
       '@remotion/bundler':
         specifier: 4.0.531
         version: 4.0.531(postcss@8.5.30)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@remotion/fonts':
+        specifier: 4.0.531
+        version: 4.0.531(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@remotion/renderer':
         specifier: 4.0.531
         version: 4.0.531(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -632,6 +635,9 @@ packages:
 
   '@remotion/elevenlabs@4.0.531':
     resolution: {integrity: sha512-h6rN4dEjaaVqev3Z3vMaqjeKmB9PneiRQRqsuoVrL7TG6YzG4tWub27kri/y6NMGLbDWF49suK0ucfx0aPzJxA==}
+
+  '@remotion/fonts@4.0.531':
+    resolution: {integrity: sha512-0eemQzfyBPNQYZZ3AumHaMbdFRwnoP+eHX96QeVwk16XXaTxAJ0jkUI8e86BW7/ABvYlFj0iIjtqbgvE9C3cJg==}
 
   '@remotion/licensing@4.0.531':
     resolution: {integrity: sha512-h17IbJSbD8GmkwJrayVJFUGCjIPTR4uj1AVOWQQYfBfv7/mgPNtCZPXDths9yQOphFXfwPq4IRRIZFPXYJFJZw==}
@@ -2179,6 +2185,13 @@ snapshots:
     dependencies:
       '@remotion/captions': 4.0.531
       zod: 4.5.4
+
+  '@remotion/fonts@4.0.531(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      remotion: 4.0.531(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+    transitivePeerDependencies:
+      - react
+      - react-dom
 
   '@remotion/licensing@4.0.531': {}
 

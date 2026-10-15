@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { bundle } from '@remotion/bundler';
 import { renderMedia, renderStill, selectComposition } from '@remotion/renderer';
 import type { CardSpec, TalkProps } from '../storyboard/schema.js';
+import type { CaptionStyleId } from '../captions/styles.js';
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'render', 'index.ts');
 const DEFAULT_CONCURRENCY = 8;
@@ -55,5 +56,14 @@ export async function renderCardStill(opts: { workDir: string; card: CardSpec; o
     const inputProps = { card: opts.card };
     const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
     await renderStill({ composition, serveUrl, inputProps, output: opts.output, frame: 24 });
+  });
+}
+
+/** 字幕样式预览静帧（1080×600，一行示例字幕；bg 为相对 workDir 的底图，可省略） */
+export async function renderCaptionStill(opts: { workDir: string; captionStyle: CaptionStyleId; captionFontFile: string; text: string; bg?: string; output: string }): Promise<void> {
+  await withBundle(opts.workDir, async (serveUrl) => {
+    const inputProps = { text: opts.text, captionStyle: opts.captionStyle, captionFontFile: opts.captionFontFile, ...(opts.bg ? { bg: opts.bg } : {}) };
+    const composition = await selectComposition({ serveUrl, id: 'CaptionStill', inputProps });
+    await renderStill({ composition, serveUrl, inputProps, output: opts.output, frame: 0 });
   });
 }
