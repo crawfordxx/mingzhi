@@ -11,6 +11,7 @@
     "test": "vitest run --exclude \"tests/{compose,templates,caption-band}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts --no-file-parallelism",
     "typecheck": "tsc --noEmit",
     "fetch-models": "node scripts/fetch-models.mjs",
+    "fetch-assets": "node scripts/fetch-assets.mjs",
     "make-fixture": "bash scripts/make-fixture.sh",
     "mingzhi": "tsx src/cli.ts"
   },

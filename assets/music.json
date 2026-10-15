@@ -1,0 +1,190 @@
+{
+  "license": "CC0 1.0（HoliznaCC0，OpenGameArt）",
+  "zips": {
+    "chill": {
+      "url": "https://opengameart.org/sites/default/files/chill_beats.zip",
+      "sha256": "53ce04d6c124843235ccfbea94be3f8c6afb3cfd3c6924badc124a4ec0d49f37"
+    },
+    "happy": {
+      "url": "https://opengameart.org/sites/default/files/happy_lo-fi_lofi_collection.zip",
+      "sha256": "7d36a9172a030d5b2e9ec7df622095e468877cdd35d92904004bb8c13266f80b"
+    },
+    "electronic": {
+      "url": "https://opengameart.org/sites/default/files/happy_electronic.zip",
+      "sha256": "b0c799be8b60620d01b8862d37103e58f6d30d33285141e9b645622c1d758449"
+    }
+  },
+  "tracks": [
+    {
+      "id": "families",
+      "title": "Families",
+      "zip": "chill",
+      "entry": "Chill Beats/03 HoliznaCC0 - Families.mp3",
+      "mood": "tech",
+      "energy": 2,
+      "durationSec": 144
+    },
+    {
+      "id": "opinions",
+      "title": "Opinions",
+      "zip": "chill",
+      "entry": "Chill Beats/05 HoliznaCC0 - Opinions.mp3",
+      "mood": "chill",
+      "energy": 2,
+      "durationSec": 168
+    },
+    {
+      "id": "old-age",
+      "title": "Old Age",
+      "zip": "chill",
+      "entry": "Chill Beats/06 HoliznaCC0 - Old Age.mp3",
+      "mood": "tech",
+      "energy": 2,
+      "durationSec": 214
+    },
+    {
+      "id": "dream-pop",
+      "title": "Dream Pop",
+      "zip": "chill",
+      "entry": "Chill Beats/08 HoliznaCC0 - Dream Pop.mp3",
+      "mood": "tech",
+      "energy": 2,
+      "durationSec": 242
+    },
+    {
+      "id": "autumn",
+      "title": "Autumn",
+      "zip": "chill",
+      "entry": "Chill Beats/28 HoliznaCC0 - Autumn.mp3",
+      "mood": "tech",
+      "energy": 2,
+      "durationSec": 170
+    },
+    {
+      "id": "poor-but-happy",
+      "title": "Poor, But Happy",
+      "zip": "happy",
+      "entry": "Happy Lo-Fi (Lofi Collection)/01 HoliznaCC0 - Poor, But Happy.mp3",
+      "mood": "chill",
+      "energy": 2,
+      "durationSec": 128
+    },
+    {
+      "id": "blue-skies",
+      "title": "Blue Skies",
+      "zip": "happy",
+      "entry": "Happy Lo-Fi (Lofi Collection)/03 HoliznaCC0 - Blue Skies.mp3.mp3",
+      "mood": "chill",
+      "energy": 2,
+      "durationSec": 176
+    },
+    {
+      "id": "letting-go",
+      "title": "Letting Go Of The Past",
+      "zip": "happy",
+      "entry": "Happy Lo-Fi (Lofi Collection)/16 HoliznaCC0 - Letting Go Of The Past.mp3",
+      "mood": "tech",
+      "energy": 2,
+      "durationSec": 180
+    },
+    {
+      "id": "puppy-love",
+      "title": "Puppy Love",
+      "zip": "happy",
+      "entry": "Happy Lo-Fi (Lofi Collection)/19 HoliznaCC0 - Puppy Love.mp3",
+      "mood": "upbeat",
+      "energy": 3,
+      "durationSec": 150
+    },
+    {
+      "id": "clouds",
+      "title": "Clouds",
+      "zip": "happy",
+      "entry": "Happy Lo-Fi (Lofi Collection)/21 HoliznaCC0 - Clouds.mp3",
+      "mood": "tech",
+      "energy": 2,
+      "durationSec": 230
+    },
+    {
+      "id": "a-little-off",
+      "title": "Happy, but a little off",
+      "zip": "happy",
+      "entry": "Happy Lo-Fi (Lofi Collection)/22 HoliznaCC0 - Happy, but a little off.mp3",
+      "mood": "chill",
+      "energy": 2,
+      "durationSec": 117
+    },
+    {
+      "id": "new-shoes",
+      "title": "New Shoes",
+      "zip": "happy",
+      "entry": "Happy Lo-Fi (Lofi Collection)/26 HoliznaCC0 - New Shoes.mp3",
+      "mood": "tech",
+      "energy": 2,
+      "durationSec": 156
+    },
+    {
+      "id": "back-in-the-80s",
+      "title": "Back In The 80s",
+      "zip": "electronic",
+      "entry": "Happy Electronic/03 HoliznaCC0 - Back In The 80s.mp3",
+      "mood": "upbeat",
+      "energy": 3,
+      "durationSec": 240
+    },
+    {
+      "id": "earth",
+      "title": "Earth",
+      "zip": "electronic",
+      "entry": "Happy Electronic/03 HoliznaCC0 - Earth.mp3",
+      "mood": "upbeat",
+      "energy": 3,
+      "durationSec": 200
+    },
+    {
+      "id": "small-town-on-pluto",
+      "title": "A Small Town On Pluto",
+      "zip": "electronic",
+      "entry": "Happy Electronic/04 HoliznaCC0 - A Small Town On Pluto.mp3",
+      "mood": "upbeat",
+      "energy": 3,
+      "durationSec": 232
+    },
+    {
+      "id": "happy-dance",
+      "title": "Happy Dance",
+      "zip": "electronic",
+      "entry": "Happy Electronic/06 HoliznaCC0 - Happy Dance.mp3",
+      "mood": "upbeat",
+      "energy": 3,
+      "durationSec": 156
+    },
+    {
+      "id": "earth-people",
+      "title": "transcendental earth people",
+      "zip": "electronic",
+      "entry": "Happy Electronic/08 HoliznaCC0 - transcendental earth people.mp3",
+      "mood": "upbeat",
+      "energy": 3,
+      "durationSec": 153
+    },
+    {
+      "id": "bouncing",
+      "title": "Bouncing",
+      "zip": "electronic",
+      "entry": "Happy Electronic/10 HoliznaCC0 - Bouncing.mp3",
+      "mood": "upbeat",
+      "energy": 3,
+      "durationSec": 88
+    },
+    {
+      "id": "love-love-love",
+      "title": "Love Love Love",
+      "zip": "electronic",
+      "entry": "Happy Electronic/11 HoliznaCC0 - Love Love Love.mp3",
+      "mood": "upbeat",
+      "energy": 3,
+      "durationSec": 175
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "license": "SIL OFL 1.1",
+  "fonts": [
+    {
+      "id": "noto-sans-sc",
+      "family": "Noto Sans SC",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+      "file": "NotoSansSC-VF.ttf",
+      "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
+    },
+    {
+      "id": "noto-serif-sc",
+      "family": "Noto Serif SC",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf",
+      "file": "NotoSerifSC-VF.ttf",
+      "sha256": "050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9"
+    },
+    {
+      "id": "zcool-kuaile",
+      "family": "ZCOOL KuaiLe",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf",
+      "file": "ZCOOLKuaiLe-Regular.ttf",
+      "sha256": "812a6fc1fe54b6d73a419245c32dfeba8aa33104d5be90d1cf6af082007cb71d"
+    },
+    {
+      "id": "zcool-huangyou",
+      "family": "ZCOOL QingKe HuangYou",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf",
+      "file": "ZCOOLQingKeHuangYou-Regular.ttf",
+      "sha256": "54f0c0df4308cd74cd0f2fd3494ae054dbc4a1fd6fa7d71f4807eb4cdd8b4136"
+    },
+    {
+      "id": "lxgw-wenkai",
+      "family": "LXGW WenKai",
+      "url": "https://github.com/lxgw/LxgwWenKai/releases/download/v1.522/LXGWWenKai-Medium.ttf",
+      "file": "LXGWWenKai-Medium.ttf",
+      "sha256": "d4bdeb38a39151d74d084cba5090f8cb7d20bf83eedb78c35939ae70b9f4e3f6"
+    },
+    {
+      "id": "smiley-sans",
+      "family": "Smiley Sans",
+      "url": "https://github.com/atelier-anchor/smiley-sans/releases/download/v2.0.1/smiley-sans-v2.0.1.zip",
+      "file": "SmileySans-Oblique.ttf",
+      "sha256": "299c0be6c960ae37361762eca76f7d0cd516615435bb96c0d4b98a1e70178a07",
+      "zipEntry": "SmileySans-Oblique.ttf"
+    }
+  ]
+}
