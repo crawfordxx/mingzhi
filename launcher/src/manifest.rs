@@ -3,7 +3,7 @@
 //! 字段以 Task 1 的 schema 为准；serde 对未知字段宽容（不加 deny_unknown_fields）。
 
 use crate::error::{Context, Error, Result};
-use crate::paths::AppRoot;
+use crate::paths::{is_safe_component, AppRoot};
 use serde::Deserialize;
 use std::path::{Component, Path, PathBuf};
 
@@ -33,13 +33,6 @@ pub struct Entry {
     pub transcode: Option<String>,
 }
 
-/// 安装成功后写入的标记文件（Remotion 的 chrome-headless-shell/VERSION）。
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct Marker {
-    pub path: String,
-    pub content: String,
-}
-
 /// 清单中的一项。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Item {
@@ -64,8 +57,10 @@ pub struct Item {
     /// 只取压缩包里的这些文件，而不是整体解包
     #[serde(default)]
     pub entries: Vec<Entry>,
+    /// 安装后的可执行文件路径（相对 AppRoot，必须在 dest 之内）；装完设可执行位，
+    /// Task 3 用它得到 Chrome 路径
     #[serde(default)]
-    pub marker: Option<Marker>,
+    pub exec: Option<String>,
     /// 按优先级排列的镜像地址
     pub urls: Vec<String>,
 }
@@ -118,8 +113,15 @@ impl Manifest {
             for e in &item.entries {
                 rel_path(&item.id, &e.dest, &self.version)?;
             }
-            if let Some(m) = &item.marker {
-                rel_path(&item.id, &m.path, &self.version)?;
+            if let Some(exec) = &item.exec {
+                let exec_rel = rel_path(&item.id, exec, &self.version)?;
+                let dest_rel = rel_path(&item.id, &item.dest, &self.version)?;
+                if exec_rel == dest_rel || !exec_rel.starts_with(&dest_rel) {
+                    return Err(Error::new(format!(
+                        "清单项 {} 的 exec 必须在 dest 目录之内",
+                        item.id
+                    )));
+                }
             }
         }
         Ok(())
@@ -153,10 +155,10 @@ impl Item {
         resolve_rel(root, &self.id, &self.dest, version)
     }
 
-    pub fn resolve_marker(&self, root: &AppRoot, version: &str) -> Result<Option<PathBuf>> {
-        self.marker
+    pub fn resolve_exec(&self, root: &AppRoot, version: &str) -> Result<Option<PathBuf>> {
+        self.exec
             .as_ref()
-            .map(|m| resolve_rel(root, &self.id, &m.path, version))
+            .map(|e| resolve_rel(root, &self.id, e, version))
             .transpose()
     }
 
@@ -175,14 +177,14 @@ impl Item {
         self.unpack.is_some()
     }
 
-    /// 该项会写入的全部路径（dest、entries、marker）。
+    /// 该项会写入的全部路径（dest、entries、exec）。
     pub fn footprint(&self, root: &AppRoot, version: &str) -> Result<Vec<PathBuf>> {
         let mut paths = vec![self.resolve_dest(root, version)?];
         for e in &self.entries {
             paths.push(self.resolve_entry(root, e, version)?);
         }
-        if let Some(m) = self.resolve_marker(root, version)? {
-            paths.push(m);
+        if let Some(e) = self.resolve_exec(root, version)? {
+            paths.push(e);
         }
         Ok(paths)
     }
@@ -215,7 +217,7 @@ fn rel_path(id: &str, raw: &str, version: &str) -> Result<PathBuf> {
     let mut path = PathBuf::new();
     for comp in Path::new(&expanded).components() {
         match comp {
-            Component::Normal(c) => path.push(c),
+            Component::Normal(c) if is_safe_component(c) => path.push(c),
             Component::CurDir => {}
             _ => return Err(Error::new(format!("清单项 {id} 的路径不合法：{raw}"))),
         }

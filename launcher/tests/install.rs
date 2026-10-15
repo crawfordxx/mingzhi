@@ -220,7 +220,7 @@ fn 某项失败时返回带项名的错误() {
 
 // ---- 以下为审查后补的用例 ----
 
-use mingzhi_launcher::manifest::{Entry, Item, Marker};
+use mingzhi_launcher::manifest::{Entry, Item};
 
 fn zip_bytes(files: &[(&str, &[u8])]) -> Vec<u8> {
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
@@ -247,7 +247,7 @@ fn new_root() -> (tempfile::TempDir, AppRoot) {
     (tmp, root)
 }
 
-/// app（整体替换型）+ 嵌套在 app 目录里的 chrome（带 marker）。chrome 故意排在 app 前面。
+/// app（整体替换型）+ 嵌套在 app 目录里的 chrome（带 exec）。chrome 故意排在 app 前面。
 fn nested_manifest(server: &TestServer, app_files: &[(&str, &[u8])]) -> Manifest {
     let app = zip_bytes(app_files);
     let chrome = zip_bytes(&[
@@ -257,10 +257,10 @@ fn nested_manifest(server: &TestServer, app_files: &[(&str, &[u8])]) -> Manifest
     server.route("/app.zip", vec![Behavior::Serve(app.clone())]);
     server.route("/chrome.zip", vec![Behavior::Serve(chrome.clone())]);
     let chrome_item = Item {
-        marker: Some(Marker {
-            path: "{app}/node_modules/.remotion/chrome-headless-shell/VERSION".into(),
-            content: "149.0.7790.0".into(),
-        }),
+        exec: Some(
+            "{app}/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell"
+                .into(),
+        ),
         ..archive_item(
             "chrome",
             &chrome,
@@ -292,10 +292,15 @@ fn assert_nested_ok(root: &AppRoot) {
         fs::read(chrome.join("mac-arm64/chrome-headless-shell")).unwrap(),
         b"CHROME"
     );
-    assert_eq!(
-        fs::read_to_string(chrome.join("VERSION")).unwrap(),
-        "149.0.7790.0"
-    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(chrome.join("mac-arm64/chrome-headless-shell"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o111, 0o111, "exec 指向的文件要有可执行位");
+    }
 }
 
 #[test]
@@ -345,19 +350,17 @@ fn assert_nested_ok_after_replace(root: &AppRoot) {
         .app()
         .join("2.0.0/node_modules/.remotion/chrome-headless-shell");
     assert!(chrome.join("mac-arm64/chrome-headless-shell").is_file());
-    assert!(chrome.join("VERSION").is_file());
 }
 
 #[test]
-fn marker被删后重新安装该项() {
+fn exec文件被删后重新安装该项() {
     let server = TestServer::start();
     let manifest = nested_manifest(&server, &[("src/index.js", b"v1")]);
     let (_tmp, root) = new_root();
     sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
-    fs::remove_file(
-        root.app()
-            .join("2.0.0/node_modules/.remotion/chrome-headless-shell/VERSION"),
-    )
+    fs::remove_file(root.app().join(
+        "2.0.0/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell",
+    ))
     .unwrap();
 
     let report = sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
@@ -523,9 +526,93 @@ fn 启动时清理上次崩溃遗留的临时目录() {
     fs::create_dir_all(fx.root.app().join(".1.2.3.unpack-99999")).unwrap();
     fs::create_dir_all(fx.root.data().join("models")).unwrap();
     fs::create_dir_all(fx.root.data().join("models/.model.bin.tmp-99999")).unwrap();
+    // 另一个实例刚创建的临时目录（新）不能被误删
+    fs::create_dir_all(fx.root.app().join(".1.2.3.unpack-88888")).unwrap();
+    for stale in [
+        fx.root.app().join(".1.2.3.unpack-99999"),
+        fx.root.data().join("models/.model.bin.tmp-99999"),
+    ] {
+        let old = std::time::SystemTime::now() - Duration::from_secs(2 * 3600);
+        fs::File::open(&stale).unwrap().set_modified(old).unwrap();
+    }
 
     sync(&fx.root, &fx.manifest, PLATFORM, &downloader()).unwrap();
 
     assert!(!fx.root.app().join(".1.2.3.unpack-99999").exists());
     assert!(!fx.root.data().join("models/.model.bin.tmp-99999").exists());
+    assert!(
+        fx.root.app().join(".1.2.3.unpack-88888").exists(),
+        "不到 1 小时的不清理"
+    );
+}
+
+#[test]
+fn entries项的输出不在dest目录内时二次运行也能跳过() {
+    let server = TestServer::start();
+    let zip = zip_bytes(&[("a.ttf", b"FONT")]);
+    server.route("/f.zip", vec![Behavior::Serve(zip.clone())]);
+    let it = Item {
+        entries: vec![Entry {
+            entry: "a.ttf".into(),
+            dest: "data/assets/fonts/a.ttf".into(),
+            transcode: None,
+        }],
+        ..archive_item(
+            "font",
+            &zip,
+            "data/assets/unused-dir",
+            UnpackKind::Zip,
+            0,
+            vec![server.url("/f.zip")],
+        )
+    };
+    let manifest = Manifest {
+        version: "1.0.0".into(),
+        items: vec![it],
+    };
+    let (_tmp, root) = new_root();
+
+    sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    let before = server.total_requests();
+    let second = sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    assert_eq!(second.skipped, vec!["font"]);
+    assert_eq!(server.total_requests(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn zip里丢了权限位时exec仍被设为可执行() {
+    let server = TestServer::start();
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    // 不写 unix_permissions：模拟外部属性丢失
+    w.start_file("bin/chrome", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    w.write_all(b"CHROME").unwrap();
+    let zip = w.finish().unwrap().into_inner();
+    server.route("/c.zip", vec![Behavior::Serve(zip.clone())]);
+    let it = Item {
+        exec: Some("runtime/chrome/bin/chrome".into()),
+        kind: "chrome".into(),
+        ..archive_item(
+            "chrome",
+            &zip,
+            "runtime/chrome",
+            UnpackKind::Zip,
+            0,
+            vec![server.url("/c.zip")],
+        )
+    };
+    let manifest = Manifest {
+        version: "1.0.0".into(),
+        items: vec![it],
+    };
+    let (_tmp, root) = new_root();
+    sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(root.root().join("runtime/chrome/bin/chrome"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o111, 0o111);
 }

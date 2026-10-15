@@ -2,7 +2,10 @@
 
 use mingzhi_launcher::error::Result;
 use mingzhi_launcher::manifest::UnpackKind;
-use mingzhi_launcher::unpack::{cleanup_stale, unpack as unpack_with_limit};
+use mingzhi_launcher::unpack::{
+    cleanup_stale, cleanup_stale_older_than, unpack as unpack_with_limit, unpack_with_budget,
+    Budget,
+};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -433,7 +436,13 @@ fn 清理崩溃遗留的临时目录() {
     let own = format!(".node.unpack-{}", std::process::id());
     fs::create_dir_all(tmp.path().join(&own)).unwrap();
 
+    // 刚创建的（不到 1 小时）一律不动
     cleanup_stale(tmp.path());
+    for name in stale {
+        assert!(tmp.path().join(name).exists(), "{name} 太新，不应清理");
+    }
+
+    cleanup_stale_older_than(tmp.path(), std::time::Duration::ZERO);
 
     for name in stale {
         assert!(!tmp.path().join(name).exists(), "{name} 应被清理");
@@ -477,4 +486,178 @@ fn 占用类错误按退避重试_耗尽后给中文提示() {
         Err(io::Error::from(io::ErrorKind::NotFound))
     });
     assert_eq!(calls, 1);
+}
+
+/// 构造「ustar 头里 size=0，PAX 扩展头里 size=N」的条目，后面跟 N 字节数据。
+fn pax_size_tar(pax_size: usize) -> Vec<u8> {
+    let mut b = tar::Builder::new(Vec::new());
+    b.append_pax_extensions([("size", pax_size.to_string().as_bytes())])
+        .unwrap();
+    let mut h = tar::Header::new_ustar();
+    h.set_path("big.bin").unwrap();
+    h.set_size(0);
+    h.set_mode(0o644);
+    h.set_entry_type(tar::EntryType::Regular);
+    h.set_cksum();
+    b.append(&h, std::io::empty()).unwrap();
+    let padded = pax_size.div_ceil(512) * 512;
+    b.get_mut().extend(vec![0u8; padded]);
+    b.finish().unwrap();
+    b.into_inner().unwrap()
+}
+
+#[test]
+fn tar的pax_size也按实际写入字节计费() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = write_archive(
+        tmp.path(),
+        "pax.tar.gz",
+        &gz(&pax_size_tar(3 * 1024 * 1024)),
+    );
+
+    // 上限 1MB：必须被拦住，且不留残骸
+    let err = unpack_with_limit(
+        &archive,
+        UnpackKind::TarGz,
+        0,
+        &tmp.path().join("w/pkg"),
+        1024 * 1024,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("异常"), "{err}");
+    assert!(fs::read_dir(tmp.path().join("w")).unwrap().next().is_none());
+
+    // 上限足够时正常解出 3MB
+    unpack_with_limit(
+        &archive,
+        UnpackKind::TarGz,
+        0,
+        &tmp.path().join("ok"),
+        4 * 1024 * 1024,
+    )
+    .unwrap();
+    assert_eq!(
+        fs::metadata(tmp.path().join("ok/big.bin")).unwrap().len(),
+        3 * 1024 * 1024
+    );
+}
+
+#[test]
+fn 路径组件的windows变体在压缩包里被拒() {
+    let tmp = tempfile::tempdir().unwrap();
+    for (i, name) in [
+        "a:b",
+        "dir/file:stream",
+        "x.",
+        ".. /evil.txt",
+        "NUL",
+        "dir/aux.txt",
+        "COM1",
+        "a<b",
+        "a?b",
+        "a\u{1}b",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let tar = write_archive(
+            tmp.path(),
+            &format!("t{i}.tar.gz"),
+            &gz(&raw_tar_entry(name, b"x")),
+        );
+        let dest = tmp.path().join(format!("t{i}"));
+        let err = unpack(&tar, UnpackKind::TarGz, 0, &dest).unwrap_err();
+        assert!(err.to_string().contains("不安全"), "{name:?}: {err}");
+        assert!(!dest.exists());
+
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        w.start_file(*name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        w.write_all(b"x").unwrap();
+        let z = write_archive(
+            tmp.path(),
+            &format!("z{i}.zip"),
+            &w.finish().unwrap().into_inner(),
+        );
+        assert!(
+            unpack(&z, UnpackKind::Zip, 0, &tmp.path().join(format!("z{i}"))).is_err(),
+            "zip {name:?}"
+        );
+    }
+}
+
+#[test]
+fn 条目数超过上限被拒() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bytes = tar_with(|b| {
+        for i in 0..5 {
+            add_file(b, &format!("f{i}.txt"), b"x");
+        }
+    });
+    let archive = write_archive(tmp.path(), "many.tar.gz", &bytes);
+    let err = unpack_with_budget(
+        &archive,
+        UnpackKind::TarGz,
+        0,
+        &tmp.path().join("pkg"),
+        Budget::new(LIMIT).with_max_entries(3),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("条目过多"), "{err}");
+
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for i in 0..5 {
+        w.start_file(format!("f{i}"), zip::write::SimpleFileOptions::default())
+            .unwrap();
+    }
+    let z = write_archive(tmp.path(), "many.zip", &w.finish().unwrap().into_inner());
+    assert!(unpack_with_budget(
+        &z,
+        UnpackKind::Zip,
+        0,
+        &tmp.path().join("z"),
+        Budget::new(LIMIT).with_max_entries(3)
+    )
+    .is_err());
+}
+
+#[test]
+fn tar里不支持的条目类型明确报错而不是丢掉() {
+    let tmp = tempfile::tempdir().unwrap();
+    for ty in [
+        tar::EntryType::Fifo,
+        tar::EntryType::Char,
+        tar::EntryType::GNUSparse,
+    ] {
+        let bytes = tar_with(|b| {
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(ty);
+            h.set_size(0);
+            h.set_mode(0o644);
+            h.set_cksum();
+            b.append_data(&mut h, "weird", std::io::empty()).unwrap();
+        });
+        let archive = write_archive(tmp.path(), "weird.tar.gz", &bytes);
+        let err = unpack(&archive, UnpackKind::TarGz, 0, &tmp.path().join("pkg")).unwrap_err();
+        // 稀疏头本身不合法时 tar 库在读取阶段就报错，同样是明确失败
+        if ty != tar::EntryType::GNUSparse {
+            assert!(err.to_string().contains("不支持"), "{ty:?}: {err}");
+        }
+    }
+}
+
+#[test]
+fn tar_continuous条目按普通文件解出() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bytes = tar_with(|b| {
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::Continuous);
+        h.set_size(2);
+        h.set_mode(0o644);
+        h.set_cksum();
+        b.append_data(&mut h, "c.txt", &b"ok"[..]).unwrap();
+    });
+    let archive = write_archive(tmp.path(), "c.tar.gz", &bytes);
+    unpack(&archive, UnpackKind::TarGz, 0, &tmp.path().join("pkg")).unwrap();
+    assert_eq!(fs::read(tmp.path().join("pkg/c.txt")).unwrap(), b"ok");
 }

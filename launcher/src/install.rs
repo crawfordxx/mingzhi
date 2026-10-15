@@ -11,7 +11,7 @@ use crate::fsx;
 use crate::hash::sha256_file;
 use crate::manifest::{Item, Manifest, UnpackKind};
 use crate::paths::AppRoot;
-use crate::single::{extract_entry, set_executable, unpack_gz, write_marker};
+use crate::single::{extract_entry, set_executable, unpack_gz};
 use crate::state::{Check, State};
 use crate::unpack::{cleanup_stale, unpack};
 use std::collections::HashSet;
@@ -38,7 +38,7 @@ pub struct SyncReport {
 struct Job<'a> {
     item: &'a Item,
     dest: PathBuf,
-    /// dest、entries、marker 全部会写入的路径
+    /// dest、entries、exec 全部会写入的路径
     footprint: Vec<PathBuf>,
 }
 
@@ -47,7 +47,7 @@ impl Job<'_> {
     fn nested_in(&self, outer: &Path) -> bool {
         self.footprint
             .iter()
-            .any(|p| p != outer && p.starts_with(outer))
+            .any(|p| !same_path(p, outer) && starts_with_path(p, outer))
     }
 
     fn needs_ffmpeg(&self) -> bool {
@@ -55,7 +55,24 @@ impl Job<'_> {
     }
 }
 
-/// 清单项处于「已装」状态时，entries 与 marker 输出也必须都在。
+/// Windows 文件系统默认大小写不敏感，路径比较时统一转小写；其它平台按原样。
+fn fold(p: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(p.to_string_lossy().to_lowercase())
+    } else {
+        p.to_path_buf()
+    }
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    fold(a) == fold(b)
+}
+
+fn starts_with_path(p: &Path, base: &Path) -> bool {
+    fold(p).starts_with(fold(base))
+}
+
+/// 清单项处于「已装」状态时，entries 与 exec 输出也必须都在。
 fn outputs_present(job: &Job) -> bool {
     job.footprint.iter().skip(1).all(|p| p.exists())
 }
@@ -154,7 +171,7 @@ pub fn sync(
                 .filter(|&i| {
                     i != j
                         && ((jobs[i].item.replaces_dir() && jobs[j].nested_in(&jobs[i].dest))
-                            || (jobs[j].needs_ffmpeg() && jobs[i].dest == ffmpeg))
+                            || (jobs[j].needs_ffmpeg() && same_path(&jobs[i].dest, &ffmpeg)))
                 })
                 .collect()
         })
@@ -323,8 +340,8 @@ fn place(root: &AppRoot, version: &str, ffmpeg: &Path, job: &Job, part: &Path) -
     if item.executable && item.entries.is_empty() {
         set_executable(&job.dest)?;
     }
-    if let (Some(marker), Some(path)) = (&item.marker, item.resolve_marker(root, version)?) {
-        write_marker(&path, &marker.content)?;
+    if let Some(exec) = item.resolve_exec(root, version)? {
+        set_executable(&exec)?;
     }
     Ok(())
 }

@@ -90,3 +90,27 @@ impl AppRoot {
         Ok(())
     }
 }
+
+/// Windows 保留设备名（不含扩展名部分，大小写不敏感）。
+const DEVICE_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// 压缩包 / 清单里的单个路径组件是否安全（两个平台统一按 Windows 的严格规则）：
+/// 拒绝含 `: < > " | ? *` 与控制字符、以点或空格结尾、Windows 设备名（含带扩展名形式）。
+/// 这样既挡住 NTFS 备用数据流、结尾点/空格被规范化等绕过手法，也避免写进设备。
+pub fn is_safe_component(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy();
+    if name
+        .chars()
+        .any(|c| c.is_control() || ":<>\"|?*".contains(c))
+    {
+        return false;
+    }
+    if name.ends_with('.') || name.ends_with(' ') {
+        return false;
+    }
+    let stem = name.split('.').next().unwrap_or("").trim_end();
+    !DEVICE_NAMES.iter().any(|d| stem.eq_ignore_ascii_case(d))
+}

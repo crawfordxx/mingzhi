@@ -12,6 +12,7 @@
 use crate::error::{Context, Error, Result};
 use crate::fsx;
 use crate::manifest::UnpackKind;
+use crate::paths::is_safe_component;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -24,6 +25,17 @@ pub fn unpack(
     strip: usize,
     dest: &Path,
     max_bytes: u64,
+) -> Result<()> {
+    unpack_with_budget(archive, kind, strip, dest, Budget::new(max_bytes))
+}
+
+/// 同 `unpack`，预算（字节数、条目数上限）由调用方构造。
+pub fn unpack_with_budget(
+    archive: &Path,
+    kind: UnpackKind,
+    strip: usize,
+    dest: &Path,
+    budget: Budget,
 ) -> Result<()> {
     let parent = dest
         .parent()
@@ -39,7 +51,7 @@ pub fn unpack(
     fsx::remove_dir_all(&tmp)?;
     fs::create_dir_all(&tmp).ctx(format!("创建临时目录 {} 失败", tmp.display()))?;
 
-    let result = extract(archive, kind, strip, &tmp, Budget::new(max_bytes))
+    let result = extract(archive, kind, strip, &tmp, budget)
         .and_then(|()| swap_into_place(&tmp, dest, parent, &name, pid));
     if result.is_err() {
         let _ = fs::remove_dir_all(&tmp);
@@ -50,11 +62,21 @@ pub fn unpack(
 /// 解压字节预算。
 pub struct Budget {
     left: u64,
+    max_entries: usize,
 }
 
 impl Budget {
     pub fn new(max: u64) -> Self {
-        Self { left: max }
+        Self {
+            left: max,
+            max_entries: MAX_ENTRIES,
+        }
+    }
+
+    /// 调整条目数上限（测试用）。
+    pub fn with_max_entries(mut self, n: usize) -> Self {
+        self.max_entries = n;
+        self
     }
 
     pub fn spend(&mut self, n: u64) -> Result<()> {
@@ -112,21 +134,36 @@ fn swap_into_place(tmp: &Path, dest: &Path, parent: &Path, name: &str, pid: u32)
     Ok(())
 }
 
-/// 清理 `dir` 下以前崩溃遗留的临时目录/文件（`.xxx.unpack-<pid>`、`.xxx.old-<pid>`、`.xxx.tmp-<pid>`），
-/// 跳过本进程自己的。
+/// 临时目录/文件超过这个时长没动过，才认为是崩溃遗留
+const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// 清理 `dir` 下崩溃遗留的临时目录/文件（`.xxx.unpack-<pid>`、`.xxx.old-<pid>`、`.xxx.tmp-<pid>`）。
+/// 只删超过 1 小时没修改的，并跳过本进程自己的，避免误伤另一个正在安装的启动器实例。
 pub fn cleanup_stale(dir: &Path) {
+    cleanup_stale_older_than(dir, STALE_AFTER);
+}
+
+/// 同 `cleanup_stale`，可指定最短陈旧时长（测试用）。
+pub fn cleanup_stale_older_than(dir: &Path, age: std::time::Duration) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     let own = format!("-{}", std::process::id());
+    let now = std::time::SystemTime::now();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let stale = name.starts_with('.')
+        let stale_name = name.starts_with('.')
             && [".unpack-", ".old-", ".tmp-"]
                 .iter()
                 .any(|m| name.contains(m))
             && !name.ends_with(&own);
-        if stale {
+        let old_enough = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|d| d >= age);
+        if stale_name && old_enough {
             let path = entry.path();
             let _ = if path.is_dir() {
                 fsx::remove_dir_all(&path)
@@ -143,7 +180,7 @@ pub fn safe_rel_path(raw: &Path, strip: usize) -> Result<Option<PathBuf>> {
     let mut parts = Vec::new();
     for comp in raw.components() {
         match comp {
-            Component::Normal(c) => parts.push(c),
+            Component::Normal(c) if is_safe_component(c) => parts.push(c),
             Component::CurDir => {}
             _ => {
                 return Err(Error::new(format!(
@@ -245,58 +282,101 @@ fn make_symlink(_target: &Path, _link: &Path) -> Result<()> {
     Ok(())
 }
 
+/// 压缩包条目数上限，防止用海量空文件/目录耗尽 inode
+const MAX_ENTRIES: usize = 500_000;
+
 fn extract_tar<R: Read>(reader: R, strip: usize, out: &Path, mut budget: Budget) -> Result<()> {
+    use tar::EntryType;
     let mut archive = tar::Archive::new(reader);
     archive.set_preserve_permissions(true);
     let entries = archive.entries().ctx("读取 tar 条目失败")?;
-    for entry in entries {
+    for (count, entry) in entries.enumerate() {
+        if count >= budget.max_entries {
+            return Err(Error::new("压缩包条目过多，已停止安装"));
+        }
         let mut entry = entry.ctx("读取 tar 条目失败")?;
         let raw = entry.path().ctx("读取条目路径失败")?.into_owned();
+        let kind = entry.header().entry_type();
+        if matches!(kind, EntryType::XGlobalHeader) {
+            continue; // pax 全局头不对应任何文件
+        }
         let Some(rel) = safe_rel_path(&raw, strip)? else {
             continue;
         };
-        let kind = entry.header().entry_type();
 
-        if kind.is_dir() {
-            ensure_no_symlink_ancestors(out, &rel)?;
-            fs::create_dir_all(out.join(&rel)).ctx(format!("创建目录 {} 失败", rel.display()))?;
-        } else if kind.is_file() {
-            budget.spend(entry.header().size().ctx("读取条目大小失败")?)?;
-            let target = prepare_file(out, &rel)?;
-            entry
-                .unpack(&target)
-                .ctx(format!("写入 {} 失败", rel.display()))?;
-        } else if kind.is_symlink() {
-            let link = entry.link_name().ctx("读取链接目标失败")?;
-            let link = link
-                .ok_or_else(|| Error::new(format!("符号链接缺少目标：{}", rel.display())))?
-                .into_owned();
-            check_symlink_target(&rel, &link)?;
-            let target = prepare_file(out, &rel)?;
-            make_symlink(&link, &target)?;
-        } else if kind.is_hard_link() {
-            let link = entry.link_name().ctx("读取链接目标失败")?;
-            let link = link
-                .ok_or_else(|| Error::new(format!("硬链接缺少目标：{}", rel.display())))?
-                .into_owned();
-            let Some(src_rel) = safe_rel_path(&link, strip)? else {
-                continue;
-            };
-            ensure_no_symlink_ancestors(out, &src_rel)?;
-            let src = out.join(&src_rel);
-            if is_symlink(&src) {
-                return Err(Error::new(format!("硬链接指向符号链接：{}", rel.display())));
+        match kind {
+            EntryType::Directory => {
+                ensure_no_symlink_ancestors(out, &rel)?;
+                fs::create_dir_all(out.join(&rel))
+                    .ctx(format!("创建目录 {} 失败", rel.display()))?;
             }
-            let target = prepare_file(out, &rel)?;
-            fs::hard_link(&src, &target).ctx(format!("创建硬链接 {} 失败", rel.display()))?;
+            EntryType::Regular | EntryType::Continuous => {
+                let target = prepare_file(out, &rel)?;
+                let mode = entry.header().mode().unwrap_or(0o644);
+                let mut dst = File::create(&target).ctx(format!("创建 {} 失败", rel.display()))?;
+                // 按实际写入字节计费，不信任头部（含 PAX）声明的大小
+                budget
+                    .copy(&mut entry, &mut dst)
+                    .map_err(|e| Error::new(format!("写入 {} 失败（{e}）", rel.display())))?;
+                drop(dst);
+                set_file_mode(&target, mode)?;
+            }
+            EntryType::Symlink => {
+                let link = entry.link_name().ctx("读取链接目标失败")?;
+                let link = link
+                    .ok_or_else(|| Error::new(format!("符号链接缺少目标：{}", rel.display())))?
+                    .into_owned();
+                check_symlink_target(&rel, &link)?;
+                let target = prepare_file(out, &rel)?;
+                make_symlink(&link, &target)?;
+            }
+            EntryType::Link => {
+                let link = entry.link_name().ctx("读取链接目标失败")?;
+                let link = link
+                    .ok_or_else(|| Error::new(format!("硬链接缺少目标：{}", rel.display())))?
+                    .into_owned();
+                let Some(src_rel) = safe_rel_path(&link, strip)? else {
+                    continue;
+                };
+                ensure_no_symlink_ancestors(out, &src_rel)?;
+                let src = out.join(&src_rel);
+                if is_symlink(&src) {
+                    return Err(Error::new(format!("硬链接指向符号链接：{}", rel.display())));
+                }
+                let target = prepare_file(out, &rel)?;
+                fs::hard_link(&src, &target).ctx(format!("创建硬链接 {} 失败", rel.display()))?;
+            }
+            // 稀疏文件、设备文件等：不能悄悄丢掉，明确报错
+            other => {
+                return Err(Error::new(format!(
+                    "压缩包含有不支持的条目类型 {:?}：{}",
+                    other,
+                    rel.display()
+                )))
+            }
         }
-        // 其余类型（pax 头、设备文件等）无需落盘，忽略
     }
+    Ok(())
+}
+
+/// 保留权限位（取低 9 位，去掉 setuid 等）；Windows 无此概念。
+fn set_file_mode(path: &Path, mode: u32) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o777))
+            .ctx(format!("设置权限 {} 失败", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    let _ = (path, mode);
     Ok(())
 }
 
 fn extract_zip(file: File, strip: usize, out: &Path, mut budget: Budget) -> Result<()> {
     let mut archive = zip::ZipArchive::new(file).ctx("读取 zip 失败")?;
+    if archive.len() > budget.max_entries {
+        return Err(Error::new("压缩包条目过多，已停止安装"));
+    }
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).ctx("读取 zip 条目失败")?;
         // 部分 Windows 工具会写反斜杠路径
@@ -321,12 +401,9 @@ fn extract_zip(file: File, strip: usize, out: &Path, mut budget: Budget) -> Resu
             let mut dst = File::create(&target).ctx(format!("创建 {} 失败", rel.display()))?;
             budget.copy(&mut entry, &mut dst)?;
             drop(dst);
-            #[cfg(unix)]
             if let Some(m) = mode {
-                use std::os::unix::fs::PermissionsExt;
                 // 保留可执行位（chrome-headless-shell 等需要）
-                fs::set_permissions(&target, fs::Permissions::from_mode(m & 0o777))
-                    .ctx(format!("设置权限 {} 失败", rel.display()))?;
+                set_file_mode(&target, m)?;
             }
         }
     }

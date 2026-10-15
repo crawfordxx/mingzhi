@@ -252,7 +252,7 @@ fn 解析task1清单新字段_未知字段不致失败() {
          "dest":"data/bin/ffmpeg","unpack":"gz","executable":true,"urls":["https://a/f.gz"],"license":"GPL","newField":{"x":1}},
         {"id":"chrome","kind":"chrome","platform":"darwin-arm64","sha256":"bb","size":10,
          "dest":"{app}/node_modules/.remotion/chrome-headless-shell/mac-arm64","unpack":"zip",
-         "marker":{"path":"{app}/node_modules/.remotion/chrome-headless-shell/VERSION","content":"149.0.7790.0"},
+         "exec":"{app}/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell",
          "urls":["https://a/c.zip"]},
         {"id":"music-a","kind":"asset","platform":"any","sha256":"cc","size":10,"dest":"data/assets/music","unpack":"zip",
          "entries":[{"entry":"a/b.wav","dest":"data/assets/music/b.mp3","transcode":"mp3"}],"urls":["https://a/m.zip"]}
@@ -261,27 +261,33 @@ fn 解析task1清单新字段_未知字段不致失败() {
     let m = Manifest::parse(json).unwrap();
     assert_eq!(m.items[0].unpack, Some(UnpackKind::Gz));
     assert!(m.items[0].executable);
-    assert_eq!(m.items[1].marker.as_ref().unwrap().content, "149.0.7790.0");
+    assert!(m.items[1].exec.is_some());
     assert_eq!(m.items[2].entries[0].transcode.as_deref(), Some("mp3"));
 
     let root = AppRoot::new("/r");
-    let marker = m.items[1].resolve_marker(&root, "0.3.0").unwrap().unwrap();
+    let exec = m.items[1].resolve_exec(&root, "0.3.0").unwrap().unwrap();
     assert_eq!(
-        marker,
-        PathBuf::from("/r/app/0.3.0/node_modules/.remotion/chrome-headless-shell/VERSION")
+        exec,
+        PathBuf::from(
+            "/r/app/0.3.0/node_modules/.remotion/chrome-headless-shell/mac-arm64/chrome-headless-shell"
+        )
     );
     assert!(m.items[1].replaces_dir() && !m.items[0].replaces_dir() && !m.items[2].replaces_dir());
 }
 
 #[test]
-fn entries与marker路径同样校验() {
+fn entries与exec路径同样校验() {
     let base = |extra: &str| {
         format!(
             r#"{{"version":"1","items":[{{"id":"a","platform":"any","sha256":"x","size":1,"dest":"d","unpack":"zip",{extra},"urls":["u"]}}]}}"#
         )
     };
     assert!(Manifest::parse(&base(r#""entries":[{"entry":"e","dest":"../x"}]"#)).is_err());
-    assert!(Manifest::parse(&base(r#""marker":{"path":"/abs","content":""}"#)).is_err());
+    assert!(Manifest::parse(&base(r#""exec":"/abs""#)).is_err());
+    // exec 必须在 dest 目录之内
+    assert!(Manifest::parse(&base(r#""exec":"other/chrome""#)).is_err());
+    assert!(Manifest::parse(&base(r#""exec":"d""#)).is_err());
+    assert!(Manifest::parse(&base(r#""exec":"d/bin/chrome""#)).is_ok());
     assert!(Manifest::parse(&base(r#""entries":[{"entry":"e","dest":"ok/x"}]"#)).is_ok());
     // entries 只能配 zip
     let tar = r#"{"version":"1","items":[{"id":"a","platform":"any","sha256":"x","size":1,"dest":"d","unpack":"tar.gz","entries":[{"entry":"e","dest":"x"}],"urls":["u"]}]}"#;
@@ -324,4 +330,75 @@ fn 凭据脱敏() {
     );
     assert_eq!(redact("https://example.com/a@b"), "https://example.com/a@b");
     assert_eq!(redact("没有链接"), "没有链接");
+}
+
+#[test]
+fn 路径组件的windows变体被统一拒绝() {
+    use mingzhi_launcher::paths::is_safe_component;
+    use std::ffi::OsStr;
+    for bad in [
+        "a:b",
+        "C:",
+        "file:stream",
+        "dir::$INDEX_ALLOCATION",
+        "x.",
+        "x ",
+        ".. ",
+        "...",
+        "CON",
+        "con",
+        "Nul",
+        "AUX",
+        "PRN",
+        "COM1",
+        "com9",
+        "LPT1",
+        "lpt9",
+        "nul.txt",
+        "CON.tar.gz",
+        "aux .txt",
+        "a<b",
+        "a>b",
+        "a\"b",
+        "a|b",
+        "a?b",
+        "a*b",
+        "a\u{1}b",
+        "a\nb",
+        "a\u{7f}b",
+    ] {
+        assert!(!is_safe_component(OsStr::new(bad)), "{bad:?} 应被拒绝");
+    }
+    for good in [
+        "node",
+        "console.log",
+        "com10",
+        "COM0",
+        "lpt",
+        "con2.txt",
+        "a b",
+        ".hidden",
+        "x.y.z",
+        "文件",
+        "a-b_c+d@e",
+        "chrome-headless-shell.exe",
+    ] {
+        assert!(is_safe_component(OsStr::new(good)), "{good:?} 应放行");
+    }
+}
+
+#[test]
+fn 清单路径同样拒绝windows变体() {
+    let base = |dest: &str| {
+        format!(
+            r#"{{"version":"1","items":[{{"id":"a","platform":"any","sha256":"x","size":1,"dest":"{dest}","urls":["u"]}}]}}"#
+        )
+    };
+    for bad in ["data/nul", "data/a:b", "data/x.", "C:/x", "data/a*b"] {
+        assert!(Manifest::parse(&base(bad)).is_err(), "{bad}");
+    }
+    assert!(Manifest::parse(&base("data/models/silero_vad.onnx")).is_ok());
+    // 版本号里的 + - . 合法
+    let m = Manifest::parse(r#"{"version":"1.0.0-beta.1+build5","items":[]}"#).unwrap();
+    assert_eq!(m.version, "1.0.0-beta.1+build5");
 }

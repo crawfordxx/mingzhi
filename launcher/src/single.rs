@@ -116,10 +116,3 @@ pub fn set_executable(path: &Path) -> Result<()> {
     let _ = path;
     Ok(())
 }
-
-/// 写标记文件（内容覆盖）。
-pub fn write_marker(path: &Path, content: &str) -> Result<()> {
-    write_atomic(path, |tmp| {
-        fs::write(tmp, content).ctx(format!("写入 {} 失败", tmp.display()))
-    })
-}

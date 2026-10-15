@@ -80,13 +80,23 @@ impl State {
 
     /// 快速判定：不读文件内容。
     pub fn check(&self, item: &Item, dest: &Path) -> Check {
-        let Ok(meta) = fs::metadata(dest) else {
-            return Check::Missing;
-        };
         let record_matches = self
             .installed
             .get(&item.id)
             .filter(|rec| rec.sha256.eq_ignore_ascii_case(&item.sha256));
+
+        // 取 entry 的项：各输出文件的位置由 entries 决定，dest 目录不一定存在，
+        // 输出是否齐全由调用方检查
+        if !item.entries.is_empty() {
+            return if record_matches.is_some() {
+                Check::UpToDate
+            } else {
+                Check::Missing
+            };
+        }
+        let Ok(meta) = fs::metadata(dest) else {
+            return Check::Missing;
+        };
 
         // 解包 / gz / 取 entry 的项：dest 里的内容与下载文件的 sha 对不上，只能信记录
         if item.is_derived() {
