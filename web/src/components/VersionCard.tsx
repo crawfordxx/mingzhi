@@ -1,11 +1,12 @@
 /**
- * 版本卡（G1）：成片缩略（悬停静音预览）+「v2 (只重渲了 1 段)」+ 耗时 / 花费 / 自检（带相对上一版的升降）
- * + 预览、导出、回退到此版本。
+ * 版本卡（G1）：成片缩略（悬停静音预览）+「v2 (改了 1 段)」（和父版本逐镜头比较，首版写「首版」）
+ * + 耗时 / 花费 / 自检（带相对上一版的升降）+ 预览、导出、回退到此版本。
  */
 import { motion } from 'motion/react';
 import { useRef } from 'react';
 import { mediaUrl, type VersionMeta, type WorkEvent } from '../api';
 import { fmtDuration, yuan } from '../lib/media';
+import { changedLabel, isFirst } from '../lib/versions';
 import { Ico, It, SOFT, Tap } from '../ui';
 
 interface Props {
@@ -23,15 +24,6 @@ interface Props {
   onView: () => void;
   onExport: () => void;
   onRevert: () => void;
-}
-
-function aside(meta: VersionMeta, totalShots?: number): string {
-  if (meta.n === 1) return '(首版)';
-  if (/^回退到/.test(meta.summary)) return `(${meta.summary})`;
-  const k = meta.changedShots.length;
-  if (k === 0) return '(没有重渲画面)';
-  if (totalShots && k >= totalShots) return '(全部重渲)';
-  return `(只重渲了 ${k} 段)`;
 }
 
 const tookOf = (events: WorkEvent[]): string => {
@@ -54,14 +46,14 @@ export function VersionCard({ spaceId, thumbSec, meta, parent, totalShots, event
   const delta = meta.qaScore !== undefined && parent?.qaScore !== undefined ? meta.qaScore - parent.qaScore : undefined;
   const facts: [string, string][] = [
     [tookOf(events), '耗时'],
-    [meta.n === 1 ? yuan(meta.costYuan) : `+${yuan(meta.costYuan)}`, '花费'],
+    [isFirst(meta) ? yuan(meta.costYuan) : `+${yuan(meta.costYuan)}`, '花费'],
     [meta.qaScore !== undefined ? meta.qaScore.toFixed(1) : '—', delta ? `自检 ${delta > 0 ? '↑' : '↓'}${Math.abs(delta).toFixed(1)}` : '自检'],
   ];
   return (
     <motion.div layout className={`card ver${viewing ? ' viewing' : ''}`} transition={SOFT}>
       <Thumb spaceId={spaceId} n={meta.n} at={thumbSec} />
       <div className="ver-b">
-        <div className="vt">v{meta.n}<It l className="ver-it">{aside(meta, totalShots)}</It>
+        <div className="vt">v{meta.n}<It l className="ver-it">({changedLabel(meta, totalShots)})</It>
           {viewing && <motion.span layoutId={`now-${spaceId}`} className="now" transition={SOFT}>预览中</motion.span>}
         </div>
         <div className="facts">{facts.map(([b, s]) => <div key={s}><b>{b}</b><span className={s.startsWith('自检 ↑') ? 'up' : s.startsWith('自检 ↓') ? 'down' : ''}>{s}</span></div>)}</div>
@@ -78,7 +70,7 @@ export function VersionCard({ spaceId, thumbSec, meta, parent, totalShots, event
 /** 缩略的时刻：只改了几段时取第一处改动，否则取第一张分屏卡；都停在卡片入场之后 */
 export function thumbSecOf(meta: VersionMeta, shots?: { start: number; end: number; layout: string }[]): number {
   if (!shots?.length) return 1.2;
-  const partial = meta.n > 1 && meta.changedShots.length > 0 && meta.changedShots.length < shots.length;
+  const partial = !isFirst(meta) && meta.changedShots.length > 0 && meta.changedShots.length < shots.length;
   const shot = (partial ? shots[meta.changedShots[0]] : undefined) ?? shots.find((s) => s.layout === 'split') ?? shots[0];
   return shot.start + Math.min(1.4, (shot.end - shot.start) / 2);
 }

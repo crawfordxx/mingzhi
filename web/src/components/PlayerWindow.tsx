@@ -37,7 +37,8 @@ export function PlayerWindow({ space, options, lay, totalSec }: Props) {
   const s = space.settings;
   const cap = options.captionStyles.find((c) => c.id === s.captionStyle);
   const cover = options.coverStyles.find((c) => c.id === (s.coverStyle ?? DEFAULT_COVER));
-  const running = space.versions.at(-1)?.status === 'running';
+  const last = space.versions.at(-1);
+  const running = last?.status === 'running' ? last.n : undefined;
   return (
     <motion.div className="player" style={{ width: lay.w + 16, left: lay.left, top: lay.top }} initial={{ opacity: 0, y: 28, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ ...SOFT, delay: 0.18 }}>
       <div className="titlebar"><Lights /><span className="tt">{space.title} — 9:16</span></div>
@@ -59,7 +60,7 @@ export function PlayerWindow({ space, options, lay, totalSec }: Props) {
         <span className="ptime"><b>00:00</b> / {totalSec > 0 ? fmtDuration(totalSec) : '--:--'}</span>
         <div className="pbar" aria-hidden="true" />
       </div>
-      <div className="pmeta"><span>{backgroundLabel(space, options).name} · {cap?.name ?? s.captionStyle}{cover ? ` · ${cover.name}封面` : ''}</span><span>{running ? '正在出 v1' : '还没有成片'}</span></div>
+      <div className="pmeta"><span>{backgroundLabel(space, options).name} · {cap?.name ?? s.captionStyle}{cover ? ` · ${cover.name}封面` : ''}</span><span>{running ? `正在出 v${running}` : '还没有成片'}</span></div>
     </motion.div>
   );
 }

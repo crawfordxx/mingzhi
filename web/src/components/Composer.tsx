@@ -82,7 +82,7 @@ export function Composer({ ready, convo, clock, shots, locked, onExport }: Props
         </div>
       </div>
       <div className="foot">
-        <span className="foot-l">{ready && pausedRef ? <InsertRef r={pausedRef} onInsert={insert} /> : ready ? '点预览画面，可插入 @时间' : '对话修改会在 v1 出片后开放'}</span>
+        <span className="foot-l">{ready && pausedRef ? <InsertRef r={pausedRef} onInsert={insert} /> : ready ? '点预览画面，可插入 @时间' : '对话修改会在首版出片后开放'}</span>
         <span>本轮预估 <It l>({canSend ? '规划约 ¥0.01' : '—'})</It></span>
       </div>
       {convo.flying && <Flyer key={convo.flying.key} f={convo.flying} target={tags} onLand={convo.land} />}

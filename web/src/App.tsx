@@ -9,6 +9,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { PreviewStage } from './components/PreviewStage';
 import { SpacesRail } from './components/SpacesRail';
 import { reduceLive } from './lib/liveModel';
+import { liveVersionOf } from './lib/versions';
 import { useReplay, type Replay } from './live';
 import { useConversation } from './useConversation';
 import { useClock, usePlayback, type Clock } from './usePlayback';
@@ -73,7 +74,9 @@ export function App() {
   const { space, options } = wb;
   const runs = useRuns({ space, putSpace: wb.putSpace, notify: wb.notify });
   const clock = usePlayback();
-  const replay = useReplay(runs.eventsOf(1));
+  // 剪辑直播与重播跟随首版（首版失败重开后不一定是 v1）
+  const liveN = space ? liveVersionOf(space) : undefined;
+  const replay = useReplay(runs.eventsOf(liveN ?? 0));
   const convo = useConversation({ space, base: runs.view, busy: runs.active !== undefined, notify: wb.notify, refresh: runs.refresh });
   const runningCost = runs.active ? reduceLive(runs.eventsOf(runs.active)).cost?.total ?? 0 : 0;
   const ready = !!space?.versions.some((v) => v.status === 'done');
@@ -81,7 +84,10 @@ export function App() {
   useSpaceToggle(clock.toggle, ready && hasVideo && replay.shown === undefined);
   usePlaybackResets(clock, replay, space?.id, runs.view, runs.compare);
   const shots = runs.view ? runs.stateOf(runs.view)?.storyboard.shots : undefined;
-  const seekTo = useCallback((n: number, sec: number) => { if (runs.view !== n && n === 1) runs.setView(1); clock.seek(sec); }, [runs, clock]);
+  const seekTo = useCallback((n: number, sec: number) => {
+    if (runs.view !== n && n === liveN) runs.setView(n);
+    clock.seek(sec);
+  }, [runs, clock, liveN]);
   return (
     <MotionConfig reducedMotion="user">
       <div className="app">
@@ -90,10 +96,10 @@ export function App() {
           <SpacesRail spaces={wb.spaces} currentId={space?.id} onSelect={wb.selectSpace} onNew={wb.newSpace} />
           {space && options ? (
             <ErrorBoundary key={space.id}>
-              <ChatFlow wb={wb} space={space} options={options} runs={runs} convo={convo} replay={replay} onSeek={seekTo} runningCost={runningCost}
+              <ChatFlow wb={wb} space={space} options={options} runs={runs} convo={convo} replay={replay} onSeek={seekTo} runningCost={runningCost} liveN={liveN}
                 composer={<Composer ready={ready} convo={convo} clock={clock} shots={shots} locked={replay.shown !== undefined} onExport={() => runs.view && void runs.exportVersion(runs.view)} />} />
               <PreviewStage space={space} options={options} estimate={wb.estimate} totalSec={wb.estimate?.durationSec ?? 0} runs={runs} clock={clock} replay={replay}
-                onRef={convo.addRef} notify={wb.notify} />
+                onRef={convo.addRef} notify={wb.notify} liveN={liveN} />
             </ErrorBoundary>
           ) : <Boot error={wb.loadError} />}
         </div>

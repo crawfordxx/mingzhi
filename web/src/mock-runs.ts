@@ -4,6 +4,7 @@
  */
 import type { Api, EditOp, EventSink, Space, VersionMeta, VersionState, WorkEvent } from './api';
 import { ApiError } from './api';
+import { isFirst } from './lib/versions';
 
 type Find = { find: (id: string) => Space; replace: (next: Space) => Space };
 type Ev = Omit<WorkEvent, 'seq' | 't' | 'spaceId' | 'version'> & { at: number };
@@ -73,8 +74,9 @@ function play(hub: Hub, f: Find, id: string, meta: VersionMeta, script: Ev[]): v
     publish(hub, id, meta.n, { ...e, t: t0 + at });
     if (e.step !== 'done') return;
     const s = f.find(id);
-    const changed = meta.n === 1 ? SHOTS.map((x) => x.index) : [4];
-    f.replace({ ...s, job: null, versions: s.versions.map((v) => (v.n === meta.n ? { ...v, status: 'done', changedShots: changed, costYuan: meta.n === 1 ? 3.84 : 0.16, qaScore: meta.n === 1 ? 8.8 : 9.0 } : v)) });
+    const first = isFirst(meta);
+    const finished = { status: 'done' as const, changedShots: first ? [] : [4], costYuan: first ? 3.84 : 0.16, qaScore: first ? 8.8 : 9.0 };
+    f.replace({ ...s, job: null, versions: s.versions.map((v) => (v.n === meta.n ? { ...v, ...finished } : v)) });
   }, at));
 }
 
@@ -82,7 +84,7 @@ const STATE: VersionState = { storyboard: { shots: SHOTS.map((s) => ({ start: s.
 
 export function withRuns(base: Api, f: Find, spaces: Space[]): Api {
   const hub: Hub = { logs: new Map(), subs: new Map() };
-  spaces.forEach((s) => s.versions.forEach((v) => seedHistory(hub, s.id, v.n, v.n === 1 ? firstScript() : editScript(v.summary))));
+  spaces.forEach((s) => s.versions.forEach((v) => seedHistory(hub, s.id, v.n, isFirst(v) ? firstScript() : editScript(v.summary))));
   const enqueue = (id: string, summary: string, ops: EditOp[]): { version: number; queued: number } => {
     const s = f.find(id);
     if (s.job) throw new ApiError('这个项目已有任务在排队或运行', 409);

@@ -20,7 +20,8 @@ interface Props {
 
 export function RunCard({ meta, events, onCancel, shots, hot, backdrop }: Props) {
   const view = reduceLive(events);
-  const running = meta.status === 'running' || view.status === 'running' || view.status === 'queued';
+  // 以版本状态为准：服务重启后版本已是 failed，就算事件流里没有终止事件也停止计时
+  const running = meta.status === 'running' && view.status !== 'failed' && view.status !== 'done';
   const now = useNow(running);
   const cur = [...view.steps].reverse().find((s) => s.state === 'run') ?? view.steps.at(-1);
   const pct = cur?.pct;

@@ -18,6 +18,8 @@ function Num({ value }: { value: number }) {
 
 interface Props {
   budget: number;
+  /** 本项目已花（首版失败或取消时已经花掉的也算），上限管整个项目 */
+  spent: number;
   estimate?: Estimate;
   estimating: boolean;
   blocker?: string;
@@ -28,17 +30,17 @@ interface Props {
 
 const pct = (v: number) => `${((Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, v)) - BUDGET_MIN) / (BUDGET_MAX - BUDGET_MIN)) * 100}%`;
 
-export function BudgetFooter({ budget, estimate, estimating, blocker, starting, onBudget, onStart }: Props) {
+export function BudgetFooter({ budget, spent, estimate, estimating, blocker, starting, onBudget, onStart }: Props) {
   const [local, setLocal] = useState(budget);
   const [open, setOpen] = useState(false);
   useEffect(() => setLocal(budget), [budget]);
   const has = !!estimate && estimate.high > 0;
-  const over = has && estimate.high > local;
+  const over = has && spent + estimate.high > local;
 
   return (
     <motion.div className="box budget" layout transition={SOFT} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
       <div className="bud-row">
-        <label className="bud-k" htmlFor="budget">预算上限</label>
+        <label className="bud-k" htmlFor="budget">本项目上限</label>
         <div className="bud-track" style={{ ['--v' as string]: pct(local) }}>
           {has && <motion.span className={`bud-band${over ? ' over' : ''}`} initial={false} animate={{ left: pct(estimate.low), width: `calc(${pct(estimate.high)} - ${pct(estimate.low)})` }} transition={SOFT} />}
           <input id="budget" type="range" min={BUDGET_MIN} max={BUDGET_MAX} step={1} value={local}
@@ -47,6 +49,7 @@ export function BudgetFooter({ budget, estimate, estimating, blocker, starting, 
         </div>
         <span className="bud-v">¥{local}</span>
       </div>
+      {spent > 0 && <div className="bud-spent">本项目已花 {yuan(spent)} / 上限 ¥{local}<It l>(上次没出成的也算在内)</It></div>}
       <div className="est-row">
         <div className="est">
           <span className="est-k">预估花费{estimating && <span className="spin est-spin" />}</span>

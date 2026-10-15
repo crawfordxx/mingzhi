@@ -3,20 +3,30 @@ import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring, useTra
 import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import { spentOf, startedOf, type Options, type Space } from '../api';
 import { yuan } from '../lib/media';
+import { budgetState } from '../lib/versions';
 import type { Replay } from '../live';
 import type { Conversation } from '../useConversation';
 import type { Runs } from '../useRuns';
 import type { Workbench } from '../useWorkbench';
 import { It, SOFT } from '../ui';
 import { KeyCard } from './KeyCard';
+import { BudgetNote } from './BudgetNote';
 import { Msg, Who } from './Msg';
 import { blockerOf, SetupCard } from './SetupCard';
 import { BudgetFooter } from './setup/BudgetFooter';
 import { Thread } from './Thread';
 
-function subtitle(space: Space, running: number): string {
+/** 副标题：口播段数 · 版本数 · 本项目已花 / 上限（接近上限时变色） */
+function Subtitle({ space, running }: { space: Space; running: number }) {
   const n = space.inputs.length;
-  return `${n ? `${n} 段口播` : '还没有口播'} · ${space.versions.length ? `${space.versions.length} 个版本` : '草稿'} · 已花 ${yuan(spentOf(space) + running)} / 上限 ¥${space.settings.budgetYuan}`;
+  const spent = spentOf(space) + running;
+  const { near } = budgetState(spent, space.settings.budgetYuan);
+  return (
+    <div className="sub">
+      {n ? `${n} 段口播` : '还没有口播'} · {space.versions.length ? `${space.versions.length} 个版本` : '草稿'} ·{' '}
+      <span className={near ? 'spent near' : 'spent'}>本项目已花 {yuan(spent)} / 上限 ¥{space.settings.budgetYuan}</span>
+    </div>
+  );
 }
 
 /** 标题里的「第 N 期」用斜体衬线点缀数字 */
@@ -37,7 +47,7 @@ function ChatHeader({ space, stream, running }: { space: Space; stream: RefObjec
     <motion.header className="chat-head" style={{ boxShadow: shadow }}>
       <div>
         <Title text={space.title} />
-        <div className="sub">{subtitle(space, running)}</div>
+        <Subtitle space={space} running={running} />
       </div>
       <motion.i className="chat-prog" style={{ scaleX: progress }} aria-hidden="true" />
     </motion.header>
@@ -50,10 +60,15 @@ function Dock({ wb, space, composer, keyReady }: { wb: Workbench; space: Space; 
   return (
     <AnimatePresence mode="wait" initial={false}>
       {started ? (
-        <motion.div key="composer" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={SOFT}>{composer}</motion.div>
+        <motion.div key="composer" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={SOFT}>
+          <div className="lim-wrap">
+            <BudgetNote spent={spentOf(space)} budget={space.settings.budgetYuan} onSave={(v) => void wb.updateSettings({ budgetYuan: v })} />
+          </div>
+          {composer}
+        </motion.div>
       ) : (
         <motion.div key="dock" className="composer" exit={{ opacity: 0, y: 8 }} transition={SOFT}>
-          <BudgetFooter budget={space.settings.budgetYuan} estimate={wb.estimate} estimating={wb.estimating} blocker={blockerOf(wb, space, keyReady)}
+          <BudgetFooter budget={space.settings.budgetYuan} spent={spentOf(space)} estimate={wb.estimate} estimating={wb.estimating} blocker={blockerOf(wb, space, keyReady)}
             starting={wb.starting} onBudget={(v) => wb.updateSettings({ budgetYuan: v })} onStart={wb.start} />
         </motion.div>
       )}
@@ -61,9 +76,12 @@ function Dock({ wb, space, composer, keyReady }: { wb: Workbench; space: Space; 
   );
 }
 
-interface Props { wb: Workbench; space: Space; options: Options; composer: ReactNode; runs: Runs; convo: Conversation; replay: Replay; onSeek: (n: number, sec: number) => void; runningCost: number }
+interface Props {
+  wb: Workbench; space: Space; options: Options; composer: ReactNode; runs: Runs; convo: Conversation; replay: Replay;
+  onSeek: (n: number, sec: number) => void; runningCost: number; liveN?: number;
+}
 
-export function ChatFlow({ wb, space, options, composer, runs, convo, replay, onSeek, runningCost }: Props) {
+export function ChatFlow({ wb, space, options, composer, runs, convo, replay, onSeek, runningCost, liveN }: Props) {
   const stream = useRef<HTMLDivElement>(null);
   const [showKey] = useState(() => !wb.status?.keyConfigured);
   const started = startedOf(space);
@@ -82,7 +100,7 @@ export function ChatFlow({ wb, space, options, composer, runs, convo, replay, on
             )}
             {showKey && !started && <Msg root={stream} delay={0.06}><KeyCard onVerified={wb.keyVerified} /></Msg>}
             <Msg root={stream} delay={started ? 0 : 0.12}><SetupCard wb={wb} space={space} options={options} /></Msg>
-            {(space.versions.length > 0 || !!space.job) && <Thread space={space} options={options} runs={runs} convo={convo} replay={replay} stream={stream} onSeek={onSeek} />}
+            {(space.versions.length > 0 || !!space.job) && <Thread space={space} options={options} runs={runs} convo={convo} replay={replay} stream={stream} onSeek={onSeek} liveN={liveN} />}
           </motion.div>
         </AnimatePresence>
       </div>

@@ -1,5 +1,5 @@
 /**
- * 开发用假数据层（?mock=1 或 VITE_MOCK=1）：内存里模拟 Task 6 的接口（形状与 task-6-report.md 一致），带一点网络延迟。
+ * 开发用假数据层（vite 开发服务里 ?mock=1，或构建时 VITE_MOCK=1）：内存里模拟 Task 6 的接口（形状与 task-6-report.md 一致），带一点网络延迟。
  * 语义与真实服务对齐：background:null 才清除、undefined 键忽略；没有口播时 estimate 400；只收视频。
  * 参数：key=1 视为已配置 key；inputs=N 预置 N 段口播。图片只用油画、预设背景与封面示例，不含真人照片。
  * 字幕样式预览图由后端渲染（Task 6），这里 preview 留空，界面用 CSS 文字样式占位。
@@ -20,8 +20,11 @@ const COVERS: [string, string][] = [
   ['guochao', '国潮'], ['risograph', '孔版印刷'], ['neobrutal', '新粗野主义'], ['y2k', '千禧 Y2K'], ['japanese', '日系清新'],
 ];
 
+/** 假数据的背景缩略图跟着 mock 分包打包（不放 public/，正式构建的 dist 里没有它们） */
+const THUMBS = import.meta.glob<string>('./mock-assets/*.webp', { eager: true, query: '?url', import: 'default' });
+
 const OPTIONS: Options = {
-  backgrounds: BACKGROUNDS.map(([id, name, file]) => ({ id, name, thumb: `/mock/${file}.webp` })),
+  backgrounds: BACKGROUNDS.map(([id, name, file]) => ({ id, name, thumb: THUMBS[`./mock-assets/${file}.webp`] ?? '' })),
   captionStyles: CAPTIONS.map(([id, name]) => ({ id, name, preview: '' })),
   coverStyles: COVERS.map(([id, name]) => ({ id, name, example: `/covers/${id}.webp` })),
   defaults: { captionStyle: 'blade', coverStyle: 'bauhaus', budgetYuan: 10, broll: true, maxVideos: 1 },
@@ -33,7 +36,7 @@ const day = (offset: number): string => new Date(Date.UTC(2026, 9, 15 - offset, 
 
 function seedSpaces(inputs: number): Space[] {
   const done = (n: number, costYuan: number, summary: string, qaScore: number) =>
-    ({ n, createdAt: day(1), summary, changedShots: [], costYuan, qaScore, status: 'done' as const });
+    ({ n, createdAt: day(1), summary, changedShots: n > 1 ? [2, 5] : [], costYuan, qaScore, status: 'done' as const, ...(n > 1 ? { parent: n - 1 } : {}) });
   return [
     { id: 'ep3', title: '第 3 期', createdAt: day(0), inputs: Array.from({ length: inputs }, (_, i) => `第3期_口播_${i + 1}.mov`), versions: [], settings: DEFAULTS, job: null, totalCostYuan: 0 },
     { id: 'ep2', title: '第 2 期 · 高性价比人生指南', createdAt: day(1), inputs: ['第2期_口播.mov'], versions: [done(1, 3.84, '首版', 8.8), done(2, 0.16, '只重渲了 2 段', 9.0)], settings: { ...DEFAULTS, background: { kind: 'preset', id: 'night-window' } }, job: null, totalCostYuan: 4 },

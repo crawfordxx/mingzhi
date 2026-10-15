@@ -32,13 +32,20 @@ function Scores({ view }: { view: LiveView }) {
   );
 }
 
+/** 分镜那一格：失败或取消时不再写「分镜生成中」 */
+function shotsText(view: LiveView): string {
+  if (view.shots.length) return `分成 ${view.shots.length} 个镜头`;
+  if (view.status === 'done') return '没有分镜';
+  return view.status === 'failed' ? '没有剪完，分镜未生成' : '分镜生成中';
+}
+
 function Summary({ view }: { view: LiveView }) {
   const c = cutCounts(view.cuts);
   return (
     <div className="live-sum">
       删除 <span className="hl"><Num value={c.filler} format={(x) => `${Math.round(x)} 处语气词`} /></span>
       <span className="dot">·</span><span className="hl"><Num value={c.slip} format={(x) => `${Math.round(x)} 处口误`} /></span>
-      <span className="dot">·</span>{view.shots.length ? `分成 ${view.shots.length} 个镜头` : view.status === 'done' ? '没有分镜' : '分镜生成中'}
+      <span className="dot">·</span>{shotsText(view)}
       {view.cost && <><span className="dot">·</span>花费 <Num className="cost" value={view.cost.total} format={yuan} /></>}
     </div>
   );

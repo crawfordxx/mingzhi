@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { CSSProperties, MouseEvent } from 'react';
 import { mediaUrl, type VersionMeta, type VersionState } from '../api';
 import { cardName, mmss, refSecond, shotIndexAt, type TimeRef } from '../lib/shots';
+import { isFirst } from '../lib/versions';
 import { useClock, type Clock } from '../usePlayback';
 import { Ico, Lights, SOFT, Tap } from '../ui';
 import { ProgressRail } from './ProgressRail';
@@ -29,10 +30,10 @@ export interface PlayerProps {
   delay?: number;
 }
 
-/** 本版改动的镜头起点（全部重渲时不标点，标了也没有信息量） */
+/** 本版改动（和父版本相比画面变了）的镜头起点；首版与每段都变了时不标点，标了也没有信息量 */
 export function changeMarks(meta: VersionMeta, state?: VersionState): { sec: number; label: string }[] {
   const shots = state?.storyboard.shots ?? [];
-  if (meta.n === 1 || !shots.length || meta.changedShots.length >= shots.length) return [];
+  if (isFirst(meta) || !shots.length || meta.changedShots.length >= shots.length) return [];
   return meta.changedShots.filter((i) => shots[i]).map((i) => ({ sec: shots[i].start, label: cardName(shots[i]) }));
 }
 

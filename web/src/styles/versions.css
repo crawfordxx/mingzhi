@@ -3,7 +3,11 @@
 .seg.live button .lbl { position: relative; z-index: 1; }
 .seg.live button.cur { color: var(--text-1); cursor: default; }
 .seg.live button[aria-disabled='true'] { color: var(--text-3); cursor: progress; }
-.seg.live button:hover:not(.cur):not([aria-disabled='true']) { color: var(--text-1); }
+.seg.live button.failed { color: var(--text-4); cursor: help; }
+.seg.live button.failed .lbl { text-decoration: line-through; text-decoration-color: #0000002e; }
+.seg .fail-tag { position: relative; z-index: 1; font: 500 10.5px/1 var(--sans); color: var(--text-3); background: #0000000d; border-radius: 999px; padding: 3px 5px; margin-left: -2px; }
+.seg.live button:hover:not(.cur):not(.failed):not([aria-disabled='true']) { color: var(--text-1); }
+.seg.live button.failed:hover { color: var(--text-3); }
 .seg .pill { position: absolute; inset: 0; border-radius: 999px; background: #fff; box-shadow: var(--shadow-1), 0 1px 3px #0000001a; z-index: 0; }
 .seg .pulse { position: relative; z-index: 1; }
 

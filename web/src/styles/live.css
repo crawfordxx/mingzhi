@@ -132,6 +132,8 @@
 .picked b { font-weight: 600; color: var(--text-2); }
 .picked .it { font-size: 15px; color: var(--brand-6); }
 .picked.warn { color: #a5741a; }
+.picked.prev-try { margin: -4px 0 10px; }
+.picked.prev-try .it { color: #a5741a; }
 
 /* 内联选项胶囊 */
 .iopts { margin-top: 12px; }

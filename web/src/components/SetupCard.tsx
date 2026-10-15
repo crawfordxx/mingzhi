@@ -3,11 +3,12 @@
  * 固定在对话区底部（setup/BudgetFooter.tsx，开始出片后让位给输入框）。开始后卡片收成一行摘要（G1 设置卡）
  */
 import { motion } from 'motion/react';
-import type { ReactNode } from 'react';
-import { startedOf, type Options, type Space } from '../api';
+import { useState, type ReactNode } from 'react';
+import { spentOf, startedOf, type Options, type Space } from '../api';
 import type { Workbench } from '../useWorkbench';
 import { It, SOFT } from '../ui';
 import { BackgroundPicker } from './setup/BackgroundPicker';
+import { BudgetEditor } from './setup/BudgetEditor';
 import { InputsDrop } from './setup/InputsDrop';
 import { CaptionPicker, CoverPicker } from './setup/StylePickers';
 
@@ -51,6 +52,24 @@ export function blockerOf(wb: Workbench, space: Space, keyReady: boolean): strin
   return undefined;
 }
 
+/** 开始出片后收成一行摘要；点「(上限 ¥y)」展开上限滑块（项目上限任何时候都能调） */
+function SetupSummary({ wb, space, names }: Props & { names: (string | undefined)[] }) {
+  const [open, setOpen] = useState(false);
+  const budget = space.settings.budgetYuan;
+  return (
+    <motion.div layout className="card setup-sum" transition={SOFT}>
+      <div className="sum-row">
+        <b>设置</b>
+        {names.filter(Boolean).map((t) => <span key={t}><span className="dot">·</span>{t}</span>)}
+        <button type="button" className="more lim-open" aria-expanded={open} onClick={() => setOpen((o) => !o)} title="调项目上限">
+          <It>(上限 ¥{budget})</It>
+        </button>
+      </div>
+      {open && <BudgetEditor spent={spentOf(space)} budget={budget} onSave={(v) => void wb.updateSettings({ budgetYuan: v })} />}
+    </motion.div>
+  );
+}
+
 export function SetupCard({ wb, space, options }: Props) {
   const s = space.settings;
   const bg = backgroundLabel(space, options);
@@ -59,15 +78,8 @@ export function SetupCard({ wb, space, options }: Props) {
   const cover = options.coverStyles.find((c) => c.id === coverId);
 
   if (startedOf(space)) {
-    return (
-      <motion.div layout className="card setup-sum" transition={SOFT}>
-        <b>设置</b>
-        {[space.inputs.length > 1 ? `${space.inputs.length} 段口播` : space.inputs[0], bg.name, cap?.name, cover?.name].filter(Boolean).map((t) => (
-          <span key={t}><span className="dot">·</span>{t}</span>
-        ))}
-        <It className="more">(上限 ¥{s.budgetYuan})</It>
-      </motion.div>
-    );
+    const names = [space.inputs.length > 1 ? `${space.inputs.length} 段口播` : space.inputs[0], bg.name, cap?.name, cover?.name];
+    return <SetupSummary wb={wb} space={space} options={options} names={names} />;
   }
 
   return (

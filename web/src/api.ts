@@ -1,7 +1,10 @@
 /**
  * 工作台 HTTP 客户端，对齐 Task 6 实现（src/server/，路由表见 task-6-report.md）。
- * 地址栏带 ?mock=1 或构建时 VITE_MOCK=1 时改用 ./mock.ts（按需动态加载）的内存假数据。
+ * vite 开发服务里地址栏带 ?mock=1、或构建时 VITE_MOCK=1 时改用 ./mock.ts（按需动态加载）的内存假数据；
+ * 正式构建里 __MOCK_ALLOWED__ 为 false，假数据层整个被摇掉（见 lib/mockGate.ts）。
  */
+import { mockEnabled } from './lib/mockGate';
+
 export type BackgroundSpec = { kind: 'preset'; id: string } | { kind: 'file'; path: string } | { kind: 'prompt'; prompt: string };
 
 export interface SpaceSettings {
@@ -267,12 +270,7 @@ function createLazyMockApi(params: URLSearchParams): Api {
   });
 }
 
-function mockEnabled(): boolean {
-  if (import.meta.env.VITE_MOCK === '1') return true;
-  return new URLSearchParams(window.location.search).get('mock') === '1';
-}
-
-export const isMock = mockEnabled();
+export const isMock = __MOCK_ALLOWED__ && mockEnabled({ allowed: true, forced: import.meta.env.VITE_MOCK === '1', search: window.location.search });
 export const api: Api = isMock ? createLazyMockApi(new URLSearchParams(window.location.search)) : createHttpApi();
 
 /** 项目已花费：服务端给的 totalCostYuan，缺省时累加各版本 */
