@@ -151,6 +151,7 @@ describe('runCover', () => {
     const { events, complete } = record();
     await runCover({ ...ctx, meter, coverDeps: { makeCovers: makeCovers as never } }, undefined, sb, caps, 'x', complete);
     expect(makeCovers).toHaveBeenCalledTimes(1);
+    expect(makeCovers).toHaveBeenCalledWith(expect.objectContaining({ meter })); // 生图前逐次查预算要用它
     expect(events.at(-1)?.message).toContain('封面已生成');
   });
 

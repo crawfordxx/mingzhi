@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { COVER_ART_YUAN } from '../cost/estimate.js';
+import type { CostMeter } from '../cost/meter.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { downloadTo, type TaskClient } from '../llm/kexiang-task.js';
@@ -48,7 +50,7 @@ export function coverPrompt(style: CoverStyleId, title: string, subtitle: string
 export async function generateCoverArt(task: TaskClient, style: CoverStyleId, title: string, subtitle: string | undefined, aspect: CoverAspect, dest: string, download: Download = downloadTo): Promise<{ cost?: number }> {
   const { url, cost } = await task.run(
     { modelName: COVER_MODEL, modelType: 'text2img', prompt: coverPrompt(style, title, subtitle, aspect), size: aspect, resolution: '1k', quality: 'medium', output_format: 'png' },
-    { kind: 'image', timeoutMs: COVER_TASK_TIMEOUT_MS },
+    { kind: 'image', timeoutMs: COVER_TASK_TIMEOUT_MS, label: '封面底图', estimateYuan: COVER_ART_YUAN },
   );
   await download(url, dest);
   return cost !== undefined ? { cost } : {};
@@ -68,7 +70,7 @@ export async function verifyTitle(client: LlmClient, png: string, title: string)
   const user = '读出这张封面图上最大、最醒目的标题文字，逐字照录（不要纠错、不要补全，换行处直接连起来）。只输出 JSON：{"title": "标题原文"}';
   let res: unknown;
   try {
-    res = await client.chatJson({ model: TITLE_CHECK_MODEL, system: '你是图片文字识别助手，只输出 JSON。', user, images: [image], reasoningEffort: 'low' });
+    res = await client.chatJson({ model: TITLE_CHECK_MODEL, system: '你是图片文字识别助手，只输出 JSON。', user, images: [image], reasoningEffort: 'low', label: '封面核对' });
   } catch (err) {
     rethrowIfBalance(err);
     return 'error';
@@ -88,7 +90,11 @@ export function coverTitle(storyboard: Storyboard, captions: TimedCaption[]): { 
   return { title: clip(source, COVER_TITLE_MAX), ...(hook?.kicker ? { subtitle: clip(hook.kicker, COVER_SUBTITLE_MAX) } : {}) };
 }
 
-export interface ArtOptions { task: TaskClient; client: LlmClient; style: CoverStyleId; title: string; subtitle?: string; aspect: CoverAspect; dest: string; download?: Download }
+export interface ArtOptions {
+  task: TaskClient; client: LlmClient; style: CoverStyleId; title: string; subtitle?: string; aspect: CoverAspect; dest: string; download?: Download;
+  /** 每次生图前检查预算；缺省不检查 */
+  meter?: CostMeter;
+}
 export interface ArtResult {
   /** 本次实际生图次数（复用时为 0） */
   attempts: number; costYuan: number; verified: boolean;
@@ -123,24 +129,34 @@ const yuan = (v: number): number => Math.round(v * 100) / 100;
 /**
  * 生成底图并核对标题：识别不一致时重生一次，仍不一致保留第二次结果并标注 verified=false；
  * 读图模型出错时不重生（保留第一张，标注未核对）。磁盘上已有同参数的底图（见旁注）时直接复用，不再花钱。
+ * 每次生图前都查预算：重生时预算不够就不重生，保留当前底图并标注未核对；第一张就没预算则报错。
  */
 export async function generateVerifiedArt(o: ArtOptions): Promise<ArtResult> {
   const note = reusableNote(o);
   if (note) return { attempts: 0, costYuan: 0, verified: note.verified, check: note.verified ? 'ok' : 'mismatch', reused: true };
   let costYuan = 0;
+  let kept: ArtResult | undefined;
   for (let attempts = 1; ; attempts += 1) {
+    if (o.meter && !o.meter.canSpend(COVER_ART_YUAN)) {
+      if (kept) return kept;
+      throw new Error(`预算不足，无法生成封面底图（剩余 ¥${o.meter.remaining().toFixed(2)}，约需 ¥${COVER_ART_YUAN.toFixed(2)}）`);
+    }
     const { cost } = await generateCoverArt(o.task, o.style, o.title, o.subtitle, o.aspect, o.dest, o.download);
     costYuan += cost ?? 0;
     writeNote(o, false); // 下载成功即记账：之后哪一步失败，重跑都能复用这张已付费的底图
     const check = await verifyTitle(o.client, o.dest, o.title);
     if (check === 'ok') writeNote(o, true);
-    if (check !== 'mismatch' || attempts >= MAX_ART_ATTEMPTS) return { attempts, costYuan: yuan(costYuan), verified: check === 'ok', check, reused: false };
+    const result: ArtResult = { attempts, costYuan: yuan(costYuan), verified: check === 'ok', check, reused: false };
+    if (check !== 'mismatch' || attempts >= MAX_ART_ATTEMPTS) return result;
+    kept = result;
   }
 }
 
 export interface MakeCoversOptions {
   workDir: string; style: CoverStyleId; title: string; subtitle?: string; personVideo: string;
   cfg: AppConfig; task: TaskClient; client: LlmClient; download?: Download;
+  /** 统一记账；生图前据此检查预算 */
+  meter?: CostMeter;
 }
 export interface MakeCoversResult {
   cover34: string; cover43: string;

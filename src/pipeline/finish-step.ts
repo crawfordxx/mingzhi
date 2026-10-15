@@ -93,7 +93,7 @@ export async function runCover(ctx: CoverContext, cover: CoverOptions | undefine
     complete('cover', COVER_START);
     const res = await make({
       workDir: ctx.workDir, style, title, ...(subtitle ? { subtitle } : {}),
-      personVideo, cfg: ctx.cfg, task, client: ctx.llm,
+      personVideo, cfg: ctx.cfg, task, client: ctx.llm, meter: ctx.meter,
     });
     const extra = await copyBesideOutput(ctx.workDir, ctx.output, res).catch((err: unknown) => [`（复制到成片旁失败：${errText(err)}）`]);
     complete('cover', coverSummary(res, extra), {

@@ -3,9 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
+import { CostMeter } from '../src/cost/meter.js';
 import { run } from '../src/media/exec.js';
 import type { ChatOptions, LlmClient } from '../src/llm/kexiang.js';
-import type { TaskClient, TaskInput } from '../src/llm/kexiang-task.js';
+import type { TaskClient, TaskInput, TaskRunOptions } from '../src/llm/kexiang-task.js';
 import type { Storyboard } from '../src/storyboard/schema.js';
 import { COVER_STYLES, DEFAULT_COVER_STYLE, slotRegion, type CoverStyleId } from '../src/cover/styles.js';
 import { COVER_MODEL, coverPrompt, coverTitle, generateCoverArt, generateVerifiedArt, makeCovers, normalizeTitle, verifyTitle } from '../src/cover/generate.js';
@@ -30,10 +31,11 @@ function fakeLlm(replies: (unknown | (() => never))[]): LlmClient & { calls: Cha
 }
 
 /** 假任务客户端：记录输入，返回固定地址与花费 */
-function fakeTask(cost: number | null = 0.6): TaskClient & { inputs: TaskInput[]; timeouts: (number | undefined)[] } {
+function fakeTask(cost: number | null = 0.6, meter?: CostMeter): TaskClient & { inputs: TaskInput[]; timeouts: (number | undefined)[]; opts: TaskRunOptions[] } {
   const inputs: TaskInput[] = [];
   const timeouts: (number | undefined)[] = [];
-  return { inputs, timeouts, async run(input, opts) { inputs.push(input); timeouts.push(opts.timeoutMs); return { taskId: String(inputs.length), url: `https://img.example/${inputs.length}.png`, ...(cost === null ? {} : { cost }) }; } };
+  const optsSeen: TaskRunOptions[] = [];
+  return { inputs, timeouts, opts: optsSeen, async run(input, opts) { inputs.push(input); timeouts.push(opts.timeoutMs); optsSeen.push(opts); if (cost !== null) meter?.addTask(input.modelName, cost, opts.label); return { taskId: String(inputs.length), url: `https://img.example/${inputs.length}.png`, ...(cost === null ? {} : { cost }) }; } };
 }
 
 /** 假下载：用 lavfi 生成纯色 PNG（尺寸接近 GPT Image 2 的 1k 输出） */
@@ -128,6 +130,7 @@ describe('generateCoverArt', () => {
     expect(task.inputs[0]).toEqual({ modelName: COVER_MODEL, modelType: 'text2img', prompt: coverPrompt('neon', '标题', '小标题', '4:3'), size: '4:3', resolution: '1k', quality: 'medium', output_format: 'png' });
     expect(downloads).toEqual([['https://img.example/1.png', '/tmp/x.png']]);
     expect(task.timeouts).toEqual([5 * 60_000]);
+    expect(task.opts[0]).toMatchObject({ label: '封面底图', estimateYuan: 0.6 });
     expect(res).toEqual({ cost: 0.6 });
   });
 });
@@ -161,6 +164,26 @@ describe('generateVerifiedArt', () => {
     expect(res).toEqual({ attempts: 2, costYuan: 1.2, verified: false, check: 'mismatch', reused: false });
     expect(task.inputs).toHaveLength(2);
     expect(existsSync(dest)).toBe(true);
+  });
+
+  it('重生前查预算：第一张之后预算不够再生一张，就不重生，保留当前底图并标注未核对', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-cover-gb-'));
+    const meter = new CostMeter({}, 1.0);
+    const task = fakeTask(0.6, meter);
+    const res = await generateVerifiedArt({ task, client: fakeLlm([{ title: '错字' }]), style: 'bauhaus', title: '标题', aspect: '3:4', dest: join(dir, 'a.png'), download: pngDownload, meter });
+    expect(res).toEqual({ attempts: 1, costYuan: 0.6, verified: false, check: 'mismatch', reused: false });
+    expect(task.inputs).toHaveLength(1);
+  });
+
+  it('预算刚好够再生一张时照常重生；第一张就没预算则报错且不生图', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-cover-gb2-'));
+    const meter = new CostMeter({}, 1.2);
+    const task = fakeTask(0.6, meter);
+    const res = await generateVerifiedArt({ task, client: fakeLlm([{ title: '错字' }]), style: 'bauhaus', title: '标题', aspect: '3:4', dest: join(dir, 'a.png'), download: pngDownload, meter });
+    expect(res.attempts).toBe(2);
+    const broke = fakeTask(0.6, meter);
+    await expect(generateVerifiedArt({ task: broke, client: fakeLlm([{ title: '标题' }]), style: 'y2k', title: '标题', aspect: '4:3', dest: join(dir, 'b.png'), download: pngDownload, meter })).rejects.toThrow('预算不足');
+    expect(broke.inputs).toHaveLength(0);
   });
 
   it('第一次通过就不再重生；任务没有返回花费时按 0 计', async () => {

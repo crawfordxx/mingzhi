@@ -236,7 +236,7 @@ async function runSteps(args: PipelineArgs, projectPath: string, complete: Compl
   const { produced, cards } = await qaCardsStep(args, meter, await produce(args, analysis, complete), complete);
   await compose(args, analysis, produced, complete);
   const hard = args.qa === false ? [] : await runQaFinal({ cfg: args.cfg, hardChecks: args.qaDeps?.hardChecks }, args.output, produced.storyboard, cards, complete);
-  await runCover({ workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter: args.meter }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
+  await runCover({ workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
   complete('done', args.output);
   return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: produced.captions, storyboard: produced.storyboard, qa: { cards, hard } };
 }

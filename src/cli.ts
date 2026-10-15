@@ -9,7 +9,7 @@ import { CostMeter } from './cost/meter.js';
 import { loadPrices } from './cost/prices.js';
 import { InsufficientBalanceError, RECHARGE_URL } from './llm/errors.js';
 import { KexiangClient } from './llm/kexiang.js';
-import { makeTaskClient, parseBrollArgs } from './pipeline/broll-step.js';
+import { makeTaskClient, parseBrollArgs, parseBudgetArg } from './pipeline/broll-step.js';
 import { parseFinishArgs } from './pipeline/finish-step.js';
 import { KexiangTaskClient } from './llm/kexiang-task.js';
 import { probe } from './media/probe.js';
@@ -28,12 +28,13 @@ async function main(): Promise<void> {
   const background = parseBackgroundArgs(values.bg, values['bg-prompt'], baseDir);
   const broll = parseBrollArgs(values, cfg.pexelsKey);
   const finish = parseFinishArgs(values);
+  const budgetYuan = parseBudgetArg(values.budget); // 整条流程的上限，meter 与确认提示都以它为准
   // 封面需要可想任务客户端；没配 key 时不在这里报错，由封面步骤降级跳过
-  const meter = new CostMeter(await loadPrices(join(cfg.dataDir, 'prices.json'), fetch, Date.now, cfg.kexiangKey), broll.budgetYuan);
+  const meter = new CostMeter(await loadPrices(join(cfg.dataDir, 'prices.json'), fetch, Date.now, cfg.kexiangKey), budgetYuan);
   const task = makeTaskClient(cfg, { background: background?.kind === 'prompt', broll, meter }) ?? (finish.cover && cfg.kexiangKey ? new KexiangTaskClient(cfg.kexiangKey, undefined, undefined, undefined, meter) : undefined);
   const llm = new KexiangClient(cfg.kexiangKey ?? '', undefined, undefined, meter);
   const estimate = estimateCost({ durationSec: (await probe(input, cfg)).durationSec, bgPrompt: background?.kind === 'prompt', broll: broll.enabled, maxVideos: broll.maxVideos, qa: !values['no-qa'], cover: finish.cover !== false });
-  if (!(await confirmRun({ estimate, budgetYuan: broll.budgetYuan, yes: values.yes === true, isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true }))) {
+  if (!(await confirmRun({ estimate, budgetYuan, yes: values.yes === true, isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true }))) {
     console.log('已取消，未花费任何费用');
     return;
   }
@@ -44,7 +45,7 @@ async function main(): Promise<void> {
     throw err;
   });
   const secs = Math.round((Date.now() - started) / 1000);
-  console.log(`\n完成：删除 ${res.cuts.length} 处 · 成片 ${res.plan.outputDurationSec.toFixed(1)} 秒 · ${res.storyboard.shots.length} 个镜头 · 用时 ${secs} 秒 · 花费 ¥${meter.total.toFixed(2)}（上限 ¥${broll.budgetYuan.toFixed(2)}）${values['no-qa'] ? '' : `\n${qaSummary(res.qa)}`}\n${res.output}`);
+  console.log(`\n完成：删除 ${res.cuts.length} 处 · 成片 ${res.plan.outputDurationSec.toFixed(1)} 秒 · ${res.storyboard.shots.length} 个镜头 · 用时 ${secs} 秒 · 花费 ¥${meter.total.toFixed(2)}（上限 ¥${budgetYuan.toFixed(2)}）${values['no-qa'] ? '' : `\n${qaSummary(res.qa)}`}\n${res.output}`);
 }
 
 main().catch((err: Error) => {

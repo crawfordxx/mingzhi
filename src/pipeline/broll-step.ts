@@ -41,12 +41,17 @@ function parseNonNegative(raw: string | undefined, fallback: number, flag: strin
   return Number(raw);
 }
 
+/** --budget 解析：每条视频的花费上限（元），缺省 10；预算属于整条流程，不归 B-roll */
+export function parseBudgetArg(raw: string | undefined): number {
+  return parseNonNegative(raw, DEFAULT_BUDGET_YUAN, '--budget', false);
+}
+
 /** CLI 参数 → B-roll 选项：默认开启，最多 1 个视频，预算 10 元；pexelsKey 来自配置（MINGZHI_PEXELS_KEY） */
 export function parseBrollArgs(values: { 'no-broll'?: boolean; 'max-videos'?: string; budget?: string }, pexelsKey?: string): BrollOptions {
   return {
     enabled: !values['no-broll'],
     maxVideos: parseNonNegative(values['max-videos'], DEFAULT_MAX_VIDEOS, '--max-videos', true),
-    budgetYuan: parseNonNegative(values.budget, DEFAULT_BUDGET_YUAN, '--budget', false),
+    budgetYuan: parseBudgetArg(values.budget), // 仅在没有 meter 时 B-roll 自己用它检查
     ...(pexelsKey ? { pexelsKey } : {}),
   };
 }

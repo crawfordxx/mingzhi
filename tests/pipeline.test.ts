@@ -12,7 +12,7 @@ import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import type { ProjectFile, ProjectPatch } from '../src/pipeline/project.js';
 import type { BrollDeps } from '../src/broll/fulfill.js';
-import { brollSummary, makeTaskClient, parseBrollArgs, runBroll } from '../src/pipeline/broll-step.js';
+import { brollSummary, makeTaskClient, parseBrollArgs, parseBudgetArg, runBroll } from '../src/pipeline/broll-step.js';
 import { visualKey } from '../src/broll/fulfill.js';
 import { runPipeline, type ProgressEvent } from '../src/pipeline/run.js';
 import type { QaDeps } from '../src/pipeline/qa-step.js';
@@ -128,8 +128,8 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     const workDir = mkdtempSync(join(tmpdir(), 'mz-fin-'));
     const output = join(workDir, 'out.mp4');
     const llm: LlmClient = { chatJson: async (o) => (o.system.includes('分镜') ? FAKE_STORYBOARD : o.system.includes('剪辑师') ? { cuts: [] } : { lines: [] }) };
-    const covers: { title: string; subtitle?: string; personVideo: string }[] = [];
-    const coverDeps = { makeCovers: async (o: { title: string; subtitle?: string; personVideo: string }) => {
+    const covers: { title: string; subtitle?: string; personVideo: string; meter?: unknown }[] = [];
+    const coverDeps = { makeCovers: async (o: { title: string; subtitle?: string; personVideo: string; meter?: unknown }) => {
       covers.push(o);
       return { cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png'), attempts: 2, costYuan: 1.2, unverified: [], person: true, reused: [] };
     } };
@@ -153,6 +153,7 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     expect(project.cover).toEqual({ style: 'bauhaus', costYuan: 1.2, unverified: [], reused: [] });
     expect(project.artifacts).toMatchObject({ output, final: output, cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png') });
     expect(covers).toEqual([expect.objectContaining({ title: '高性价比', subtitle: '测试封面', personVideo: join(workDir, 'cut.mp4') })]);
+    expect(covers[0].meter).toBeInstanceOf(CostMeter); // 未传 meter 时封面也用流程内的本地 meter
     expect((await probe(output, cfg)).hasAudio).toBe(true);
   }, 240_000);
 });
@@ -390,6 +391,9 @@ describe('B-roll 选项', () => {
   it('parseBrollArgs：默认开启、1 个视频、预算 10 元；支持 --no-broll、--max-videos、--budget 与图库 key；非法值报错', () => {
     expect(parseBrollArgs({})).toEqual({ enabled: true, maxVideos: 1, budgetYuan: 10 });
     expect(parseBrollArgs({ 'no-broll': true, 'max-videos': '0', budget: '3.5' }, 'pk')).toEqual({ enabled: false, maxVideos: 0, budgetYuan: 3.5, pexelsKey: 'pk' });
+    expect(parseBudgetArg(undefined)).toBe(10);
+    expect(parseBudgetArg('3.5')).toBe(3.5);
+    expect(() => parseBudgetArg('-1')).toThrow('--budget');
     for (const bad of ['1.5', '-1', '1e1', '0x10', '', ' 2', 'abc']) expect(() => parseBrollArgs({ 'max-videos': bad })).toThrow('--max-videos');
     for (const bad of ['-1', '1e1', '0x10', '', '.5', '5.', 'abc', 'Infinity']) expect(() => parseBrollArgs({ budget: bad })).toThrow('--budget');
   });
