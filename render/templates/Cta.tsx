@@ -24,6 +24,16 @@ const FIRST_CLICK = 0.5;
 const CLICK_GAP = 0.5;
 const FLIP_SEC = 0.18;
 const PRESS_SEC = 0.24;
+/** 最后一次按下至少在镜头结束前多久完成（秒）；cta 是末镜头，不做出场淡出 */
+const DONE_BEFORE_END = 0.2;
+
+/** n 次点击的时间：默认从 FIRST_CLICK 起每 CLICK_GAP 一次；镜头短时压缩首次点击与间隔，让最后一次按下在结束前完成 */
+export function ctaClickTimes(n: number, dur: number): number[] {
+  const room = Math.max(0, dur - DONE_BEFORE_END - PRESS_SEC);
+  const first = Math.min(FIRST_CLICK, room);
+  const gap = n > 1 ? Math.min(CLICK_GAP, (room - first) / (n - 1)) : 0;
+  return Array.from({ length: n }, (_, i) => first + i * gap);
+}
 /** 光标从第一个胶囊下方多远处滑进来 */
 const CURSOR_FROM = { x: 70, y: 300 };
 
@@ -47,11 +57,12 @@ const Pill: React.FC<{ text: string; color: string; flip: number; press: number 
 };
 
 /** 三连 CTA：全屏镜头上方一排胶囊，光标依次点击，每个点完变成彩色 */
-export const Cta: React.FC<TemplateProps<'cta'>> = ({ props, local }) => {
+export const Cta: React.FC<TemplateProps<'cta'>> = ({ props, local, dur }) => {
   const { fps } = useVideoConfig();
   const n = props.actions.length;
   const left0 = (CANVAS.width - n * PILL_W - (n - 1) * GAP) / 2;
-  const clicks: Click[] = props.actions.map((_, i) => ({ x: left0 + i * (PILL_W + GAP) + PILL_W * 0.84, y: CTA_TOP + PILL_H * 0.66, t: FIRST_CLICK + i * CLICK_GAP }));
+  const times = ctaClickTimes(n, dur);
+  const clicks: Click[] = props.actions.map((_, i) => ({ x: left0 + i * (PILL_W + GAP) + PILL_W * 0.84, y: CTA_TOP + PILL_H * 0.66, t: times[i] }));
   const cursor = cursorAt(local, { x: clicks[0].x + CURSOR_FROM.x, y: clicks[0].y + CURSOR_FROM.y }, clicks);
   return (
     <div style={{ position: 'absolute', inset: 0, fontFamily: THEME.font }}>

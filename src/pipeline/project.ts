@@ -33,6 +33,10 @@ export interface ProjectFile {
   storyboard?: Storyboard;
   /** 分镜里被丢弃的不合格镜头数 */
   storyboardDropped?: number;
+  /** 分镜里因版式规则或短镜头合并而失去卡片的镜头数 */
+  storyboardDemoted?: number;
+  /** 分镜里因超过 8 秒被截短的带卡片镜头数 */
+  storyboardCapped?: number;
   artifacts: ProjectArtifacts;
 }
 

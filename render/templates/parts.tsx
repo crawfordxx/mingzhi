@@ -11,19 +11,21 @@ export type TemplateProps<T extends TemplateId> = { props: PropsOf<T>; local: nu
 /** 卡片出场：镜头最后 EXIT_SEC 秒淡出（CardLayer 与各模板的节奏收拢共用） */
 export const EXIT_SEC = 0.25;
 
-/** 卡片区安全区：左右边距 60；上方避开平台状态栏，下方避开压在分界线上的字幕 */
-export const SAFE = { side: 60, top: 120, bottom: 850 } as const;
+/** 卡片区安全区：左右边距 48；上方避开平台状态栏，下方给压在分界线（960）上的字幕留出 90px */
+export const SAFE = { side: 48, top: 150, bottom: 870 } as const;
 export const CONTENT_W = 1080 - SAFE.side * 2;
 export const SAFE_H = SAFE.bottom - SAFE.top;
 
-// ---------- 文字尺寸估算（不量 DOM：CJK 按 1em，大写字母与数字约 0.65em，其余 ASCII 约 0.55em） ----------
+// ---------- 文字尺寸估算（不量 DOM：CJK 按 1em；W/M 约 0.9em，其他大写 0.7em，数字 0.6em，小写与其余 ASCII 约 0.55em） ----------
 
 /** 单行不折行（nowrap）时的宽度余量，弥补估算误差 */
 const ONE_LINE_MARGIN = 0.94;
 
 const charEm = (ch: string): number => {
   if (ch === ' ') return 0.3;
-  if (/[A-Z0-9]/.test(ch)) return 0.65;
+  if (ch === 'W' || ch === 'M') return 0.9;
+  if (/[A-Z]/.test(ch)) return 0.7;
+  if (/[0-9]/.test(ch)) return 0.6;
   return ch.charCodeAt(0) < 128 ? 0.55 : 1;
 };
 
@@ -80,10 +82,10 @@ export const Reveal: React.FC<{ p: number; dx?: number; dy?: number; from?: numb
 
 // ---------- 共用小部件 ----------
 
-/** 安全区容器：内容在安全区内垂直居中；scale < 1 时整体缩小 */
+/** 安全区容器：内容贴安全区顶部排（下方留给字幕）；scale < 1 时以顶边为基准整体缩小 */
 export const SafeArea: React.FC<{ scale?: number; children: React.ReactNode }> = ({ scale = 1, children }) => (
-  <div style={{ position: 'absolute', left: SAFE.side, right: SAFE.side, top: SAFE.top, height: SAFE_H, display: 'flex', flexDirection: 'column', justifyContent: 'center', fontFamily: THEME.font, color: THEME.ink }}>
-    <div style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}>{children}</div>
+  <div style={{ position: 'absolute', left: SAFE.side, right: SAFE.side, top: SAFE.top, height: SAFE_H, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', fontFamily: THEME.font, color: THEME.ink }}>
+    <div style={{ transform: `scale(${scale})`, transformOrigin: 'top center' }}>{children}</div>
   </div>
 );
 

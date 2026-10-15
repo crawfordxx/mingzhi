@@ -12,12 +12,18 @@ const ENTER_DY = 80;
 const ENTER_SCALE = 0.94;
 const EXIT_DY = 30;
 
-/** 卡片进出场：从下方 80px、0.94 缩放、透明度 0 弹入；结尾淡出上移 */
-const CardMotion: React.FC<{ shot: Shot & { card: CardSpec }; sec: number }> = ({ shot, sec }) => {
+/** 出场进度（0 未开始 → 1 完全淡出）：镜头最后 EXIT_SEC 秒；片尾的末镜头（cta）一直停在画面上，不淡出 */
+export function cardExit(shotEnd: number, sec: number, isLast: boolean): number {
+  if (isLast) return 0;
+  return interpolate(shotEnd - sec, [0, EXIT_SEC], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+}
+
+/** 卡片进出场：从下方 80px、0.94 缩放、透明度 0 弹入；结尾淡出上移（末镜头除外） */
+const CardMotion: React.FC<{ shot: Shot & { card: CardSpec }; sec: number; isLast: boolean }> = ({ shot, sec, isLast }) => {
   const { fps } = useVideoConfig();
   const local = sec - shot.start;
   const s = spring({ frame: Math.round(local * fps), fps, config: { damping: 16, mass: 0.7 } });
-  const exit = interpolate(shot.end - sec, [0, EXIT_SEC], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const exit = cardExit(shot.end, sec, isLast);
   const style: React.CSSProperties = {
     position: 'absolute', inset: 0,
     opacity: Math.min(s, 1 - exit),
@@ -31,19 +37,20 @@ export const CardLayer: React.FC<{ shots: Shot[]; sec: number }> = ({ shots, sec
   const hit = shotAt(shots, sec);
   if (!hit) return null;
   const { shot } = hit;
+  const isLast = hit.index === shots.length - 1;
   if (shot.layout === 'full') {
     // 全屏只叠 cta：不画卡片区底色，胶囊由模板自己放在画布上方（顶边 y=CTA_TOP=230，中心约 280）
     if (shot.card?.template !== 'cta') return null;
     return (
       <div style={{ position: 'absolute', left: 0, top: 0, width: CANVAS.width, height: CANVAS.seam }}>
-        <CardMotion shot={{ ...shot, card: shot.card }} sec={sec} />
+        <CardMotion shot={{ ...shot, card: shot.card }} sec={sec} isLast={isLast} />
       </div>
     );
   }
   return (
     <div style={{ position: 'absolute', left: 0, top: 0, width: CANVAS.width, height: CANVAS.seam, background: THEME.stage, overflow: 'hidden' }}>
       {shot.card ? renderBackdrop(shot.card, sec - shot.start, shot.end - shot.start) : null}
-      {shot.card ? <CardMotion shot={{ ...shot, card: shot.card }} sec={sec} /> : null}
+      {shot.card ? <CardMotion shot={{ ...shot, card: shot.card }} sec={sec} isLast={isLast} /> : null}
     </div>
   );
 };

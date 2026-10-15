@@ -36,7 +36,7 @@ describe('CardSpecSchema', () => {
 });
 
 describe('normalizeStoryboard', () => {
-  it('排序、截到片长、补齐空隙为全屏、首尾对齐 0 与片长', () => {
+  it('排序、截到片长、补齐空隙为全屏、首尾对齐 0 与片长；片头不足 1 秒的空隙并入后一张卡片', () => {
     const raw = { shots: [
       { start: 5, end: 9, layout: 'split', card: title('B') },
       { start: 0.4, end: 4, layout: 'split', card: title('A') },
@@ -45,8 +45,7 @@ describe('normalizeStoryboard', () => {
     const { storyboard, dropped } = normalizeStoryboard(raw, 20, []);
     expect(dropped).toBe(0);
     expect(storyboard.shots.map((s) => [s.start, s.end, s.layout, s.card?.template ?? null])).toEqual([
-      [0, 0.4, 'full', null],
-      [0.4, 4, 'split', 'title'],
+      [0, 4, 'split', 'title'],
       [4, 5, 'full', null],
       [5, 9, 'split', 'title'],
       [9, 12, 'full', null],
@@ -115,7 +114,7 @@ describe('normalizeStoryboard：CTA 保留', () => {
     ]);
     expect(demoted).toBe(0);
   });
-  it('cta 9.2–10 在 title 2–9.2 之后：cta 保留（短于 1 秒也不并入前一个）', () => {
+  it('cta 9.2–10 在 title 2–9.2 之后：cta 保留（不并入前一个），并向前借时长补足 2 秒', () => {
     const raw = { shots: [
       { start: 2, end: 9.2, layout: 'split', card: title('A') },
       { start: 9.2, end: 10, layout: 'split', card: cta(['关注']) },
@@ -123,8 +122,8 @@ describe('normalizeStoryboard：CTA 保留', () => {
     const { storyboard, demoted, dropped } = normalizeStoryboard(raw, 10, []);
     expect(shotRows(storyboard.shots)).toEqual([
       [0, 2, 'full', null],
-      [2, 9.2, 'split', 'title'],
-      [9.2, 10, 'full', 'cta'],
+      [2, 8, 'split', 'title'],
+      [8, 10, 'full', 'cta'],
     ]);
     expect(demoted).toBe(0);
     expect(dropped).toBe(0);
@@ -211,10 +210,11 @@ describe('normalizeStoryboard：字段清理与边界', () => {
   it('短镜头恰好 1 秒（浮点误差后）保留', () => {
     const raw = { shots: [{ start: 1.13, end: 2.13, layout: 'split', card: title('B') }] };
     const { storyboard, demoted } = normalizeStoryboard(raw, 4, []);
+    // 边界对齐到帧：1.13 → 34/30，2.13 → 64/30
     expect(shotRows(storyboard.shots)).toEqual([
-      [0, 1.13, 'full', null],
-      [1.13, 2.13, 'split', 'title'],
-      [2.13, 4, 'full', null],
+      [0, 34 / 30, 'full', null],
+      [34 / 30, 64 / 30, 'split', 'title'],
+      [64 / 30, 4, 'full', null],
     ]);
     expect(demoted).toBe(0);
   });
@@ -260,14 +260,14 @@ describe('normalizeStoryboard：镜头限长 8 秒', () => {
     expect(shotRows(storyboard.shots)).toEqual([[0, 12, 'full', null], [12, 20, 'full', 'cta']]);
     expect(capped).toBe(1);
   });
-  it('短卡片镜头并入前一个会超过 8 秒时不合并，改为全屏人像（不出现 8.5 秒的卡片）', () => {
+  it('短卡片镜头并入前一个会超过 8 秒时改为并入后面的全屏镜头（不出现 8.5 秒的卡片，也不出现 0.5 秒的闪屏）', () => {
     const raw = { shots: [
       { start: 0, end: 8, layout: 'split', card: title('A') },
       { start: 8, end: 8.5, layout: 'split', card: title('B') },
       { start: 8.5, end: 20, layout: 'full' },
     ] };
     const { storyboard, demoted } = normalizeStoryboard(raw, 20, []);
-    expect(shotRows(storyboard.shots)).toEqual([[0, 8, 'split', 'title'], [8, 8.5, 'full', null], [8.5, 20, 'full', null]]);
+    expect(shotRows(storyboard.shots)).toEqual([[0, 8, 'split', 'title'], [8, 20, 'full', null]]);
     expect(demoted).toBe(1);
   });
 

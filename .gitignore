@@ -6,6 +6,7 @@ node_modules/
 
 # 会话交接与 SDD 工作区
 docs/handoff.md
+/handoff.md
 .superpowers/
 work/
 *.local.mp4

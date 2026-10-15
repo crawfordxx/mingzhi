@@ -83,8 +83,12 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(project.artifacts).toEqual({ wav: join(work, 'audio16k.wav'), cut: join(work, 'cut.mp4'), ass: join(work, 'captions.ass'), output: join(work, 'out.mp4'), final: join(work, 'out.mp4') });
     expect(project.storyboard?.shots[0].card?.template).toBe('title');
     expect(project.storyboardDropped).toBe(0);
+    expect(project.storyboardDemoted).toBe(0);
+    expect(project.storyboardCapped).toBe(0);
     const final = await probe(res.output, cfg);
     expect([final.width, final.height, final.fps, final.hasAudio]).toEqual([1080, 1920, 30, true]);
+    // 成片时长不超过人像视频（剪切结果）的实际时长
+    expect(final.durationSec).toBeLessThanOrEqual((await probe(join(work, 'cut.mp4'), cfg)).durationSec + 0.05);
     expect(existsSync(join(work, 'cut.mp4'))).toBe(true);
     expect(events.find((e) => e.step === 'captions')?.message).toContain('改用自动分行');
     expect(events.find((e) => e.step === 'cuts')?.message).toContain('丢弃 1 条');

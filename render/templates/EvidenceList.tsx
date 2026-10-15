@@ -11,6 +11,14 @@ const BADGE_W = 100;
 const ROW_PAD_X = 18;
 const TEXT_W = INNER_W - BADGE_W - 26 - ROW_PAD_X * 2;
 const TEXT_PX = 34;
+const TEXT_LINE_H = 1.35;
+const BADGE_H = 50;
+/** 行的上下内边距：行数少（≤ ROOMY_ROWS）时放宽，填满卡片 */
+const ROOMY_ROWS = 3;
+const rowPadY = (rows: number): number => (rows <= ROOMY_ROWS ? 24 : 13);
+const ROW_GAP = 6;
+/** 估算行数时按 94% 行宽算：断不开的长串（如全大写英文）按字符折行会多损耗，宁可多估一行 */
+const EST_WIDTH = 0.94;
 const TAG_COLORS = [THEME.badge['证据'], THEME.badge['收益'], THEME.badge['来源']];
 const ROW_START = 0.12;
 const TAG_GAP = 14;
@@ -19,15 +27,15 @@ const TAG_TEXT_W = (INNER_W - TAG_GAP * 2) / 3 - BADGE_PAD_X * 2 - 4;
 const ROW_STAGGER = 0.07;
 
 /** 一行：左侧彩色标签 + 右侧文字；高亮行在滑入后铺一层同色浅底（从左往右刷开） */
-const EvidenceRow: React.FC<{ row: Row; hot: boolean; p: number; mark: number }> = ({ row, hot, p, mark }) => {
+const EvidenceRow: React.FC<{ row: Row; hot: boolean; p: number; mark: number; padY: number }> = ({ row, hot, p, mark, padY }) => {
   const color = THEME.badge[row.badge];
   const px = fitFontSize(row.text, TEXT_W, TEXT_PX, 24, 2);
   return (
     <Reveal p={p} dx={-40} dy={0}>
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 26, padding: `13px ${ROW_PAD_X}px`, borderRadius: 18 }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 26, padding: `${padY}px ${ROW_PAD_X}px`, borderRadius: 18 }}>
         {hot ? <div style={{ position: 'absolute', inset: 0, borderRadius: 18, background: `${color}1F`, transform: `scaleX(${mark})`, transformOrigin: 'left center' }} /> : null}
-        <div style={{ position: 'relative' }}><Badge text={row.badge} color={color} width={BADGE_W} height={50} size={25} /></div>
-        <div style={{ position: 'relative', fontSize: px, fontWeight: hot ? 600 : 500, lineHeight: 1.35, ...clampLines(2) }}>{row.text}</div>
+        <div style={{ position: 'relative' }}><Badge text={row.badge} color={color} width={BADGE_W} height={BADGE_H} size={25} /></div>
+        <div style={{ position: 'relative', minWidth: 0, fontSize: px, fontWeight: hot ? 600 : 500, lineHeight: TEXT_LINE_H, overflowWrap: 'anywhere', ...clampLines(2) }}>{row.text}</div>
       </div>
     </Reveal>
   );
@@ -43,11 +51,19 @@ const Tags: React.FC<{ tags: string[]; local: number; delay: number; fps: number
   </div>
 );
 
+/** 一行的高度：标签与文字取高者，加上下内边距 */
+function rowHeight(text: string, padY: number): number {
+  const px = fitFontSize(text, TEXT_W, TEXT_PX, 24, 2);
+  const lines = Math.min(2, lineCount(text, TEXT_W * EST_WIDTH, px));
+  return Math.max(BADGE_H, lines * px * TEXT_LINE_H) + padY * 2;
+}
+
 /** 估算卡片高度，超出安全区时整体缩小 */
 function estimateHeight(props: PropsOf<'evidenceList'>, titlePx: number): number {
-  const titleLines = lineCount(props.title, INNER_W, titlePx);
-  const rows = props.rows.reduce((h, r) => h + (lineCount(r.text, TEXT_W, fitFontSize(r.text, TEXT_W, TEXT_PX, 24, 2)) > 1 ? 116 : 78), 0);
-  return 84 + (props.crumb ? 44 : 0) + titleLines * titlePx * 1.25 + 22 + rows + (props.rows.length - 1) * 6 + (props.tags?.length ? 76 : 0);
+  const titleLines = Math.min(3, lineCount(props.title, INNER_W * EST_WIDTH, titlePx));
+  const padY = rowPadY(props.rows.length);
+  const rows = props.rows.reduce((h, r) => h + rowHeight(r.text, padY), 0);
+  return 84 + (props.crumb ? 44 : 0) + titleLines * titlePx * 1.25 + 22 + rows + (props.rows.length - 1) * ROW_GAP + (props.tags?.length ? 76 : 0);
 }
 
 /** 证据列表卡：面包屑 + 标题 + 成本/收益/证据/来源 行 + 底部来源标签 */
@@ -61,11 +77,11 @@ export const EvidenceList: React.FC<TemplateProps<'evidenceList'>> = ({ props, l
       <CardFrame padding={`40px ${PAD_X}px 44px`}>
         <Reveal p={springAt(local, 0.05, fps)} dy={18}>
           {props.crumb ? <Crumb text={props.crumb} size={24} maxWidth={INNER_W} /> : null}
-          <div style={{ marginTop: props.crumb ? 14 : 0, fontSize: titlePx, fontWeight: 800, lineHeight: 1.25, letterSpacing: '-0.01em', ...clampLines(3) }}>{props.title}</div>
+          <div style={{ marginTop: props.crumb ? 14 : 0, fontSize: titlePx, fontWeight: 800, lineHeight: 1.25, letterSpacing: '-0.01em', overflowWrap: 'anywhere', ...clampLines(3) }}>{props.title}</div>
         </Reveal>
-        <div style={{ marginTop: 22, marginLeft: -ROW_PAD_X, marginRight: -ROW_PAD_X, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ marginTop: 22, marginLeft: -ROW_PAD_X, marginRight: -ROW_PAD_X, display: 'flex', flexDirection: 'column', gap: ROW_GAP }}>
           {props.rows.map((r, i) => (
-            <EvidenceRow key={i} row={r} hot={hot.has(i)} p={springAt(local, ROW_START + i * ROW_STAGGER, fps)} mark={easeAt(local, ROW_START + i * ROW_STAGGER + 0.2, 0.35)} />
+            <EvidenceRow key={i} row={r} hot={hot.has(i)} padY={rowPadY(props.rows.length)} p={springAt(local, ROW_START + i * ROW_STAGGER, fps)} mark={easeAt(local, ROW_START + i * ROW_STAGGER + 0.2, 0.35)} />
           ))}
         </div>
         {props.tags?.length ? <Tags tags={props.tags} local={local} delay={rowsDone + 0.05} fps={fps} /> : null}

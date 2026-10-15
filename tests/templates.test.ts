@@ -16,8 +16,9 @@ import { SAFE_H, fitScale } from '../render/templates/parts.js';
 import { estimateChipsHeight } from '../render/templates/Chips.js';
 import { STRIKE_END, strikeStarts } from '../render/templates/StrikeList.js';
 import { clickTimes } from '../render/templates/Toggles.js';
-import { ctaColor } from '../render/templates/Cta.js';
-import { CardLayer } from '../render/layers/CardLayer.js';
+import { ctaClickTimes, ctaColor } from '../render/templates/Cta.js';
+import { CardLayer, cardExit } from '../render/layers/CardLayer.js';
+import { estimateHookHeight } from '../render/templates/Hook.js';
 
 export const SAMPLES: CardSpec[] = [
   { template: 'hook', props: { index: 1, total: 3, kicker: '这 3 句话都出自 GitHub 近 3.5 万星的《高性价比人生指南》', headline: '吃抗氧化补剂的人死亡率反而略高', highlight: ['略高'], stat: { value: '78 项试验', label: '近 30 万人' } } },
@@ -150,5 +151,39 @@ describe('按镜头时长收拢节奏与版面估算', () => {
     expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'full' }], sec: 1 })).toBeNull();
     expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'full', card: SAMPLES[1] }], sec: 1 })).toBeNull();
     expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'full', card: cta }], sec: 1 })).not.toBeNull();
+  });
+});
+
+describe('终审修复：CTA 节奏、末镜头不淡出、字宽与钩子估高', () => {
+  it('CTA：短镜头压缩点击间隔，最后一次按下在结束前完成；长镜头保持 0.5 秒间隔', () => {
+    const t = ctaClickTimes(3, 2);
+    expect(t[2] + 0.24).toBeLessThanOrEqual(2 - 0.2 + 1e-9);
+    expect(t[1]).toBeGreaterThan(t[0]);
+    expect(ctaClickTimes(3, 10)).toEqual([0.5, 1, 1.5]);
+    const tiny = ctaClickTimes(3, 0.8);
+    expect(tiny[2] + 0.24).toBeLessThanOrEqual(0.8 + 1e-9);
+  });
+  it('末镜头（片尾的 cta）不做出场淡出；其他镜头最后 0.25 秒淡出', () => {
+    expect(cardExit(10, 9.95, true)).toBe(0);
+    expect(cardExit(10, 9.95, false)).toBeGreaterThan(0.5);
+    expect(cardExit(10, 5, false)).toBe(0);
+  });
+  it('字宽：W/M 约 0.9em，其他大写 0.7em，数字 0.6em，小写 0.55em', () => {
+    expect(textEm('WM')).toBeCloseTo(1.8);
+    expect(textEm('AB')).toBeCloseTo(1.4);
+    expect(textEm('12')).toBeCloseTo(1.2);
+    expect(textEm('ab')).toBeCloseTo(1.1);
+  });
+  it('钩子：全大写长标题 + 长 kicker + 长 stat，缩放后不超出安全区', () => {
+    const W = (n: number) => 'WMWQ'.repeat(n).slice(0, n);
+    const props = { index: 1, total: 3, kicker: W(60), headline: 'WMWM WMWM WMWM WMWM WMWM WMWM WMWM WMWM WMWM WMWM WMWM WMWM', highlight: [], stat: { value: W(24), label: W(24) } };
+    const est = estimateHookHeight(props);
+    expect(est * fitScale(est)).toBeLessThanOrEqual(SAFE_H);
+    expect(fitScale(estimateHookHeight({ index: 1, total: 3, headline: '吃抗氧化补剂的人死亡率反而略高', highlight: [] }))).toBe(1);
+  });
+  it('钩子估高按实际行数：断不开的长单词按折行后的行数计', () => {
+    // 60 个 W 是一个整体片段，均衡断行只得 1 行，但 52px 下要折成 3 行以上
+    const one = estimateHookHeight({ index: 1, total: 1, headline: 'W'.repeat(60), highlight: [] });
+    expect(one).toBeGreaterThanOrEqual(58 + 40 + 3 * 52 * 1.28);
   });
 });

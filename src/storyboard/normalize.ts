@@ -1,16 +1,20 @@
-import { HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, ShotSchema, type CardSpec, type Shot, type Storyboard } from './schema.js';
+import { CANVAS, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, ShotSchema, type CardSpec, type Shot, type Storyboard } from './schema.js';
 
 export interface NormalizeResult {
   storyboard: Storyboard;
   /** 不可用的镜头：结构不合法、photo 缺图，或被裁切后整体覆盖/超出片长而跳过 */
   dropped: number;
-  /** 因版式规则（hook 超窗或超量、cta 非末尾）或短镜头并入前一个而失去卡片的镜头 */
+  /** 因版式规则（hook 超窗或超量、cta 非末尾）或短镜头并入相邻镜头而失去卡片的镜头 */
   demoted: number;
   /** 因超过 MAX_SHOT_SEC 被截短的带卡片镜头数 */
   capped: number;
 }
 
 const MAX_HOOKS = 3;
+/** 短镜头前后都并不进去时，前一张卡片允许超出 MAX_SHOT_SEC 不足 1 秒（软上限），避免留下不足 1 秒的全屏闪屏 */
+const SOFT_MAX_SHOT_SEC = MAX_SHOT_SEC + MIN_SHOT_SEC;
+/** 末尾 cta 至少这么长，三连点击才放得下 */
+const CTA_MIN_SEC = 2;
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const countCards = (shots: Shot[]): number => shots.filter((s) => s.card !== undefined).length;
 const plain = (s: Shot): Shot => ({ start: s.start, end: s.end, layout: 'full' });
@@ -103,16 +107,59 @@ function fillGaps(shots: Shot[], durationSec: number): Shot[] {
   return out;
 }
 
-/** 短于 MIN_SHOT_SEC 的镜头并入前一个（cta 与首个镜头除外） */
+/** 短镜头的去向：keep 原样保留、prev 并入前一个、next 并入后一个、plain 改为全屏（实在放不下时） */
+type Fate = 'keep' | 'prev' | 'next' | 'plain';
+
+/** 短于 MIN_SHOT_SEC 的镜头（末尾 cta 除外；非末尾的 cta 之后会被降级，照常合并）：先并入前一个（带卡片的不超过 MAX_SHOT_SEC），再试并入后一个（同样限长），都不行时前一个按软上限并入，最后才改为全屏；首个镜头只能并入后一个，放不下就保留 */
+function shortFate(last: Shot | undefined, s: Shot, next: Shot | undefined): Fate {
+  if (round(s.end - s.start) >= MIN_SHOT_SEC || (s.card?.template === 'cta' && !next)) return 'keep';
+  const fitsNext = next !== undefined && (!next.card || round(next.end - s.start) <= MAX_SHOT_SEC);
+  if (!last) return fitsNext ? 'next' : 'keep';
+  if (!last.card || round(s.end - last.start) <= MAX_SHOT_SEC) return 'prev';
+  if (fitsNext) return 'next';
+  return round(s.end - last.start) < SOFT_MAX_SHOT_SEC ? 'prev' : 'plain';
+}
+
+/** 合并短镜头；并入后一个时不输出本镜头，后一个从已排好的末尾开始（起点提前） */
 function mergeShort(shots: Shot[]): Shot[] {
+  return shots.reduce<Shot[]>((acc, shot, i) => {
+    const last = acc[acc.length - 1];
+    const from = last ? last.end : 0;
+    const s = shot.start > from ? { ...shot, start: from } : shot;
+    const fate = shortFate(last, s, shots[i + 1]);
+    if (fate === 'prev') return [...acc.slice(0, -1), { ...last, end: s.end }];
+    if (fate === 'next') return acc;
+    return [...acc, fate === 'plain' ? plain(s) : s];
+  }, []);
+}
+
+/** 相邻的无卡片全屏镜头合并成一个 */
+function mergePlain(shots: Shot[]): Shot[] {
   return shots.reduce<Shot[]>((acc, s) => {
     const last = acc[acc.length - 1];
-    const isShort = round(s.end - s.start) < MIN_SHOT_SEC;
-    if (!last || !isShort || s.card?.template === 'cta') return [...acc, s];
-    // 并入后带卡片的镜头会超过 MAX_SHOT_SEC：不合并，短镜头改为全屏人像
-    if (last.card && round(s.end - last.start) > MAX_SHOT_SEC) return [...acc, plain(s)];
-    return [...acc.slice(0, -1), { ...last, end: s.end }];
+    return last && !last.card && !s.card ? [...acc.slice(0, -1), { ...last, end: s.end }] : [...acc, s];
   }, []);
+}
+
+/** 末尾 cta 不足 CTA_MIN_SEC 时起点前移，从前一个镜头借时长（前一个至少留 MIN_SHOT_SEC）；前一个没有卡片且借完会太短时整个并入 cta */
+function ensureCtaRoom(shots: Shot[]): Shot[] {
+  const last = shots[shots.length - 1];
+  const prev = shots[shots.length - 2];
+  if (!prev || last.card?.template !== 'cta' || round(last.end - last.start) >= CTA_MIN_SEC) return shots;
+  // 向下取整到帧，帧对齐后仍不短于 CTA_MIN_SEC
+  const wanted = Math.floor(round(last.end - CTA_MIN_SEC) * CANVAS.fps) / CANVAS.fps;
+  if (!prev.card && wanted - prev.start < MIN_SHOT_SEC) return [...shots.slice(0, -2), { ...last, start: prev.start }];
+  const start = Math.max(wanted, round(prev.start + MIN_SHOT_SEC));
+  return start >= last.start ? shots : [...shots.slice(0, -2), { ...prev, end: start }, { ...last, start }];
+}
+
+const snap = (sec: number): number => Math.round(sec * CANVAS.fps) / CANVAS.fps;
+
+/** 内部边界对齐到帧（1/30 秒），片头 0、片尾保持片长；对齐后为零长的镜头去掉（前后仍首尾相接） */
+function snapToFrames(shots: Shot[], durationSec: number): Shot[] {
+  const end = round(durationSec);
+  const at = (sec: number, i: number): number => (i === 0 ? 0 : i === shots.length ? end : Math.min(snap(sec), end));
+  return shots.map((s, i): Shot => ({ ...s, start: at(s.start, i), end: at(s.end, i + 1) })).filter((s) => s.end > s.start);
 }
 
 /** 版式规则：hook 只取窗口内前 3 个并按序重编号；cta 只保留位于末尾的那个 */
@@ -144,7 +191,8 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
   const usable = valid.flatMap((s) => { const c = sanitizeShot(s, images); return c ? [c] : []; });
   const { placed, dropped: overlapDropped } = clampAndResolve(usable, durationSec);
   const { shots: capped, capped: cappedCount } = capLongShots(extendCta(placed, durationSec));
-  const shots = applyPlacementRules(mergeShort(fillGaps(capped, durationSec)));
+  const merged = mergePlain(applyPlacementRules(mergeShort(fillGaps(capped, durationSec))));
+  const shots = snapToFrames(ensureCtaRoom(merged), durationSec);
 
   return {
     storyboard: { shots },

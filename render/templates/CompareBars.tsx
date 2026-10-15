@@ -16,8 +16,10 @@ const TONE: Record<Tone, { ink: string; bottle: string }> = {
   warn: { ink: THEME.gold, bottle: '#8D97A2' },
   good: { ink: GREEN, bottle: GREEN },
 };
-const ITEM_H = 200;
-const ITEM_GAP = 26;
+/** 单行文字：字宽估算失准时以省略号收尾，不溢出卡片 */
+const ONE_LINE: React.CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' };
+const ITEM_H = 210;
+const ITEM_GAP = 40;
 
 /** 名称括号里的词作为瓶身标签，例如「甜饮料（含糖）」→「含糖」 */
 export function bottleLabel(name: string): string | null {
@@ -54,10 +56,10 @@ const ItemCard: React.FC<{ item: Item; grow: number }> = ({ item, grow }) => {
       <Bottle tone={item.tone} label={bottleLabel(item.name)} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 20, whiteSpace: 'nowrap' }}>
-          <span style={{ fontSize: namePx, fontWeight: 800 }}>{item.name}</span>
-          {item.annotation ? <span style={{ fontSize: fitFontSize(item.annotation, COL_W * 0.44, 34, 22), fontWeight: 800, color: tone.ink }}>{item.annotation}</span> : null}
+          <span style={{ ...ONE_LINE, fontSize: namePx, fontWeight: 800 }}>{item.name}</span>
+          {item.annotation ? <span style={{ ...ONE_LINE, flex: 'none', maxWidth: '48%', fontSize: fitFontSize(item.annotation, COL_W * 0.44, 34, 22), fontWeight: 800, color: tone.ink }}>{item.annotation}</span> : null}
         </div>
-        {item.note ? <div style={{ marginTop: 6, fontSize: notePx, fontWeight: 500, color: THEME.sub, whiteSpace: 'nowrap' }}>{item.note}</div> : null}
+        {item.note ? <div style={{ ...ONE_LINE, marginTop: 6, fontSize: notePx, fontWeight: 500, color: THEME.sub, whiteSpace: 'nowrap' }}>{item.note}</div> : null}
         <Bar value={item.value} color={tone.ink} p={grow} />
       </div>
     </CardFrame>

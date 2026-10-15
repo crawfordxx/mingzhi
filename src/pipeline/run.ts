@@ -118,7 +118,7 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   const cards = res.storyboard.shots.filter((s) => s.card).length;
   const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
   const retry = res.retryError ? ` · 重试失败（已用首次结果）：${res.retryError}` : '';
-  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${retry}`, { storyboard: res.storyboard, storyboardDropped: res.dropped });
+  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${retry}`, { storyboard: res.storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped });
   return res.storyboard;
 }
 
@@ -141,10 +141,12 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
   const person = relative(workDir, base);
   if (person.startsWith('..')) throw new Error(`人像视频必须在工作目录内：${base}`);
   const storyboard = await planStoryboard(llm, captions, a.plan.outputDurationSec, complete);
-  const { width, height } = await probe(base, cfg);
+  const baseInfo = await probe(base, cfg);
+  // 成片时长不超过人像视频的实际时长（剪切编码后可能比方案略短），避免末尾取不到帧
+  const durationSec = Math.min(a.plan.outputDurationSec, baseInfo.durationSec);
   await renderTalk({
     workDir, output, onProgress: throttledRenderProgress((e) => args.onProgress?.(e)),
-    props: { person, personWidth: width, personHeight: height, subject: project.subject ?? null, captions, shots: storyboard.shots, durationSec: a.plan.outputDurationSec },
+    props: { person, personWidth: baseInfo.width, personHeight: baseInfo.height, subject: project.subject ?? null, captions, shots: storyboard.shots, durationSec },
   }).catch((err: unknown) => {
     throw new Error(`成片渲染失败：${err instanceof Error ? err.message : String(err)}`);
   });
