@@ -1,6 +1,7 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
+import { readableOn } from '../../src/qa/contrast.js';
 import { CONTENT_W, CardFrame, Crumb, Reveal, SafeArea, easeAt, fitFontSize, fitScale, springAt, textEm, type PropsOf, type TemplateProps } from './parts.js';
 
 type Tone = 'bad' | 'warn' | 'good';
@@ -13,7 +14,7 @@ const GREEN = THEME.green;
 /** 文字/进度条用色 与 小瓶用色 */
 const TONE: Record<Tone, { ink: string; fill: string; bottle: string }> = {
   bad: { ink: THEME.redText, fill: THEME.red, bottle: THEME.red },
-  warn: { ink: THEME.goldText, fill: THEME.gold, bottle: '#8D97A2' },
+  warn: { ink: THEME.goldText, fill: THEME.gold, bottle: THEME.neutral },
   good: { ink: THEME.greenText, fill: GREEN, bottle: GREEN },
 };
 /** 单行文字：字宽估算失准时以省略号收尾，不溢出卡片 */
@@ -35,7 +36,7 @@ const Bottle: React.FC<{ tone: Tone; label: string | null }> = ({ tone, label })
       <div style={{ position: 'relative', width: BOTTLE_W, height: 118, marginTop: 3, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: color, boxShadow: 'inset -10px 0 0 rgba(0, 0, 0, 0.07)' }}>
         <div style={{ position: 'absolute', left: 11, top: 14, bottom: 14, width: 7, borderRadius: 4, background: 'rgba(255, 255, 255, 0.28)' }} />
-        {label ? <span style={{ position: 'relative', color: '#FFFFFF', fontSize: Math.min(24, Math.floor(60 / textEm(label))), fontWeight: 800, letterSpacing: '0.04em' }}>{label}</span> : null}
+        {label ? <span style={{ position: 'relative', color: readableOn(color), fontSize: Math.min(24, Math.floor(60 / textEm(label))), fontWeight: 800, letterSpacing: '0.04em' }}>{label}</span> : null}
       </div>
     </div>
   );

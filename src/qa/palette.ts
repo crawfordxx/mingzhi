@@ -1,14 +1,18 @@
 import { CAPTION_STYLES } from '../captions/styles.js';
 import { THEME } from '../../render/theme.js';
+import { blend, readableOn } from './contrast.js';
 
 export interface PalettePair { fg: string; bg: string; label: string }
 
 const WHITE = '#FFFFFF';
+/** StrikeList 胶囊底 rgba(255,255,255, 0.82 - strike×0.22) 划到底时的最低 alpha */
+const STRIKE_PILL_MIN_ALPHA = 0.6;
 
-/** 把黑色半透明底框叠在最亮的画面（纯白）上，得到字幕底框的最不利底色 */
-function worstCaseBox(alpha: number): string {
-  const v = Math.round(255 * (1 - alpha)).toString(16).padStart(2, '0').toUpperCase();
-  return `#${v}${v}${v}`;
+/** 把黑色半透明底框叠在最亮的画面（纯白）上，得到字幕底框的最不利底色；底框必须是纯黑，否则按纯黑算会失真，直接报错 */
+function worstCaseBox(boxColor: string): string {
+  const m = /^rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*([\d.]+)\s*\)$/.exec(boxColor);
+  if (!m) throw new Error(`字幕底框目前只支持纯黑半透明 rgba(0,0,0,a)：${boxColor}`);
+  return blend('#000000', Number(m[1]), '#FFFFFF');
 }
 
 function captionPairs(): PalettePair[] {
@@ -16,16 +20,44 @@ function captionPairs(): PalettePair[] {
     const pairs: PalettePair[] = [];
     if (s.stroke) pairs.push({ fg: s.color, bg: s.stroke.color, label: `字幕 ${id} 字色/描边` });
     if (s.box) {
-      const alpha = Number(/rgba\([^)]*,\s*([\d.]+)\)/.exec(s.box.color)?.[1] ?? 1);
-      pairs.push({ fg: s.color, bg: worstCaseBox(alpha), label: `字幕 ${id} 字色/底框（叠白底最不利）` });
+      pairs.push({ fg: s.color, bg: worstCaseBox(s.box.color), label: `字幕 ${id} 字色/底框（叠白底最不利）` });
     }
     if (s.highlight && s.stroke) pairs.push({ fg: s.highlight, bg: s.stroke.color, label: `字幕 ${id} 数字高亮/描边` });
     return pairs;
   });
 }
 
-/** 卡片与舞台上实际出现的文字/底色组合，字幕样式的字/描边（或底框）。
- *  THEME.faint 只用于「划掉」文字（刻意弱化）和装饰分隔点，不算可读文字，不在表内 */
+/** 彩色底（CTA 胶囊、瓶身）：字色由 readableOn 按底色自动选 */
+function filledPairs(): PalettePair[] {
+  const cta = [...Object.entries(THEME.cta.actions).map(([k, c]) => ({ name: k, c })), ...THEME.cta.fallback.map((c, i) => ({ name: `备用${i + 1}`, c }))];
+  return [
+    ...cta.map(({ name, c }) => ({ fg: readableOn(c), bg: c, label: `CTA ${name} 字色/底色 ${c}` })),
+    { fg: readableOn(THEME.neutral), bg: THEME.neutral, label: `瓶身标签 warn 字色/灰底 ${THEME.neutral}` },
+    { fg: readableOn(THEME.green), bg: THEME.green, label: `瓶身标签 good 字色/绿底 ${THEME.green}` },
+    { fg: readableOn(THEME.red), bg: THEME.red, label: `瓶身标签 bad 字色/红底 ${THEME.red}` },
+  ];
+}
+
+/** 叠在视频/照片上的半透明底，按最不利的纯黑画面合成底色后检查 */
+function glassPairs(): PalettePair[] {
+  const idle = blend(THEME.cta.idle.bg, THEME.cta.idle.alpha, '#000000');
+  const glass = blend(THEME.glass.bg, THEME.glass.alpha, '#000000');
+  const strike = blend('#FFFFFF', STRIKE_PILL_MIN_ALPHA, '#000000');
+  return [
+    { fg: THEME.cta.idle.fg, bg: idle, label: 'CTA 未点胶囊 灰字/半透明白底（叠黑最不利）' },
+    { fg: THEME.ink, bg: glass, label: '图片卡标签 ink/玻璃底（叠黑最不利）' },
+    { fg: THEME.subOnGlass, bg: glass, label: '图片卡副标题 subOnGlass/玻璃底（叠黑最不利）' },
+    { fg: THEME.ink, bg: strike, label: '划掉列表 ink/半透明白底（划掉后 alpha 最低，叠黑最不利）' },
+    { fg: THEME.hookLime, bg: blend(THEME.hookLime, 0.12, THEME.hookBg), label: 'Hook 数据条 hookLime/浅荧光底' },
+  ];
+}
+
+/** 卡片模板里的文字/底色组合 + 字幕样式的字/描边（或底框）。
+ *  有意不在表内：
+ *  - THEME.faint：只用于「划掉」文字（刻意弱化的已删除项）和装饰分隔点；
+ *  - Hook 白色标题压在视频上：真实底色是「视频 + 55% 深色蒙层」，随画面变，无法静态计算，表内只按 hookBg 实色检查；
+ *  - EvidenceList 高亮行的 12% 彩色浅底：叠在白卡上仍极浅，ink 字对比度 > 14；
+ *  - 光标、进度条、开关、色点、瓶盖等无文字的装饰色块。 */
 export function defaultPalette(): PalettePair[] {
   const badges = Object.entries(THEME.badge).map(([name, color]) => ({ fg: WHITE, bg: color, label: `徽标 ${name} 白字/底色` }));
   return [
@@ -42,6 +74,13 @@ export function defaultPalette(): PalettePair[] {
     { fg: THEME.hookBg, bg: THEME.hookLime, label: 'Hook 标签 hookBg/hookLime' },
     { fg: THEME.hookLime, bg: THEME.hookBg, label: 'Hook 荧光字 hookLime/hookBg' },
     ...badges,
+    { fg: THEME.maybe.fg, bg: THEME.maybe.bg, label: '不确定胶囊 maybe.fg/bg' },
+    { fg: THEME.hint, bg: THEME.card, label: '浏览器加载提示 hint/card' },
+    { fg: THEME.url.fg, bg: THEME.url.bg, label: '地址栏 url.fg/bg' },
+    { fg: WHITE, bg: THEME.hookBg, label: 'Hook 标题 白/hookBg' },
+    ...Object.entries(THEME.termInk).map(([k, fg]) => ({ fg, bg: THEME.terminal, label: `终端 ${k} 字/terminal` })),
+    ...filledPairs(),
+    ...glassPairs(),
     ...captionPairs(),
   ];
 }

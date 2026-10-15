@@ -7,7 +7,7 @@ import { run } from '../src/media/exec.js';
 import { THEME } from '../render/theme.js';
 import { contrastRatio } from '../src/qa/contrast.js';
 import { defaultPalette } from '../src/qa/palette.js';
-import { checkContrast, checkSafeArea, hardChecks, parseBlackSegments, parseEbur128, type HardCheck } from '../src/qa/hard.js';
+import { checkBlack, checkContrast, checkSafeArea, hardChecks, parseBlackSegments, parseEbur128, type HardCheck } from '../src/qa/hard.js';
 
 const cfg = loadConfig({});
 const byId = (checks: HardCheck[], id: HardCheck['id']): HardCheck => checks.find((c) => c.id === id)!;
@@ -122,6 +122,22 @@ describe('hardChecks（真实 ffmpeg）', () => {
     expect(byId(await hardChecks(mid, LAYOUT, PALETTE, cfg), 'blackFrames').ok).toBe(false);
     const tail = await make('black-tail.mp4', '7dB', ",drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='gte(t,3.5)'");
     expect(byId(await hardChecks(tail, LAYOUT, PALETTE, cfg), 'blackFrames').ok).toBe(true);
+  }, 60_000);
+
+  it('黑帧检测的 ffmpeg 失败时返回失败项而不是抛错', async () => {
+    const c = await checkBlack(join(dir, 'none.mp4'), 4, { ...cfg, ffmpeg: '/nonexistent/ffmpeg' });
+    expect(c.ok).toBe(false);
+    expect(c.id).toBe('blackFrames');
+    expect(c.detail).toContain('黑帧检测失败');
+  });
+
+  it('静音视频：响度与峰值 detail 打印 -inf 而不是 -Infinity', async () => {
+    const out = join(dir, 'silent.mp4');
+    await run(cfg.ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc2=s=1080x1920:r=30:d=2', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2',
+      '-vf', 'format=yuv420p', '-c:v', 'libx264', '-c:a', 'aac', out]);
+    const checks = await hardChecks(out, LAYOUT, PALETTE, cfg);
+    expect(byId(checks, 'truePeak').detail).toContain('-inf dBTP');
+    expect(byId(checks, 'truePeak').ok).toBe(true);
   }, 60_000);
 
   it('尺寸不对：resolution 失败', async () => {

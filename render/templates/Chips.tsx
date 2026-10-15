@@ -22,7 +22,7 @@ export const STAGGER = 0.12;
 const MARKS: Record<Mark, { bg: string; fg: string }> = {
   yes: { bg: THEME.tint.yes, fg: THEME.greenText },
   no: { bg: THEME.tint.no, fg: THEME.redText },
-  maybe: { bg: '#EEEDEA', fg: '#8C877E' },
+  maybe: THEME.maybe,
 };
 
 const pillPx = (text: string): number => fitFontSize(text, PILLS_W - 90, 32, 20);

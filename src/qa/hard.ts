@@ -31,7 +31,7 @@ const BLACK_TAIL_SEC = 0.5;
 
 export interface Palette { fg: string; bg: string; label: string }
 
-const fmt = (n: number): string => (Number.isFinite(n) ? n.toFixed(1) : String(n));
+const fmt = (n: number): string => (Number.isFinite(n) ? n.toFixed(1) : n < 0 ? '-inf' : 'inf');
 
 /** 解析 ebur128 Summary：积分响度 I 与真峰值 Peak；静音时为 -inf */
 export function parseEbur128(stderr: string): { lufs: number; peak: number } {
@@ -71,14 +71,20 @@ async function measureLoudness(video: string, cfg: AppConfig): Promise<HardCheck
   }
 }
 
-async function checkBlack(video: string, durationSec: number, cfg: AppConfig): Promise<HardCheck> {
-  const { stderr } = await run(cfg.ffmpeg, ['-hide_banner', '-nostats', '-i', video, '-an', '-vf', 'blackdetect=d=0.5:pix_th=0.10', '-f', 'null', '-']);
+export async function checkBlack(video: string, durationSec: number, cfg: AppConfig): Promise<HardCheck> {
+  let stderr: string;
+  try {
+    ({ stderr } = await run(cfg.ffmpeg, ['-hide_banner', '-nostats', '-i', video, '-an', '-vf', 'blackdetect=d=0.5:pix_th=0.10', '-f', 'null', '-']));
+  } catch (err) {
+    return { id: 'blackFrames', ok: false, detail: `黑帧检测失败：${(err as Error).message.split('\n')[0]}` };
+  }
   const bad = parseBlackSegments(stderr).filter((s) => s.start < durationSec - BLACK_TAIL_SEC);
   const detail = bad.length === 0 ? '无黑帧段（片尾 0.5 秒内除外）' : `黑帧段：${bad.map((s) => `${s.start}s–${s.end}s`).join('、')}`;
   return { id: 'blackFrames', ok: bad.length === 0, detail };
 }
 
-/** 静态几何检查：字幕竖向不进顶/底安全区，横向居中时右缘不进点赞栏 */
+/** 静态几何检查：字幕竖向不进顶/底安全区，横向居中时右缘不进点赞栏。
+ *  描边向外多出约 5px（stroke 宽 8–10 的一半），相对 120px 的留白可忽略，不计入宽度 */
 export function checkSafeArea(layout: CaptionLayout): HardCheck {
   const width = layout.captionMaxWidth ?? CAPTION_MAX_WIDTH;
   const maxSize = Math.max(...Object.values(CAPTION_STYLES).map((s) => s.size));
