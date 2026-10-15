@@ -1,6 +1,8 @@
-import { rename, copyFile } from 'node:fs/promises';
+import { rename, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { run } from '../media/exec.js';
+import { probe } from '../media/probe.js';
 
 /** 成片响度目标：-14 LUFS 积分响度，真峰值 ≤ -1.5 dBTP，响度范围 11 LU */
 export const TARGET = { I: -14, TP: -1.5, LRA: 11 } as const;
@@ -48,7 +50,25 @@ export function parseLoudnormJson(stderr: string): LoudnormMeasure {
   };
 }
 
-const BASE_FILTER = `loudnorm=I=${TARGET.I}:TP=${TARGET.TP}:LRA=${TARGET.LRA}`;
+/** 滤镜里的真峰值上限：比 TARGET.TP 低 0.3 dB，给 AAC 重编码的过冲留余量 */
+const FILTER_TP = -1.8;
+/** 验收：积分响度偏差超过 1 LU 或真峰值高于 -1.0 dBTP 就改用动态模式重做 */
+const MAX_LUFS_DEVIATION = 1;
+const MAX_TRUE_PEAK = -1.0;
+
+/** 动态模式在尖峰+低底噪的信号上会让真峰值超标（实测可到 0 dBTP），后面再接限幅器兜底（-2 dBFS） */
+const DYNAMIC_LIMITER = 'alimiter=limit=0.794:level=false';
+
+const BASE_FILTER = `loudnorm=I=${TARGET.I}:TP=${FILTER_TP}:LRA=${TARGET.LRA}`;
+const FASTSTART = ['-movflags', '+faststart'];
+
+export interface LoudnessResult {
+  before: number;
+  after: number;
+  /** 成片的真峰值（dBTP） */
+  truePeak: number;
+  mode: 'linear' | 'dynamic';
+}
 
 /** 只解码音轨跑一遍 loudnorm 并读出测量值 */
 async function measure(input: string, filter: string, cfg: AppConfig): Promise<LoudnormMeasure> {
@@ -56,26 +76,50 @@ async function measure(input: string, filter: string, cfg: AppConfig): Promise<L
   return parseLoudnormJson(stderr);
 }
 
+/** 第二遍：视频流拷贝，音频按第一遍的测量值归一；先写临时文件再改名，失败时清掉临时文件 */
+async function applyPass(input: string, output: string, first: LoudnormMeasure, linear: boolean, cfg: AppConfig): Promise<void> {
+  const filter =
+    `${BASE_FILTER}:measured_I=${first.input_i}:measured_TP=${first.input_tp}:measured_LRA=${first.input_lra}` +
+    `:measured_thresh=${first.input_thresh}:offset=${first.target_offset}:linear=${linear}:print_format=json${linear ? '' : `,${DYNAMIC_LIMITER}`}`;
+  const tmp = `${output}.tmp.mp4`;
+  try {
+    // 只映射第一路视频：流水线成片必有视频；纯音频输入不在支持范围
+    await run(cfg.ffmpeg, [
+      '-y', '-hide_banner', '-nostats', '-i', input, '-map', '0:v', '-map', '0:a:0',
+      '-c:v', 'copy', '-af', filter, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', ...FASTSTART, tmp,
+    ]);
+    await rename(tmp, output);
+  } finally {
+    await rm(tmp, { force: true });
+  }
+}
+
+function meetsTarget(m: LoudnormMeasure): boolean {
+  return Math.abs(m.input_i - TARGET.I) <= MAX_LUFS_DEVIATION && m.input_tp <= MAX_TRUE_PEAK;
+}
+
 /**
- * 两遍 loudnorm 把音轨统一到 -14 LUFS：视频流直接拷贝，音频重编码为 AAC 192k/48kHz。
- * 返回 normalize 前后的积分响度（LUFS），after 由对成片的第三次测量得到。
- * 静音音轨无法归一：原样拷贝到 output，before 与 after 均为 -Infinity。
+ * 两遍 loudnorm 把音轨统一到 -14 LUFS：视频流直接拷贝，音频重编码为 AAC 192k/48kHz，输出带 faststart。
+ * 先走 linear 模式；成片复测达不到目标（响度偏差 > 1 LU 或真峰值 > -1.0 dBTP）时，
+ * 从原始输入改用动态模式（linear=false，并接限幅器）重做并再次复测，mode 报告最终采用的模式。
+ * 静音音轨无法归一：重封装（faststart）后原样输出，before 与 after 均为 -Infinity。
  */
-export async function normalizeLoudness(input: string, output: string, cfg: AppConfig): Promise<{ before: number; after: number }> {
+export async function normalizeLoudness(input: string, output: string, cfg: AppConfig): Promise<LoudnessResult> {
+  if (resolve(input) === resolve(output)) throw new Error('输入与输出路径不能相同');
+  if (!(await probe(input, cfg)).hasAudio) throw new Error('成片没有音轨，无法统一响度');
   const first = await measure(input, `${BASE_FILTER}:print_format=json`, cfg);
   if (!Number.isFinite(first.input_i)) {
-    await copyFile(input, output);
-    return { before: first.input_i, after: first.input_i };
+    await run(cfg.ffmpeg, ['-y', '-hide_banner', '-i', input, '-c', 'copy', ...FASTSTART, '-f', 'mp4', output]);
+    return { before: first.input_i, after: first.input_i, truePeak: first.input_tp, mode: 'linear' };
   }
-  const second =
-    `${BASE_FILTER}:measured_I=${first.input_i}:measured_TP=${first.input_tp}:measured_LRA=${first.input_lra}` +
-    `:measured_thresh=${first.input_thresh}:offset=${first.target_offset}:linear=true:print_format=json`;
-  const tmp = `${output}.tmp.mp4`;
-  await run(cfg.ffmpeg, [
-    '-y', '-hide_banner', '-nostats', '-i', input, '-map', '0:v', '-map', '0:a:0',
-    '-c:v', 'copy', '-af', second, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', tmp,
-  ]);
-  await rename(tmp, output);
-  const verify = await measure(output, `${BASE_FILTER}:print_format=json`, cfg);
-  return { before: first.input_i, after: verify.input_i };
+  const verifyFilter = `${BASE_FILTER}:print_format=json`;
+  await applyPass(input, output, first, true, cfg);
+  let verify = await measure(output, verifyFilter, cfg);
+  let mode: LoudnessResult['mode'] = 'linear';
+  if (!meetsTarget(verify)) {
+    await applyPass(input, output, first, false, cfg);
+    verify = await measure(output, verifyFilter, cfg);
+    mode = 'dynamic';
+  }
+  return { before: first.input_i, after: verify.input_i, truePeak: verify.input_tp, mode };
 }

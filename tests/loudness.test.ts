@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
@@ -48,6 +48,21 @@ describe('parseLoudnormJson', () => {
   });
 });
 
+/** 读 mp4 顶层 box 的类型顺序（size + type，兼容 64 位 largesize） */
+function topLevelBoxes(path: string): string[] {
+  const buf = readFileSync(path);
+  const types: string[] = [];
+  let pos = 0;
+  while (pos + 8 <= buf.length) {
+    let size = buf.readUInt32BE(pos);
+    types.push(buf.toString('latin1', pos + 4, pos + 8));
+    if (size === 1) size = Number(buf.readBigUInt64BE(pos + 8));
+    if (size === 0) break;
+    pos += size;
+  }
+  return types;
+}
+
 describe('normalizeLoudness', () => {
   let dir: string;
   beforeAll(() => {
@@ -68,8 +83,13 @@ describe('normalizeLoudness', () => {
   it('-30 dBFS 正弦统一到 -14 LUFS 左右，时长与视频流保持', async () => {
     const input = await makeInput('quiet.mp4', 'sine=frequency=440:duration=4:sample_rate=48000,volume=-30dB');
     const output = join(dir, 'quiet-norm.mp4');
-    const { before, after } = await normalizeLoudness(input, output, cfg);
+    const { before, after, truePeak, mode } = await normalizeLoudness(input, output, cfg);
     expect(TARGET.I).toBe(-14);
+    expect(truePeak).toBeLessThanOrEqual(-1.0);
+    expect(['linear', 'dynamic']).toContain(mode);
+    const boxes = topLevelBoxes(output);
+    expect(boxes.indexOf('moov')).toBeGreaterThanOrEqual(0);
+    expect(boxes.indexOf('moov')).toBeLessThan(boxes.indexOf('mdat'));
     expect(before).toBeLessThan(-25);
     expect(after).toBeGreaterThan(-15);
     expect(after).toBeLessThan(-13);
@@ -87,5 +107,35 @@ describe('normalizeLoudness', () => {
     expect(before).toBe(-Infinity);
     expect(after).toBe(before);
     expect(existsSync(output)).toBe(true);
+    const boxes = topLevelBoxes(output);
+    expect(boxes.indexOf('moov')).toBeLessThan(boxes.indexOf('mdat'));
   }, 60_000);
+
+  it('峰值很高的突发信号：最终响度在 -14±1.5 LU，真峰值 ≤ -1.0 dBTP', async () => {
+    const burst = "aevalsrc='0.2*sin(2*PI*1000*t)*lt(mod(t,1),0.05)+0.005*(random(0)*2-1)':s=48000:d=8";
+    const input = await makeInput('peaky.mp4', burst);
+    const output = join(dir, 'peaky-norm.mp4');
+    const { after, truePeak, mode } = await normalizeLoudness(input, output, cfg);
+    expect(mode).toBe('dynamic'); // 线性模式会让真峰值到 0 dBTP，必须触发回退
+    expect(Math.abs(after - TARGET.I)).toBeLessThanOrEqual(1.5);
+    expect(truePeak).toBeLessThanOrEqual(-1.0);
+  }, 60_000);
+
+  it('没有音轨时报错', async () => {
+    const input = join(dir, 'noaudio.mp4');
+    await run(cfg.ffmpeg, ['-y', '-f', 'lavfi', '-i', 'color=c=black:s=160x90:r=25:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input]);
+    await expect(normalizeLoudness(input, join(dir, 'noaudio-out.mp4'), cfg)).rejects.toThrow('成片没有音轨，无法统一响度');
+  });
+
+  it('输入输出同一路径时报错', async () => {
+    const input = await makeInput('same.mp4', 'sine=frequency=440:duration=2:sample_rate=48000');
+    await expect(normalizeLoudness(input, input, cfg)).rejects.toThrow('不能相同');
+  });
+
+  it('第二遍失败时清掉临时文件', async () => {
+    const input = await makeInput('fail.mp4', 'sine=frequency=440:duration=2:sample_rate=48000');
+    const output = join(dir, 'nodir', 'out.mp4');
+    await expect(normalizeLoudness(input, output, cfg)).rejects.toThrow();
+    expect(existsSync(`${output}.tmp.mp4`)).toBe(false);
+  });
 });
