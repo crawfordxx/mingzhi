@@ -19,6 +19,7 @@ import { clickTimes } from '../render/templates/Toggles.js';
 import { ctaClickTimes, ctaColor } from '../render/templates/Cta.js';
 import { CardLayer, cardExit } from '../render/layers/CardLayer.js';
 import { estimateHookHeight } from '../render/templates/Hook.js';
+import { shotStartFrame } from '../render/templates/ShotVideo.js';
 
 export const SAMPLES: CardSpec[] = [
   { template: 'hook', props: { index: 1, total: 3, kicker: '这 3 句话都出自 GitHub 近 3.5 万星的《高性价比人生指南》', headline: '吃抗氧化补剂的人死亡率反而略高', highlight: ['略高'], stat: { value: '78 项试验', label: '近 30 万人' } } },
@@ -189,5 +190,15 @@ describe('终审修复：CTA 节奏、末镜头不淡出、字宽与钩子估高
     // 60 个 W 是一个整体片段，均衡断行只得 1 行，但 52px 下要折成 3 行以上
     const one = estimateHookHeight({ index: 1, total: 1, headline: 'W'.repeat(60), highlight: [] });
     expect(one).toBeGreaterThanOrEqual(58 + 40 + 3 * 52 * 1.28);
+  });
+});
+
+describe('视频底的镜头起点', () => {
+  it('镜头 3.0 秒起（第 90 帧）：镜头内 0 秒、1.5 秒、非整数帧都还原出第 90 帧', () => {
+    expect(shotStartFrame(90, 0, 30)).toBe(90);
+    expect(shotStartFrame(135, 1.5, 30)).toBe(90);
+    // 浮点秒数：local = 7.0 - 3.0 的结果带误差，仍取整回第 90 帧
+    expect(shotStartFrame(210, 7.0 - 3.0, 30)).toBe(90);
+    expect(shotStartFrame(100, 10 / 30 + 1e-9, 30)).toBe(90);
   });
 });

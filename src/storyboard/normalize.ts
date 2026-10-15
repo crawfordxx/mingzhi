@@ -59,11 +59,12 @@ function sanitizeCard(card: CardSpec, files: Set<string>): CardSpec | null {
   }
 }
 
-/** 无卡片的 split 镜头变为全屏；卡片不可用则返回 null（镜头整体丢弃） */
+/** 无卡片的 split 镜头变为全屏；full 镜头只有 cta 能显示卡片，带其他卡片的改为 split（保留内容，否则会为看不见的卡片白取素材）；卡片不可用则返回 null（镜头整体丢弃） */
 function sanitizeShot(shot: Shot, files: Set<string>): Shot | null {
   if (!shot.card) return { ...shot, layout: 'full' };
   const card = sanitizeCard(shot.card, files);
-  return card ? { ...shot, card } : null;
+  if (!card) return null;
+  return { ...shot, card, layout: shot.layout === 'full' && card.template !== 'cta' ? 'split' : shot.layout };
 }
 
 /** 裁进 [0, D] 并消除重叠；裁后为空的镜头计入 dropped */

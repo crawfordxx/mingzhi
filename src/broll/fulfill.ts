@@ -15,7 +15,8 @@ export interface BrollDeps {
   screenshot(url: string, out: string): Promise<void>;
   search(query: string): Promise<string[]>;
   image(prompt: string, out: string): Promise<{ cost?: number }>;
-  video(prompt: string, out: string): Promise<{ cost?: number }>;
+  /** onStatus：长任务的状态回调（轮询到的状态文字），可选 */
+  video(prompt: string, out: string, onStatus?: (status: string) => void): Promise<{ cost?: number }>;
   pexels?(query: string, out: string): Promise<boolean>;
 }
 export interface FulfillOptions {
@@ -24,7 +25,11 @@ export interface FulfillOptions {
   durationSec: number;
   maxVideos: number;
   budgetYuan: number;
+  /** 某个素材开始获取前回调（缓存命中不回调） */
+  onStart?: (need: VisualNeed) => void;
   onAsset?: (a: BrollAsset | { key: string; failed: string }) => void;
+  /** 视频任务的状态变化 */
+  onStatus?: (status: string) => void;
 }
 /** failures[].shotIndex 指输入分镜（传入 fulfillVisuals 的 storyboard）的镜头下标；归一化可能合并或丢弃镜头，返回的 storyboard 下标可能不同 */
 export interface FulfillResult { storyboard: Storyboard; assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number }
@@ -37,7 +42,7 @@ const SEARCH_TRIES = 2;
 const PEXELS_WORDS = 6;
 
 type Attempt = { asset: BrollAsset } | { reason: string };
-interface Env { deps: BrollDeps; workDir: string; budgetYuan: number; maxVideos: number }
+interface Env { deps: BrollDeps; workDir: string; budgetYuan: number; maxVideos: number; onStatus?: (status: string) => void }
 /** yuan：已花费；videos：已发起（含失败、含缓存命中）的视频请求数 */
 interface Spend { yuan: number; videos: number }
 
@@ -62,7 +67,7 @@ export function makeDeps(opts: { apiKey: string; task: TaskClient; cfg: AppConfi
     screenshot: (url, out) => screenshotUrl(url, out),
     search: (query) => searchUrls(apiKey, query, { max: SEARCH_TRIES }),
     image: (prompt, out) => generateImage(task, prompt, out),
-    video: (prompt, out) => generateVideo(task, prompt, out, cfg),
+    video: (prompt, out, onStatus) => generateVideo(task, prompt, out, cfg, undefined, onStatus),
     ...(pexelsKey ? { pexels: (query: string, out: string) => searchPexels(pexelsKey, query, out) } : {}),
   };
 }
@@ -103,9 +108,10 @@ function validCache(path: string): boolean {
   return false;
 }
 
-/** 按来源在缓存里找已有文件：截图 png（或退化成的 jpg）、生图 jpg、视频 mp4（或退化成的 jpg） */
-function findCached(env: Env, key: string, source: Visual['source']): BrollAsset | undefined {
-  const candidates: [string, BrollAsset['source']][] = source === 'screenshot' ? [['png', 'screenshot'], ['jpg', 'generate']] : source === 'video' ? [['mp4', 'video'], ['jpg', 'generate']] : [['jpg', 'generate']];
+/** 按来源在缓存里找已有文件：截图 png（或退化成的 jpg）、生图 jpg、视频 mp4（或退化成的 jpg）；视频已达 maxVideos 时不用缓存的 mp4 */
+function findCached(env: Env, key: string, source: Visual['source'], videoRequests: number): BrollAsset | undefined {
+  const videoAllowed = videoRequests < env.maxVideos;
+  const candidates: [string, BrollAsset['source']][] = source === 'screenshot' ? [['png', 'screenshot'], ['jpg', 'generate']] : source === 'video' ? [...(videoAllowed ? [['mp4', 'video'] as [string, BrollAsset['source']]] : []), ['jpg', 'generate']] : [['jpg', 'generate']];
   const hit = candidates.find(([ext]) => validCache(join(env.workDir, relFile(key, ext))));
   return hit ? { key, file: relFile(key, hit[0]), source: hit[1], cached: true } : undefined;
 }
@@ -158,7 +164,7 @@ async function tryVideo(env: Env, key: string, prompt: string, spend: Spend): Pr
   if (spend.videos >= env.maxVideos) return { attempt: { reason: '视频数量已达上限' }, tried: false };
   if (spend.yuan + EST_VIDEO_YUAN > env.budgetYuan) return { attempt: { reason: OVER_BUDGET }, tried: false };
   const file = relFile(key, 'mp4');
-  const r = await produce(join(env.workDir, file), (tmp) => env.deps.video(prompt, tmp));
+  const r = await produce(join(env.workDir, file), (tmp) => env.deps.video(prompt, tmp, env.onStatus));
   const attempt: Attempt = typeof r === 'string' ? { reason: `生视频失败：${r}` } : { asset: { key, file, source: 'video', cost: costOf(r.result, EST_VIDEO_YUAN) } };
   return { attempt, tried: true };
 }
@@ -217,14 +223,15 @@ function existingFiles(storyboard: Storyboard, workDir: string): string[] {
  */
 export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, opts: FulfillOptions): Promise<FulfillResult> {
   mkdirSync(join(opts.workDir, 'broll'), { recursive: true });
-  const env: Env = { deps, workDir: opts.workDir, budgetYuan: opts.budgetYuan, maxVideos: opts.maxVideos };
+  const env: Env = { deps, workDir: opts.workDir, budgetYuan: opts.budgetYuan, maxVideos: opts.maxVideos, onStatus: opts.onStatus };
   let current = storyboard;
   let assets: BrollAsset[] = [];
   let failures: FulfillResult['failures'] = [];
   let videoRequests = 0;
   for (const need of visualsOf(storyboard)) {
     const key = visualKey(need.visual);
-    const cached = findCached(env, key, need.visual.source);
+    const cached = findCached(env, key, need.visual.source, videoRequests);
+    if (!cached) opts.onStart?.(need);
     const { outcome, videoTried } = cached ? { outcome: { asset: cached } as Attempt, videoTried: cached.source === 'video' } : await fetchAsset(env, need, key, { yuan: yuanOf(assets), videos: videoRequests });
     videoRequests += videoTried ? 1 : 0;
     if ('asset' in outcome) {

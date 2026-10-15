@@ -12,6 +12,7 @@ describe('loadConfig', () => {
     expect(cfg.dataDir).toBe(join(homedir(), '.mingzhi'));
     expect(cfg.modelsDir).toBe(join(homedir(), '.mingzhi', 'models'));
     expect(cfg.kexiangKey).toBeUndefined();
+    expect(cfg.pexelsKey).toBeUndefined();
   });
 
   it('MINGZHI_DATA_DIR 为空串时回退默认数据目录', () => {
@@ -35,10 +36,15 @@ describe('loadConfig', () => {
   });
 
   it('环境变量可覆盖', () => {
-    const cfg = loadConfig({ MINGZHI_DATA_DIR: '/tmp/mz', MINGZHI_FFMPEG: '/opt/ff', MINGZHI_FFPROBE: '/opt/fp', MINGZHI_KX_KEY: 'abc' });
+    const cfg = loadConfig({ MINGZHI_DATA_DIR: '/tmp/mz', MINGZHI_FFMPEG: '/opt/ff', MINGZHI_FFPROBE: '/opt/fp', MINGZHI_KX_KEY: 'abc', MINGZHI_PEXELS_KEY: 'pk' });
     expect(cfg.modelsDir).toBe('/tmp/mz/models');
     expect(cfg.ffmpeg).toBe('/opt/ff');
     expect(cfg.ffprobe).toBe('/opt/fp');
     expect(cfg.kexiangKey).toBe('abc');
+    expect(cfg.pexelsKey).toBe('pk');
+  });
+
+  it('Pexels key 为空串时视为未配置', () => {
+    expect(loadConfig({ MINGZHI_PEXELS_KEY: '' }).pexelsKey).toBeUndefined();
   });
 });

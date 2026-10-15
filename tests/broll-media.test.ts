@@ -39,6 +39,18 @@ describe('generateVideo', () => {
     expect(existsSync(`${dest}.raw.mp4`)).toBe(false);
   });
 
+  it('onStatus 透传给任务客户端，供长任务显示进度', async () => {
+    const cfg = loadConfig({});
+    const seen: unknown[] = [];
+    const task: TaskClient = { run: async (_i, opts) => { seen.push(opts.onStatus); return { taskId: '1', url: 'https://x/r' }; } };
+    const onStatus = (): void => undefined;
+    const dir = mkdtempSync(join(tmpdir(), 'mz-gv-st-'));
+    await generateVideo(task, 'slow push-in on a glass of cola with ice', join(dir, 'v.mp4'), cfg, async (_u, d) => {
+      await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=320x320:r=24:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', d]);
+    }, onStatus);
+    expect(seen).toEqual([onStatus]);
+  });
+
   it('下载到的不是有效视频时转码失败：报中文错误，且清掉 raw 中间文件', async () => {
     const cfg = loadConfig({});
     const dir = mkdtempSync(join(tmpdir(), 'mz-gv-bad-'));

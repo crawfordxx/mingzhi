@@ -83,6 +83,35 @@ describe('fulfillVisuals 缓存校验', () => {
     expect(r.assets[0]?.cached).toBeUndefined();
   });
 
+  it('缓存的 mp4 也受 maxVideos 约束：上限 0 时不用，改为生图；上限 1 时第二个缓存视频同样不用', async () => {
+    const dir = workDir();
+    const [v1, v2] = [vid('slow push-in on a glass of cola'), vid('slow pan across a messy desk')];
+    mkdirSync(join(dir, 'broll'));
+    for (const v of [v1, v2]) touch(join(dir, 'broll', `${visualKey(v)}.mp4`));
+    const none = fakeDeps();
+    const r0 = await fulfillVisuals(board(hook(0, v1)), none.deps, opts(dir, { maxVideos: 0 }));
+    expect(none.calls.image).toHaveLength(1);
+    expect(r0.assets.map((a) => a.source)).toEqual(['generate']);
+    const one = fakeDeps();
+    const r1 = await fulfillVisuals(board(hook(0, v1), hook(5, v2)), one.deps, opts(dir, { maxVideos: 1 }));
+    expect(r1.assets.map((a) => [a.source, a.cached])).toEqual([['video', true], ['generate', undefined]]);
+    expect(one.calls.image).toHaveLength(1);
+  });
+
+  it('onStart 只在真正去取素材前回调（缓存命中不回调）；onStatus 透传给视频依赖', async () => {
+    const dir = workDir();
+    const cached = gen('a jar of coins on a table');
+    mkdirSync(join(dir, 'broll'));
+    touch(join(dir, 'broll', `${visualKey(cached)}.jpg`));
+    const fresh = vid('slow push-in on a glass of cola');
+    const started: number[] = [];
+    const statuses: string[] = [];
+    const { deps } = fakeDeps({ video: async (_p, out, onStatus) => { onStatus?.('running'); touch(out); return { cost: 2.4 }; } });
+    await fulfillVisuals(board(photo(0, cached), hook(5, fresh)), deps, opts(dir, { onStart: (n) => started.push(n.shotIndex), onStatus: (s) => statuses.push(s) }));
+    expect(started).toEqual([1]);
+    expect(statuses).toEqual(['running']);
+  });
+
   it('依赖写到临时文件再改名：成功后只留正式文件，失败不留残留', async () => {
     const dir = workDir();
     const outs: string[] = [];

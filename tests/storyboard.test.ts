@@ -350,6 +350,21 @@ describe('素材需求 visual', () => {
     const { storyboard } = normalizeStoryboard(raw, 4, []);
     expect(storyboard.shots[0].card).toEqual({ template: 'hook', props: { index: 1, total: 1, headline: '钩子', highlight: [], visual } });
   });
+  it('visualsOf 只看分屏镜头：全屏镜头上的 visual 不取素材', () => {
+    const visual = { source: 'generate' as const, prompt: 'a jar of coins on a wooden table' };
+    const sb = { shots: [{ start: 0, end: 3, layout: 'full' as const, card: { template: 'photo' as const, props: { visual } } }] };
+    expect(visualsOf(sb)).toEqual([]);
+  });
+  it('full 镜头带非 cta 卡片时改为 split 并保留卡片；带 cta 的 full 不变', () => {
+    const visual = { source: 'video', prompt: 'slow push-in on a glass of cola with ice' };
+    const raw = { shots: [
+      { start: 0, end: 4, layout: 'full', card: { template: 'hook', props: { index: 1, total: 1, headline: '钩子', highlight: [], visual } } },
+      { start: 4, end: 10, layout: 'full', card: { template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } } },
+    ] };
+    const { storyboard } = normalizeStoryboard(raw, 10, []);
+    expect(storyboard.shots[0]).toMatchObject({ layout: 'split', card: { template: 'hook', props: { visual } } });
+    expect(storyboard.shots[1]).toMatchObject({ layout: 'full', card: { template: 'cta' } });
+  });
   it('visualsOf 列出全部素材需求及其镜头下标', () => {
     const sb = { shots: [
       { start: 0, end: 3, layout: 'split' as const, card: { template: 'hook' as const, props: { index: 1, total: 1, headline: '钩子', highlight: [], visual: { source: 'video' as const, prompt: 'slow push-in on a glass of cola with ice' } } } },

@@ -23,10 +23,10 @@ export async function generateImage(task: TaskClient, prompt: string, dest: stri
 }
 
 /** Seedance 文生视频：1:1 / 4 秒 / 720p，约 ¥2.4 一条；原片是 24fps，下载后统一转成 30fps 无音轨 */
-export async function generateVideo(task: TaskClient, prompt: string, dest: string, cfg: AppConfig, download: Download = downloadTo): Promise<{ cost?: number }> {
+export async function generateVideo(task: TaskClient, prompt: string, dest: string, cfg: AppConfig, download: Download = downloadTo, onStatus?: (status: string) => void): Promise<{ cost?: number }> {
   const { url, cost } = await task.run(
     { modelName: VIDEO_MODEL, modelType: 'text2video', content: [{ type: 'text', text: prompt }], ratio: '1:1', duration: 4, resolution: '720p', watermark: false, generate_audio: false },
-    { kind: 'video', timeoutMs: VIDEO_TIMEOUT_MS },
+    { kind: 'video', timeoutMs: VIDEO_TIMEOUT_MS, onStatus },
   );
   const raw = `${dest}.raw.mp4`;
   try {

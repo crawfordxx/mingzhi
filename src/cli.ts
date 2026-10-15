@@ -3,8 +3,7 @@ import { resolveCliPaths } from './cli-paths.js';
 import { parseBackgroundArgs } from './background/resolve.js';
 import { loadConfig } from './config.js';
 import { KexiangClient } from './llm/kexiang.js';
-import { KexiangTaskClient } from './llm/kexiang-task.js';
-import { parseBrollArgs } from './pipeline/broll-step.js';
+import { makeTaskClient, parseBrollArgs } from './pipeline/broll-step.js';
 import { runPipeline } from './pipeline/run.js';
 
 const USAGE = '用法：pnpm mingzhi edit <口播视频> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] [--no-broll] [--max-videos N] [--budget 元]';
@@ -17,8 +16,8 @@ async function main(): Promise<void> {
   const { input, workDir, output } = resolveCliPaths(inputArg, values, baseDir);
   const cfg = loadConfig();
   const background = parseBackgroundArgs(values.bg, values['bg-prompt'], baseDir);
-  const broll = parseBrollArgs(values, process.env);
-  const task = background?.kind === 'prompt' || broll.enabled ? new KexiangTaskClient(cfg.kexiangKey ?? '') : undefined;
+  const broll = parseBrollArgs(values, cfg.pexelsKey);
+  const task = makeTaskClient(cfg, { background: background?.kind === 'prompt', broll });
   const llm = new KexiangClient(cfg.kexiangKey ?? '');
   const started = Date.now();
   const res = await runPipeline({ input, workDir, output, cfg, llm, background, task, broll, onProgress: (e) => console.log(`[${e.step}] ${e.message}`) });

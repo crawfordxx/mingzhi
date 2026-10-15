@@ -9,6 +9,8 @@ export interface AppConfig {
   ffmpeg: string;
   ffprobe: string;
   kexiangKey?: string;
+  /** Pexels 图库 key（可选，B-roll 生图失败时的备选） */
+  pexelsKey?: string;
 }
 
 const EXE = process.platform === 'win32' ? '.exe' : '';
@@ -27,5 +29,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ffmpeg: env.MINGZHI_FFMPEG ?? bundled(dataDir, 'ffmpeg'),
     ffprobe: env.MINGZHI_FFPROBE ?? bundled(dataDir, 'ffprobe'),
     kexiangKey: env.MINGZHI_KX_KEY || undefined,
+    pexelsKey: env.MINGZHI_PEXELS_KEY || undefined,
   };
 }

@@ -7,6 +7,9 @@ import { AbsoluteFill, Loop, OffthreadVideo, Sequence, staticFile, useCurrentFra
  */
 export const BROLL_VIDEO_SEC = 4;
 
+/** 镜头起点的全片帧号：当前全片帧减去镜头内已过的帧（local 为镜头内秒数，可以不是整数帧） */
+export const shotStartFrame = (frame: number, local: number, fps: number): number => Math.round(frame - local * fps);
+
 /**
  * 卡片底上的视频：静音、铺满、镜头比素材长时循环。
  * 底不随镜头移动，所以帧数是全片的；用 Sequence 把起点对齐到镜头开头（local 为镜头内秒数），视频才从头播放。
@@ -14,7 +17,7 @@ export const BROLL_VIDEO_SEC = 4;
 export const ShotVideo: React.FC<{ src: string; local: number }> = ({ src, local }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
-  const shotStart = Math.round(frame - local * fps);
+  const shotStart = shotStartFrame(frame, local, fps);
   return (
     <Sequence from={shotStart} layout="none">
       <Loop durationInFrames={Math.round(BROLL_VIDEO_SEC * fps)} layout="none">
