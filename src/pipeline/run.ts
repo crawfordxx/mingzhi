@@ -107,17 +107,19 @@ export function throttledRenderProgress(emit: (e: ProgressEvent) => void): (rati
 
 /** 生成分镜；请求失败不中断，降级为整片人像全屏一个镜头，并在进度消息里写明原因 */
 async function planStoryboard(llm: LlmClient, captions: TimedCaption[], durationSec: number, complete: Complete): Promise<Storyboard> {
+  let res: Awaited<ReturnType<typeof generateStoryboard>>;
   try {
-    const res = await generateStoryboard(llm, captions, durationSec, []);
-    const cards = res.storyboard.shots.filter((s) => s.card).length;
-    const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
-    complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}`, { storyboard: res.storyboard, storyboardDropped: res.dropped });
-    return res.storyboard;
+    res = await generateStoryboard(llm, captions, durationSec, []);
   } catch (err) {
     const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }] };
     complete('storyboard', `分镜生成失败，改为全程人像：${err instanceof Error ? err.message : String(err)}`, { storyboard });
     return storyboard;
   }
+  const cards = res.storyboard.shots.filter((s) => s.card).length;
+  const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
+  const retry = res.retryError ? ` · 重试失败（已用首次结果）：${res.retryError}` : '';
+  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${retry}`, { storyboard: res.storyboard, storyboardDropped: res.dropped });
+  return res.storyboard;
 }
 
 /** 剪切 → 换背景 → 字幕 → 分镜 → Remotion 成片 */
@@ -143,6 +145,8 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
   await renderTalk({
     workDir, output, onProgress: throttledRenderProgress((e) => args.onProgress?.(e)),
     props: { person, personWidth: width, personHeight: height, subject: project.subject ?? null, captions, shots: storyboard.shots, durationSec: a.plan.outputDurationSec },
+  }).catch((err: unknown) => {
+    throw new Error(`成片渲染失败：${err instanceof Error ? err.message : String(err)}`);
   });
   complete('compose', '成片渲染完成', { artifacts: { output, final: output } });
   return { captions, storyboard };
