@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { SpaceStore } from '../src/workspace/store.js';
 import { EventBus, toWorkEvent, type WorkEvent, type WorkEventInput } from '../src/workspace/events.js';
 import { JobQueue, type Job } from '../src/workspace/jobs.js';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
 
 const ev = (spaceId: string, version: number, step: WorkEvent['step'], message: string, extra: Partial<WorkEventInput> = {}): WorkEventInput =>
   ({ t: 1, spaceId, version, step, message, ...extra });
@@ -113,6 +114,36 @@ describe('EventBus', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(bus.history(space.id, n).map((e) => e.message)).toEqual(['好']);
     expect(warn).toHaveBeenCalledTimes(4);
+    warn.mockRestore();
+  });
+
+  it('末行没有换行（上次写到一半被杀）：新事件不会拼到残行后面丢失，残行单独被丢弃', () => {
+    const store = newStore();
+    const space = store.create('t', [], SETTINGS);
+    const { n } = store.addVersion(space.id, { summary: '', changedShots: [], costYuan: 0, status: 'running' });
+    const file = join(store.versionDir(space.id, n), 'events.jsonl');
+    writeFileSync(file, `${JSON.stringify({ seq: 1, t: 1, spaceId: space.id, version: n, step: 'probe', message: '前' })}\n{"seq":2,"t":1,"spaceId":"x"`);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const bus = new EventBus((id, v) => store.versionDir(id, v));
+    bus.publish(ev(space.id, n, 'asr', '后'));
+    bus.publish(ev(space.id, n, 'cuts', '再后'));
+    expect(bus.history(space.id, n).map((e) => e.message)).toEqual(['前', '后', '再后']);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('落盘失败时 seq 不复用：内存里照常递增，目录恢复后接着往后编号', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-jobs-'));
+    const blocker = join(dir, 'file');
+    writeFileSync(blocker, 'x');
+    let broken = true;
+    const bus = new EventBus(() => (broken ? join(blocker, 'sub') : join(dir, 'ok')));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(bus.publish(ev('s', 1, 'probe', '丢')).seq).toBe(1);
+    expect(bus.publish(ev('s', 1, 'asr', '又丢')).seq).toBe(2);
+    broken = false;
+    expect(bus.publish(ev('s', 1, 'cuts', '存下')).seq).toBe(3);
+    expect(bus.history('s', 1).map((e) => e.seq)).toEqual([3]);
     warn.mockRestore();
   });
 
@@ -225,6 +256,20 @@ describe('JobQueue', () => {
     q.cancel('a');
     await tick();
     expect(seen.map((e) => e.message)).toEqual(['已取消']);
+  });
+
+  it('取消与余额不足错误同时出现：以取消为准，failed 消息为「已取消」', async () => {
+    const bus = new EventBus(() => mkdtempSync(join(tmpdir(), 'mz-jobs-')));
+    const seen: WorkEvent[] = [];
+    bus.subscribe('a', (e) => seen.push(e));
+    const q = new JobQueue(async (_job, signal) => {
+      await new Promise<void>((r) => signal.addEventListener('abort', () => r()));
+      throw new InsufficientBalanceError();
+    }, bus);
+    q.enqueue(makeJob('a'));
+    q.cancel('a');
+    await tick();
+    expect(seen.map((e) => [e.step, e.message])).toEqual([['failed', '已取消']]);
   });
 
   it('取消还在排队的任务：直接移出队列、不会运行、发布 failed「已取消」', async () => {

@@ -13,7 +13,7 @@ import { resolveBackground, validateBackground, type BackgroundSpec } from '../b
 import { detectCuts, type Cut } from '../cut/llm-cuts.js';
 import { buildEditPlan, cutsToRanges, type EditPlan } from '../cut/plan.js';
 import { renderCut } from '../cut/render-cut.js';
-import { rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
+import { CancelledError, rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
@@ -241,6 +241,10 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   };
   try {
     return await runSteps(args, projectPath, complete, meter);
+  } catch (err) {
+    // 已取消时以取消为准：取消后在途的付费调用才报出的余额不足等错误不再外抛，调用方只会看到「已取消」
+    if (args.signal?.aborted && !(err instanceof CancelledError)) throw new CancelledError();
+    throw err;
   } finally {
     // 无论成败都把最新账目落盘：失败时钱已经花了；写盘失败不能盖掉原错误
     try { record({ costs: costsOf(meter) }); } catch { /* 忽略：保留 try 块里的原始错误 */ }

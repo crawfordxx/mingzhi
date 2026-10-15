@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import ort from 'onnxruntime-node';
 import type { AppConfig } from '../config.js';
@@ -189,7 +190,9 @@ async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo):
 
   const dec = decoder(opts.cfg, opts.input, `fps=${OUT_FPS}`);
   const decDone = exited(dec, '解码');
-  const enc = startEncoder(opts, w, h);
+  // 先写临时文件，成功后再改名：取消或失败时不破坏已有的好文件
+  const tmpOutput = `${opts.output}.${randomUUID().slice(0, 8)}.tmp.mp4`;
+  const enc = startEncoder({ ...opts, output: tmpOutput }, w, h);
   const out = Buffer.alloc(w * h * 3);
   const boxes: SubjectBox[] = [];
   let frames = 0;
@@ -209,12 +212,14 @@ async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo):
     await decDone;
     enc.proc.stdin.end();
     await enc.done;
+    renameSync(tmpOutput, opts.output);
   } catch (e) {
     rethrowIfCancelled(e);
     const reason = await rootCause(e, enc);
     throw new Error(`抠像换背景失败（已处理 ${frames} 帧）：${reason}`);
   } finally {
     killAll(dec, enc.proc);
+    rmSync(tmpOutput, { force: true });
   }
   opts.onProgress?.(frames, total);
   return { frames, subject: medianBox(boxes), gains, fps: OUT_FPS };

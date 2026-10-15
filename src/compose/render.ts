@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -60,17 +60,24 @@ export async function withCancelSignal<T>(signal: AbortSignal | undefined, fn: (
 
 export interface RenderOptions { workDir: string; props: TalkProps; output: string; concurrency?: number; onProgress?: (ratio: number) => void; signal?: AbortSignal }
 
+/** 整条渲染先写带随机后缀的临时文件，成功后改名；取消或失败时不覆盖已有的好文件 */
 export async function renderTalk(opts: RenderOptions): Promise<void> {
   throwIfCancelled(opts.signal);
-  await withBundle(opts.workDir, (serveUrl) => withCancelSignal(opts.signal, async (cancelSignal) => {
-    const inputProps = opts.props;
-    const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
-    await renderMedia({
-      composition, serveUrl, inputProps, codec: 'h264', crf: 18, outputLocation: opts.output,
-      concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
-      onProgress: ({ progress }) => opts.onProgress?.(progress),
-    });
-  }));
+  const tmp = `${opts.output}.${randomUUID().slice(0, 8)}.tmp.mp4`;
+  try {
+    await withBundle(opts.workDir, (serveUrl) => withCancelSignal(opts.signal, async (cancelSignal) => {
+      const inputProps = opts.props;
+      const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+      await renderMedia({
+        composition, serveUrl, inputProps, codec: 'h264', crf: 18, outputLocation: tmp,
+        concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
+        onProgress: ({ progress }) => opts.onProgress?.(progress),
+      });
+    }));
+    renameSync(tmp, opts.output);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
   opts.onProgress?.(1);
 }
 

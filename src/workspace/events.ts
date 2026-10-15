@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PipelineStep, ProgressEvent } from '../pipeline/run.js';
 
@@ -43,6 +43,8 @@ export class EventBus {
   private subscribers = new Map<string, readonly ((e: WorkEvent) => void)[]>();
   /** 各「项目+版本」最近一次的序号；第一次发布时从已落盘的事件续上，服务重启后序号不回头 */
   private lastSeq = new Map<string, number>();
+  /** 已检查过末尾换行的事件文件（每个文件每个进程只检查一次） */
+  private tailChecked: ReadonlySet<string> = new Set();
 
   constructor(private readonly versionDir: (spaceId: string, version: number) => string) {}
 
@@ -106,9 +108,27 @@ export class EventBus {
     try {
       const dir = this.versionDir(e.spaceId, e.version);
       mkdirSync(dir, { recursive: true });
-      appendFileSync(join(dir, EVENTS_FILE), `${JSON.stringify(e)}\n`);
+      const file = join(dir, EVENTS_FILE);
+      this.terminateTail(file);
+      appendFileSync(file, `${JSON.stringify(e)}\n`);
     } catch (err) {
       console.warn(`事件写入 events.jsonl 失败：${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** 进程曾被杀在写到一半时，文件末行没有换行；先补一个换行，让残行单独成行、不吞掉下一条事件 */
+  private terminateTail(file: string): void {
+    if (this.tailChecked.has(file)) return;
+    if (existsSync(file) && statSync(file).size > 0) {
+      const fd = openSync(file, 'r');
+      try {
+        const last = Buffer.alloc(1);
+        readSync(fd, last, 0, 1, statSync(file).size - 1);
+        if (last[0] !== 0x0a) appendFileSync(file, '\n');
+      } finally {
+        closeSync(fd);
+      }
+    }
+    this.tailChecked = new Set([...this.tailChecked, file]);
   }
 }

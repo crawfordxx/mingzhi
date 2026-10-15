@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CancelledError, rethrowIfCancelled, throwIfCancelled } from '../src/cancel.js';
@@ -17,7 +17,8 @@ import type { ProjectFile, ProjectPatch } from '../src/pipeline/project.js';
 import { runQaCards } from '../src/pipeline/qa-step.js';
 import { runPipeline, type ProgressEvent } from '../src/pipeline/run.js';
 import type { Storyboard } from '../src/storyboard/schema.js';
-import { hasRvm } from './helpers/models.js';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
+import { hasModels, hasRvm } from './helpers/models.js';
 
 const cfg = loadConfig({});
 const llm: LlmClient = { chatJson: async () => ({ cuts: [] }) };
@@ -158,10 +159,31 @@ describe('步骤内部响应取消', () => {
     await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x808080:s=180x320:r=30:d=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input]);
     const controller = new AbortController();
     const seen: number[] = [];
+    // 占位的「上一次的好文件」：取消后必须原样保留，且不留临时文件
+    writeFileSync(join(dir, 'out.mp4'), 'previous-good');
     await expect(matteVideo({
       input, output: join(dir, 'out.mp4'), backgroundPath: presetPath('cafe'), cfg, signal: controller.signal,
       onProgress: (done) => { seen.push(done); controller.abort(); },
     })).rejects.toBeInstanceOf(CancelledError);
     expect(seen.at(-1)).toBeLessThan(90);
+    expect(readFileSync(join(dir, 'out.mp4'), 'utf8')).toBe('previous-good');
+    expect(readdirSync(dir).filter((f) => f.includes('.tmp.'))).toEqual([]);
+  });
+});
+
+describe.skipIf(!hasModels())('取消与余额不足同时出现（需要本地模型）', () => {
+  it('取消后在途的付费调用报余额不足：runPipeline 以取消为准，抛 CancelledError 而不是余额错误', async () => {
+    const controller = new AbortController();
+    const brokeAfterCancel: LlmClient = { chatJson: async () => { controller.abort(); throw new InsufficientBalanceError(); } };
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-cancel-bal-'));
+    await expect(runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output: join(workDir, 'out.mp4'), cfg, llm: brokeAfterCancel, signal: controller.signal }))
+      .rejects.toBeInstanceOf(CancelledError);
+  });
+
+  it('没有取消时余额不足照常外抛', async () => {
+    const broke: LlmClient = { chatJson: async () => { throw new InsufficientBalanceError(); } };
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-cancel-bal-'));
+    await expect(runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output: join(workDir, 'out.mp4'), cfg, llm: broke }))
+      .rejects.toBeInstanceOf(InsufficientBalanceError);
   });
 });

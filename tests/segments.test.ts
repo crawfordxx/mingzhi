@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CancelledError } from '../src/cancel.js';
 import { loadConfig } from '../src/config.js';
 import { run, runBuffer } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
@@ -159,6 +160,38 @@ describe('renderSegmented 边界', () => {
     const workDir = mkdtempSync(join(tmpdir(), 'mz-seg-empty-'));
     await expect(renderSegmented({ workDir, cacheDir: join(workDir, 'c'), output: join(workDir, 'o.mp4'), props: { ...BASE, shots: [] } })).rejects.toThrow('分镜为空');
   });
+});
+
+describe('renderSegmented 取消（真实 Remotion 渲染）', () => {
+  const cfg = loadConfig({});
+  const makeDir = async (): Promise<string> => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-seg-cancel-'));
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', join(workDir, 'person.mp4')]);
+    return workDir;
+  };
+
+  it('开始前已取消：抛 CancelledError，什么都不渲染也不产出', async () => {
+    const workDir = await makeDir();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(renderSegmented({ workDir, cacheDir: join(workDir, 'cache'), props: BASE, output: join(workDir, 'final.mp4'), ffmpeg: cfg.ffmpeg, signal: controller.signal })).rejects.toBeInstanceOf(CancelledError);
+    expect(existsSync(join(workDir, 'final.mp4'))).toBe(false);
+  }, 60_000);
+
+  it('第一段渲完后取消：抛 CancelledError；已渲完的段留作缓存，不留临时文件，也不产出成片', async () => {
+    const workDir = await makeDir();
+    const cacheDir = join(workDir, 'cache');
+    const controller = new AbortController();
+    await expect(renderSegmented({
+      workDir, cacheDir, props: BASE, output: join(workDir, 'final.mp4'), ffmpeg: cfg.ffmpeg, signal: controller.signal,
+      onProgress: () => controller.abort(),
+    })).rejects.toBeInstanceOf(CancelledError);
+    const files = readdirSync(cacheDir);
+    expect(files.filter((f) => f.includes('.tmp.'))).toEqual([]);
+    expect(files.filter((f) => f.endsWith('.mp4'))).toHaveLength(1);
+    expect(existsSync(join(workDir, 'final.mp4'))).toBe(false);
+  }, 120_000);
 });
 
 describe('renderSegmented（真实 Remotion 渲染）', () => {
