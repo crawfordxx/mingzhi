@@ -1,4 +1,4 @@
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { fontPath, loadFonts, sfxPath, trackPath, type Track } from '../assets/catalog.js';
@@ -42,12 +42,10 @@ async function stageTrack(workDir: string, cfg: AppConfig, track: Track): Promis
 export async function stageCaptionFont(workDir: string, cfg: AppConfig, styleId: CaptionStyleId): Promise<{ file: string; fallback: boolean }> {
   const font = loadFonts().find((f) => f.id === CAPTION_STYLES[styleId].font);
   if (!font) throw new Error(`字幕样式 ${styleId} 的字体 ${CAPTION_STYLES[styleId].font} 不在素材清单里`);
+  // 与 fontsReady 一致：不存在或 0 字节都按未下载处理，避免渲染时才因坏字体失败
+  const size = await stat(fontPath(cfg, font)).then((s) => s.size, () => 0);
+  if (size === 0) return { file: '', fallback: true };
   await mkdir(join(workDir, 'fonts'), { recursive: true });
-  try {
-    await copyFile(fontPath(cfg, font), join(workDir, 'fonts', font.file));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { file: '', fallback: true };
-    throw e;
-  }
+  await copyFile(fontPath(cfg, font), join(workDir, 'fonts', font.file));
   return { file: font.file, fallback: false };
 }

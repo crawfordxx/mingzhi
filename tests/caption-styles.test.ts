@@ -76,6 +76,16 @@ describe('stageCaptionFont', () => {
     expect(existsSync(join(workDir, 'fonts', 'NotoSansSC-VF.ttf'))).toBe(false);
   });
 
+  it('字体文件为 0 字节（损坏）：按未下载处理，返回 fallback=true', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'mz-cf-zero-'));
+    const cfg = cfgWith(dataDir);
+    const font = loadFonts().find((f) => f.id === CAPTION_STYLES.song.font)!;
+    mkdirSync(join(dataDir, 'assets', 'fonts'), { recursive: true });
+    writeFileSync(fontPath(cfg, font), '');
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-cf-work-'));
+    expect(await stageCaptionFont(workDir, cfg, 'song')).toEqual({ file: '', fallback: true });
+  });
+
   it('字体未下载：不报错，返回 fallback=true 且文件名为空', async () => {
     const cfg = cfgWith(mkdtempSync(join(tmpdir(), 'mz-cf-empty-')));
     const workDir = mkdtempSync(join(tmpdir(), 'mz-cf-work-'));
