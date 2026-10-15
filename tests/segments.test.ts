@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { run, runBuffer } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import { renderTalk } from '../src/compose/render.js';
-import { renderSegmented, segmentBounds, shotHash } from '../src/compose/segments.js';
+import { codeFiles, createStamper, renderSegmented, segmentBounds, segmentSalt, shotHash } from '../src/compose/segments.js';
 import type { Shot, TalkProps } from '../src/storyboard/schema.js';
 
 const title = (t: string): Shot['card'] => ({ template: 'title', props: { title: t } });
@@ -20,6 +20,7 @@ const BASE: TalkProps = {
   captions: [{ start: 0, end: 1.5, text: '第一行' }, { start: 1.5, end: 3, text: '第二行' }],
 };
 const { shots: _shots, ...REST } = BASE;
+const RANGE = { start: 0, end: 30 };
 const hashAll = (p: TalkProps): string[] => {
   const { shots, ...rest } = p;
   return segmentBounds(shots, p.durationSec).map((range, i) => shotHash(shots[i], rest, i, { shots, range }));
@@ -72,7 +73,91 @@ describe('shotHash', () => {
     for (const patch of [{ person: 'other.mp4' }, { captionStyle: 'song' as const }, { subject: { top: 0.3 } as TalkProps['subject'] }, { personHeight: 700 }]) {
       hashAll({ ...BASE, ...patch }).forEach((h, i) => expect(h, JSON.stringify(patch)).not.toBe(base[i]));
     }
-    expect(shotHash(SHOTS[0], REST, 0, { shots: SHOTS, salt: 'x' })).not.toBe(shotHash(SHOTS[0], REST, 0, { shots: SHOTS }));
+    expect(shotHash(SHOTS[0], REST, 0, { shots: SHOTS, range: RANGE, salt: 'x' })).not.toBe(shotHash(SHOTS[0], REST, 0, { shots: SHOTS, range: RANGE }));
+  });
+});
+
+describe('盐值（素材与渲染代码指纹）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mz-salt-'));
+  mkdirSync(join(dir, 'broll'));
+  mkdirSync(join(dir, 'fonts'));
+  const write = (name: string, content: string, mtime = 1_700_000_000): void => {
+    writeFileSync(join(dir, name), content);
+    utimesSync(join(dir, name), mtime, mtime);
+  };
+  const photo = (image: string): Shot['card'] => ({ template: 'photo', props: { image } });
+  const SHOTS4: Shot[] = [0, 1, 2, 3].map((i) => ({ start: i, end: i + 1, layout: 'split' as const, card: i === 1 ? photo('broll/a.png') : title(`镜${i}`) }));
+  const props: TalkProps = { ...BASE, durationSec: 4, shots: SHOTS4, captionFontFile: 'f.ttf' };
+  const salts = async (p: TalkProps = props, code?: string): Promise<string[]> => {
+    const stamper = createStamper(dir, code);
+    return Promise.all(p.shots.map((_, i) => segmentSalt(stamper, p, i)));
+  };
+  /** 与 renderSegmented 同样的算法：盐值进镜头哈希 */
+  const hashes = async (p: TalkProps = props, code?: string): Promise<string[]> => {
+    const sl = await salts(p, code);
+    const { shots, ...rest } = p;
+    return segmentBounds(shots, p.durationSec).map((range, i) => shotHash(shots[i], rest, i, { shots, range, salt: sl[i] }));
+  };
+  const changed = (a: string[], b: string[]): boolean[] => a.map((h, i) => h !== b[i]);
+
+  beforeAll(() => {
+    write('person.mp4', 'person-v1');
+    write('broll/a.png', 'img-v1');
+    write('fonts/f.ttf', 'font-v1');
+  });
+
+  it('B-roll 图片内容变：该镜头及相邻镜头（i±1，进出场相邻）变，不相邻镜头不变；mtime 变而内容不变则不变', async () => {
+    const base = await hashes();
+    write('broll/a.png', 'img-v1', 1_800_000_000);
+    expect(changed(await hashes(), base)).toEqual([false, false, false, false]);
+    write('broll/a.png', 'img-v2');
+    expect(changed(await hashes(), base)).toEqual([true, true, true, false]);
+    write('broll/a.png', 'img-v1');
+  });
+  it('图片同名同大小同 mtime 但内容不同也能识别', async () => {
+    const base = await hashes();
+    write('broll/a.png', 'img-XX');
+    expect(changed(await hashes(), base)).toEqual([true, true, true, false]);
+    write('broll/a.png', 'img-v1');
+  });
+  it('人像文件内容变：所有镜头变', async () => {
+    const base = await hashes();
+    write('person.mp4', 'person-v2');
+    expect(changed(await hashes(), base)).toEqual([true, true, true, true]);
+    write('person.mp4', 'person-v1');
+  });
+  it('字体文件内容变：所有镜头变', async () => {
+    const base = await hashes();
+    write('fonts/f.ttf', 'font-v2');
+    expect(changed(await hashes(), base)).toEqual([true, true, true, true]);
+    write('fonts/f.ttf', 'font-v1');
+  });
+  it('渲染代码指纹变：所有镜头变；素材文件缺失与存在不同', async () => {
+    const base = await hashes();
+    expect(changed(await hashes(props, 'code-v2'), base)).toEqual([true, true, true, true]);
+    expect(changed(await hashes({ ...props, person: 'nope.mp4' }), base)).toEqual([true, true, true, true]);
+  });
+  it('同一指纹器内同一文件只读一次（改文件后同一次调用内仍是旧值）', async () => {
+    const stamper = createStamper(dir, 'c');
+    const before = await stamper.file('person.mp4');
+    write('person.mp4', 'person-v3');
+    expect(await stamper.file('person.mp4')).toBe(before);
+    write('person.mp4', 'person-v1');
+  });
+  it('代码指纹文件清单包含渲染包的 src 依赖（对比度、画布常量）与 render 模板', () => {
+    const files = codeFiles().map((f) => f.replace(/\\/g, '/'));
+    for (const tail of ['src/qa/contrast.ts', 'src/storyboard/schema.ts', 'src/captions/styles.ts', 'render/Talk.tsx', 'render/templates/Cta.tsx']) expect(files.some((f) => f.endsWith(tail)), tail).toBe(true);
+  });
+  it('默认代码指纹：40 位十六进制、重复计算稳定', () => {
+    expect(createStamper(dir).code).toMatch(/^[0-9a-f]{40}$/);
+    expect(createStamper(dir).code).toBe(createStamper(dir).code);
+  });
+});
+
+describe('renderSegmented 边界', () => {
+  it('分镜为空：抛中文错误', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-seg-empty-'));
+    await expect(renderSegmented({ workDir, cacheDir: join(workDir, 'c'), output: join(workDir, 'o.mp4'), props: { ...BASE, shots: [] } })).rejects.toThrow('分镜为空');
   });
 });
 
