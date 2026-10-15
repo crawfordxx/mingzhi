@@ -71,9 +71,10 @@ export function CoverPicker({ options, value, onChange }: CoverProps) {
               whileHover={{ y: -3 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
               <span className="covt-im">
                 <img src={o.example} alt={`${o.name}风格示例封面`} loading="lazy" draggable={false} />
+                <It className="covt-i">{String(i + 1).padStart(2, '0')}</It>
                 {on && <motion.span layoutId="cover-ring" className="sel-ring" transition={SPRING} />}
               </span>
-              <span className="covt-nm"><It className="covt-i">{String(i + 1).padStart(2, '0')}</It><span title={o.name}>{o.name}</span></span>
+              <span className="covt-nm" title={o.name}>{o.name}</span>
             </motion.button>
           );
         })}

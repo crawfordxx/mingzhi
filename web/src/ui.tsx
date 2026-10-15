@@ -1,6 +1,6 @@
 /** 共用小件：动效常量、图标、红黄绿、按压按钮 */
-import { motion, type HTMLMotionProps } from 'motion/react';
-import type { ReactNode } from 'react';
+import { motion, useReducedMotion, useSpring, useTransform, type HTMLMotionProps } from 'motion/react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 /** 按压/选中用硬一点的弹簧，展开/入场用软弹簧（与 G1 原稿一致） */
 export const SPRING = { type: 'spring', stiffness: 420, damping: 34 } as const;
@@ -14,6 +14,9 @@ export const Ico = {
   down: <svg viewBox="0 0 16 16" {...stroke}><path d="M8 2.5v8M4 7l4 4 4-4M3 13.5h10" /></svg>,
   ext: <svg viewBox="0 0 16 16" {...stroke}><path d="M5 11 11 5M6 5h5v5" /></svg>,
   play: <svg viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.5v9l7.5-4.5z" /></svg>,
+  pause: <svg viewBox="0 0 12 12" fill="currentColor"><rect x="2.5" y="1.5" width="2.5" height="9" rx=".6" /><rect x="7" y="1.5" width="2.5" height="9" rx=".6" /></svg>,
+  replay: <svg viewBox="0 0 16 16" {...stroke}><path d="M2.5 8a5.5 5.5 0 1 0 1.7-4" /><path d="M2.5 2.5v3.5H6" /></svg>,
+  undo: <svg viewBox="0 0 16 16" {...stroke}><path d="M5.5 4 2.5 7l3 3" /><path d="M2.5 7h7a4 4 0 0 1 0 8H8" /></svg>,
   plus: <svg viewBox="0 0 16 16" {...stroke}><path d="M8 3v10M3 8h10" /></svg>,
   close: <svg viewBox="0 0 16 16" {...stroke}><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" /></svg>,
   check: <svg viewBox="0 0 16 16" {...stroke} strokeWidth={2}><path d="m3.5 8.5 3 3 6-7" /></svg>,
@@ -46,3 +49,23 @@ export function Tap({ children, disabled, ...rest }: HTMLMotionProps<'button'> &
 export const It = ({ children, l, className = '' }: { children: ReactNode; l?: boolean; className?: string }) => (
   <span className={`it${l ? ' l' : ''} ${className}`.trim()}>{children}</span>
 );
+
+/** 数字滚动（Revolut 式计数）：值变了就用弹簧滚过去；减弱动效时直接跳到目标值 */
+export function Num({ value, format, className }: { value: number; format: (v: number) => string; className?: string }) {
+  const reduce = useReducedMotion();
+  const spring = useSpring(value, { stiffness: 140, damping: 24, mass: 0.6 });
+  useEffect(() => { if (reduce) spring.jump(value); else spring.set(value); }, [value, reduce, spring]);
+  const text = useTransform(spring, format);
+  return <motion.span className={className}>{text}</motion.span>;
+}
+
+/** 每隔 ms 刷新一次的当前时间（用来显示「已用 0:12」）；active=false 时不走 */
+export function useNow(active: boolean, ms = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return undefined;
+    const id = window.setInterval(() => setNow(Date.now()), ms);
+    return () => window.clearInterval(id);
+  }, [active, ms]);
+  return now;
+}

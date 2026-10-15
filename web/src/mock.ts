@@ -7,6 +7,7 @@
 import type { Api, Estimate, KeyInfo, Options, SettingsPatch, Space, SpaceSettings, Status, UploadOpts } from './api';
 import { ApiError } from './api';
 import { probeDuration } from './lib/media';
+import { withRuns } from './mock-runs';
 
 const BACKGROUNDS: [string, string, string][] = [
   ['study', '书房', '01-study'], ['studio', '极简工作室', '02-studio'], ['cafe', '咖啡馆', '03-cafe'],
@@ -172,5 +173,6 @@ export function createMockApi(params: URLSearchParams): Api {
   const spaces = seedSpaces(Number.isFinite(preset) ? preset : 0);
   const st: MockState = { keyConfigured: params.get('key') === '1', spaces, durations: new Map(spaces[0].inputs.map((name, i) => [name, [222, 96, 140][i % 3]])) };
   const f = finder(st);
-  return { ...keyMethods(st), ...crudMethods(st, f), ...mediaMethods(st, f) };
+  const base = { ...keyMethods(st), ...crudMethods(st, f), ...mediaMethods(st, f) } as Api;
+  return withRuns(base, f, spaces);
 }

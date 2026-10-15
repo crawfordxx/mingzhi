@@ -4,14 +4,15 @@
  */
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
-import type { Options, Space } from '../api';
+import { startedOf, type Options, type Space } from '../api';
 import type { Workbench } from '../useWorkbench';
 import { It, SOFT } from '../ui';
 import { BackgroundPicker } from './setup/BackgroundPicker';
 import { InputsDrop } from './setup/InputsDrop';
 import { CaptionPicker, CoverPicker } from './setup/StylePickers';
 
-export const DEFAULT_COVER = 'bauhaus';
+export { DEFAULT_COVER } from '../lib/cli';
+import { DEFAULT_COVER } from '../lib/cli';
 
 /** 当前背景的显示名与缩略图（预设才有缩略图） */
 export function backgroundLabel(space: Space, options: Options): { name: string; thumb?: string } {
@@ -57,7 +58,7 @@ export function SetupCard({ wb, space, options }: Props) {
   const coverId = s.coverStyle ?? DEFAULT_COVER;
   const cover = options.coverStyles.find((c) => c.id === coverId);
 
-  if (space.versions.length) {
+  if (startedOf(space)) {
     return (
       <motion.div layout className="card setup-sum" transition={SOFT}>
         <b>设置</b>

@@ -35,7 +35,38 @@ export interface Space {
   settings: SpaceSettings;
   job: null | { state: 'queued' | 'running'; version: number };
   totalCostYuan: number;
+  /** 对话修改（规划）累计花费 */
+  chatCostYuan?: number;
 }
+
+/** 剪辑直播事件（src/workspace/events.ts 的 WorkEvent）；detail 形状见 src/pipeline/detail.ts */
+export interface WorkEvent {
+  seq: number;
+  /** 毫秒时间戳 */
+  t: number;
+  spaceId: string;
+  version: number;
+  step: string;
+  message: string;
+  detail?: { kind: string; data: unknown };
+}
+
+/** 修改操作（src/edit/ops.ts）：前端只透传，不解释字段 */
+export type EditOp = { type: string } & Record<string, unknown>;
+export interface EditOption { label: string; ops: EditOp[] }
+/** 对话修改的回复（EditPlan + 基于哪个版本） */
+export interface EditReply { reply: string; ops: EditOp[]; options?: EditOption[]; version: number; costYuan?: number; chatCostYuan?: number }
+export interface Queued { version: number; queued: number }
+
+export interface ShotState { start: number; end: number; layout: 'split' | 'full'; card?: { template: string; props: Record<string, unknown> } }
+/** 版本状态里前端用到的部分（分镜取卡片名、时长） */
+export interface VersionState {
+  storyboard: { shots: ShotState[] };
+  captions: { start: number; end: number; text: string }[];
+  plan: { outputDurationSec: number; sourceDurationSec: number };
+}
+export interface ExportResult { dir: string; files: string[] }
+export type EventSink = (e: WorkEvent) => void
 
 export interface Status { version: string; keyConfigured: boolean; modelsReady: boolean; assetsReady: boolean; ffmpegReady: boolean }
 export type KeySource = 'env' | 'keychain' | 'file';
@@ -74,7 +105,17 @@ export interface Api {
   uploadBackground(id: string, file: File, opts?: UploadOpts): Promise<Space>;
   /** 没有口播时服务端返回 400，调用方应先判断 */
   estimate(id: string): Promise<Estimate>;
-  start(id: string): Promise<{ version: number; queued: number }>;
+  start(id: string): Promise<Queued>;
+  /** 一句话修改 → 修改方案（不执行）；version 缺省 = 最新完成版本 */
+  messages(id: string, message: string, version?: number): Promise<EditReply>;
+  /** 执行修改，出新版本；dropped 是被校验丢弃的原因 */
+  apply(id: string, ops: EditOp[], parent?: number, summary?: string): Promise<Queued & { dropped: string[] }>;
+  revert(id: string, n: number): Promise<Queued>;
+  cancel(id: string): Promise<void>;
+  exportVersion(id: string, n: number): Promise<ExportResult>;
+  versionState(id: string, n: number): Promise<VersionState>;
+  /** 订阅某个版本的事件：先补历史再推实时；返回取消订阅 */
+  events(id: string, version: number, sink: EventSink): () => void;
 }
 
 export class ApiError extends Error {
@@ -88,6 +129,8 @@ const UNREADABLE = '本机服务返回了无法识别的内容';
 /** 校验 key 要请求可想 AI，给长一点 */
 const TIMEOUT_MS = 20_000;
 const KEY_TIMEOUT_MS = 45_000;
+/** 修改规划要等模型、导出要复制大文件 */
+const PLAN_TIMEOUT_MS = 120_000;
 
 async function readError(res: Response): Promise<ApiError> {
   try {
@@ -157,18 +200,50 @@ export function createHttpApi(): Api {
     uploadBackground: (id, file, opts) => sendFile(`/api/spaces/${enc(id)}/background`, file, opts),
     estimate: (id) => json(`/api/spaces/${enc(id)}/estimate`),
     start: (id) => json(`/api/spaces/${enc(id)}/start`, { method: 'POST' }),
+    messages: (id, message, version) => json(`/api/spaces/${enc(id)}/messages`, { method: 'POST', body: JSON.stringify({ message, ...(version ? { version } : {}) }) }, PLAN_TIMEOUT_MS),
+    apply: (id, ops, parent, summary) => json(`/api/spaces/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify({ ops, ...(parent ? { parent } : {}), ...(summary ? { summary } : {}) }) }),
+    revert: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/revert`, { method: 'POST' }),
+    cancel: (id) => json(`/api/spaces/${enc(id)}/cancel`, { method: 'POST' }),
+    exportVersion: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/export`, { method: 'POST' }, PLAN_TIMEOUT_MS),
+    versionState: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/state`),
+    events: (id, version, sink) => openEvents(`/api/spaces/${enc(id)}/events?version=${version}`, sink),
   };
 }
+
+/** SSE：EventSource 自动重连并带 Last-Event-ID；这里再按 seq 去重一次 */
+function openEvents(url: string, sink: EventSink): () => void {
+  const source = new EventSource(url);
+  let last = 0;
+  source.onmessage = (msg) => {
+    try {
+      const e = JSON.parse(msg.data as string) as WorkEvent;
+      if (e.seq > last) { last = e.seq; sink(e); }
+    } catch {
+      /* 坏行忽略 */
+    }
+  };
+  return () => source.close();
+}
+
+/** 成片与封面（服务端只放行这三个文件） */
+export const mediaUrl = (id: string, n: number, file: 'final.mp4' | 'cover-3x4.png' | 'cover-4x3.png'): string => `/media/${enc(id)}/${n}/${file}`;
 
 /** 假数据层按需加载：不带 ?mock=1 时生产包不会执行也不会下载 mock.ts */
 function createLazyMockApi(params: URLSearchParams): Api {
   let loaded: Promise<Api> | undefined;
   const load = () => (loaded ??= import('./mock').then((m) => m.createMockApi(params)));
+  // events 是同步返回「取消订阅」的，单独包一层：加载完再订阅，期间取消则不订阅
+  const events: Api['events'] = (id, version, sink) => {
+    let close: (() => void) | undefined;
+    let dead = false;
+    void load().then((m) => { if (!dead) close = m.events(id, version, sink); });
+    return () => { dead = true; close?.(); };
+  };
   return new Proxy({} as Api, {
-    get: (_, name: keyof Api) => async (...args: unknown[]) => {
+    get: (_, name: keyof Api) => (name === 'events' ? events : async (...args: unknown[]) => {
       const mock = await load();
       return (mock[name] as (...a: unknown[]) => unknown)(...args);
-    },
+    }),
   });
 }
 
@@ -183,3 +258,6 @@ export const api: Api = isMock ? createLazyMockApi(new URLSearchParams(window.lo
 /** 项目已花费：服务端给的 totalCostYuan，缺省时累加各版本 */
 export const spentOf = (space: Space | undefined): number =>
   !space ? 0 : typeof space.totalCostYuan === 'number' ? space.totalCostYuan : space.versions.reduce((sum, v) => sum + v.costYuan, 0);
+
+/** 出过片（或正在出）才算开始；首版失败后回到设置卡，可以重新开始 */
+export const startedOf = (space: Space): boolean => !!space.job || space.versions.some((v) => v.status !== 'failed');
