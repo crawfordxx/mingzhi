@@ -11,7 +11,7 @@ import { canonicalize, layoutProblem } from './layout-rules.js';
 import { VISUAL_SOURCES, type EditOp } from './ops.js';
 import { addRange, outputToSource, subtractRange } from './spans.js';
 
-export { remapStoryboard, retimeCaptions } from './retime.js';
+export { captionsForRestored, droppedCardNotes, remapStoryboard, retimeCaptions } from './retime.js';
 
 /**
  * 一个版本的全部可修改状态。plan（剪辑方案）由 Task 5 用 buildEditPlan 按 cutOptions、extraCuts、restored 重建，
@@ -139,11 +139,16 @@ function setBgm(state: VersionState, bgm: string): VersionState {
   return { ...state, bgm: { bgm } };
 }
 
-/** 当前剪辑方案再扣掉 extraCuts 之后剩下的成片秒数（此前版本的 extraCuts 已体现在 plan.keep 里，不会重复扣） */
+/** 当前剪辑方案再扣掉 extraCuts 之后剩下的成片秒数（此前版本的 extraCuts 已体现在 plan.keep 里，不会重复扣）；短于 minKeep 的碎片 buildEditPlan 会丢弃，这里同样不算 */
 function remainingSec(state: VersionState): number {
-  const kept = state.plan.keep.flatMap((k) => state.extraCuts.reduce(subtractRange, [k]));
-  return kept.reduce((sum, r) => sum + r.end - r.start, 0);
+  return currentKeep(state).filter((r) => r.end - r.start >= state.cutOptions.minKeep).reduce((sum, r) => sum + r.end - r.start, 0);
 }
+
+/** 现在会出现在成片里的原片区间：plan.keep 扣掉 extraCuts */
+const currentKeep = (state: VersionState): TimeRange[] => state.plan.keep.flatMap((k) => state.extraCuts.reduce(subtractRange, [k]));
+
+/** 找回的区间里不到这么长是新内容，就当作本来就在成片里 */
+const MIN_NEW_SEC = 0.1;
 
 function removeSpan(state: VersionState, from: number, to: number): VersionState {
   if (!(to > from) || from >= state.plan.outputDurationSec) throw new Error(`删除的时间范围不在成片内（成片 ${state.plan.outputDurationSec} 秒）`);
@@ -156,6 +161,8 @@ function removeSpan(state: VersionState, from: number, to: number): VersionState
 function restoreSpan(state: VersionState, from: number, to: number): VersionState {
   if (!(to > from) || from >= state.plan.sourceDurationSec) throw new Error(`找回的时间范围不在原片内（原片 ${state.plan.sourceDurationSec} 秒）`);
   const span = { start: from, end: Math.min(to, state.plan.sourceDurationSec) };
+  const missing = currentKeep(state).reduce(subtractRange, [span]).reduce((sum, r) => sum + r.end - r.start, 0);
+  if (missing < MIN_NEW_SEC) throw new Error('这一段本来就在成片里，不需要找回');
   return { ...state, extraCuts: subtractRange(state.extraCuts, span), restored: addRange(state.restored, span) };
 }
 

@@ -1,5 +1,6 @@
-import type { TimedCaption } from '../captions/lines.js';
-import type { EditPlan as CutPlan, TimeRange } from '../cut/plan.js';
+import type { Token } from '../asr/types.js';
+import { fallbackLines, type TimedCaption, timeCaptions } from '../captions/lines.js';
+import { mapToOutput, type EditPlan as CutPlan, type TimeRange } from '../cut/plan.js';
 import type { Storyboard } from '../storyboard/schema.js';
 import { canonicalize } from './layout-rules.js';
 import { outputToSource } from './spans.js';
@@ -35,9 +36,47 @@ export function remapRange(oldKeep: TimeRange[], newKeep: TimeRange[], start: nu
 export function retimeCaptions(captions: TimedCaption[], oldPlan: CutPlan, newPlan: CutPlan): TimedCaption[] {
   const timed = captions.flatMap((c) => {
     const r = remapRange(oldPlan.keep, newPlan.keep, c.start, c.end);
-    return r && r.end - r.start >= MIN_CAPTION_SEC ? [{ ...c, start: r.start, end: r.end }] : [];
-  }).sort((a, b) => a.start - b.start);
-  return timed.map((c, i) => (timed[i + 1] && c.end > timed[i + 1].start ? { ...c, end: timed[i + 1].start } : c));
+    return r ? [{ ...c, start: r.start, end: r.end }] : [];
+  });
+  return trimOverlaps(timed);
+}
+
+/** 按开始时间排序，重叠时把前一句收尾到后一句开头；收到不足 MIN_CAPTION_SEC 的丢弃 */
+function trimOverlaps(captions: TimedCaption[]): TimedCaption[] {
+  const sorted = [...captions].sort((a, b) => a.start - b.start);
+  return sorted
+    .map((c, i) => (sorted[i + 1] && c.end > sorted[i + 1].start ? { ...c, end: sorted[i + 1].start } : c))
+    .filter((c) => c.end - c.start >= MIN_CAPTION_SEC);
+}
+
+const midpoint = (t: Token): number => (t.start + t.end) / 2;
+
+/**
+ * 找回的片段补字幕：取 restored（原片时间）内、并且在新剪辑方案里确实保留的 token，
+ * 用现有的分行规则（fallbackLines，每行宽度与停顿断行）和 timeCaptions 生成字幕，
+ * 与 existing（已重新对时的字幕）合并。existing 里已有文字包含它的（此前版本找回过）不重复添加；
+ * 包住新字幕的旧字幕在新字幕开头处收尾，不把相邻字幕拉长。
+ */
+export function captionsForRestored(tokens: Token[], restored: TimeRange[], newPlan: CutPlan, existing: TimedCaption[]): TimedCaption[] {
+  const inside = tokens.flatMap((t, i) => {
+    const mid = midpoint(t);
+    return restored.some((r) => mid >= r.start && mid <= r.end) && mapToOutput(mid, newPlan.keep) !== null ? [i] : [];
+  });
+  if (inside.length === 0) return existing;
+  const fresh = timeCaptions(fallbackLines(tokens, inside), tokens, newPlan.keep)
+    .filter((n) => !existing.some((e) => e.start < n.end && n.start < e.end && e.text.includes(n.text)));
+  return trimOverlaps([...existing, ...fresh]);
+}
+
+/** 对比平移前后的分镜，说明哪些卡片因为所在镜头整个被删而消失；没有则返回空列表，供回复里告诉用户 */
+export function droppedCardNotes(before: Storyboard, after: Storyboard): string[] {
+  const count = (sb: Storyboard) => sb.shots.reduce<Record<string, number>>((acc, s) => (s.card ? { ...acc, [s.card.template]: (acc[s.card.template] ?? 0) + 1 } : acc), {});
+  const b = count(before);
+  const a = count(after);
+  const lost = Object.entries(b).flatMap(([t, n]) => (n > (a[t] ?? 0) ? [{ t, n: n - (a[t] ?? 0) }] : []));
+  if (lost.length === 0) return [];
+  const total = lost.reduce((sum, l) => sum + l.n, 0);
+  return [`去掉了 ${total} 张卡片（${lost.map((l) => (l.n > 1 ? `${l.t}×${l.n}` : l.t)).join('、')}）`];
 }
 
 /**
@@ -46,6 +85,7 @@ export function retimeCaptions(captions: TimedCaption[], oldPlan: CutPlan, newPl
  * 片头从 0、片尾到新成片末尾；随后交给 normalizeStoryboard 做版式整理（过短的并入相邻镜头、卡片镜头限长等）。
  */
 export function remapStoryboard(oldPlan: CutPlan, newPlan: CutPlan, storyboard: Storyboard): Storyboard {
+  if (!(newPlan.outputDurationSec > 0)) throw new Error('剪辑后成片长度为 0，无法平移分镜');
   const moved = storyboard.shots.flatMap((s) => {
     const r = remapRange(oldPlan.keep, newPlan.keep, s.start, s.end);
     return r ? [{ ...s, start: r.start, end: r.end }] : [];

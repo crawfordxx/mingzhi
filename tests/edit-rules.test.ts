@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Track } from '../src/assets/catalog.js';
 import { applyOps } from '../src/edit/apply.js';
-import { remapStoryboard, retimeCaptions } from '../src/edit/retime.js';
+import { captionsForRestored, droppedCardNotes, remapStoryboard, retimeCaptions } from '../src/edit/retime.js';
+import type { Token } from '../src/asr/types.js';
 import { validateOps } from '../src/edit/validate.js';
 import type { EditPlan as CutPlan } from '../src/cut/plan.js';
 import type { CardSpec, Shot } from '../src/storyboard/schema.js';
@@ -173,5 +174,139 @@ describe('retimeCaptions / remapStoryboard', () => {
     remapStoryboard(oldPlan, plan([{ start: 1, end: 4 }, { start: 7, end: 13 }]), state.storyboard);
     retimeCaptions(state.captions, oldPlan, plan([{ start: 1, end: 4 }]));
     expect(JSON.stringify(state)).toBe(frozen);
+  });
+});
+
+describe('restoreSpan 的校验', () => {
+  it('找回本来就在成片里的区间被拒；真正被剪掉的区间通过', () => {
+    const res = validateOps([
+      { type: 'restoreSpan', fromSec: 2, toSec: 4 },
+      { type: 'restoreSpan', fromSec: 5, toSec: 7 },
+    ], makeState(), tracks);
+    expect(res.ops).toEqual([{ type: 'restoreSpan', fromSec: 5, toSec: 7 }]);
+    expect(res.dropped[0]).toContain('本来就在成片里');
+  });
+
+  it('同批先删后找回：被删的部分算作未在成片里，可以找回', () => {
+    const res = validateOps([{ type: 'removeSpan', fromSec: 0, toSec: 2 }, { type: 'restoreSpan', fromSec: 1, toSec: 3 }], makeState(), tracks);
+    expect(res.ops).toHaveLength(2);
+  });
+
+  it('碎片不够 minKeep 时不计入剩余时长', () => {
+    const state = { ...makeState(), cutOptions: { pad: 0.12, mergeGap: 0.3, minKeep: 2 } };
+    // 删成片 [0,3.5] 和 [4,10]，剩下 [3.5,4] 一个 0.5 秒碎片 + 其余
+    const res = validateOps([{ type: 'removeSpan', fromSec: 0, toSec: 3.5 }, { type: 'removeSpan', fromSec: 4, toSec: 9.5 }], state, tracks);
+    expect(res.ops).toHaveLength(1);
+    expect(res.dropped[0]).toContain('不足 1 秒');
+  });
+});
+
+describe('captionsForRestored', () => {
+  const plan = (keep: CutPlan['keep']): CutPlan => ({ keep, sourceDurationSec: 14, outputDurationSec: keep.reduce((s, r) => s + r.end - r.start, 0) });
+  const oldPlan = plan([{ start: 1, end: 5 }, { start: 7, end: 13 }]);
+  const word = (text: string, start: number): Token[] => [...text].map((ch, i) => ({ text: ch, start: start + i * 0.25, end: start + (i + 1) * 0.25 }));
+  const tokens = [...word('甲乙', 1.0), ...word('插入', 5.0), ...word('丙丁', 7.5)];
+
+  it('找回的话落在两句之间：补上新字幕，邻句不变', () => {
+    const between = plan([{ start: 1, end: 11 }]);
+    const base = plan([{ start: 1, end: 5 }, { start: 7, end: 11 }]);
+    const caps = [{ start: 0, end: 4, text: '甲乙' }, { start: 4, end: 8, text: '丙丁' }];
+    const existing = retimeCaptions(caps, base, between);
+    const out = captionsForRestored(tokens, [{ start: 5, end: 7 }], between, existing);
+    expect(out).toEqual([{ start: 0, end: 4, text: '甲乙' }, { start: 4, end: 4.5, text: '插入' }, { start: 6, end: 10, text: '丙丁' }]);
+  });
+
+  it('找回的话落在一句字幕中间：包住它的旧字幕在新字幕开头收尾，不被拉长', () => {
+    const whole = plan([{ start: 1, end: 13 }]);
+    const caps = [{ start: 0, end: 3, text: '甲' }, { start: 3, end: 6, text: '乙' }, { start: 6, end: 10, text: '丙' }];
+    const existing = retimeCaptions(caps, oldPlan, whole);
+    expect(existing[1]).toEqual({ start: 3, end: 8, text: '乙' });
+    const out = captionsForRestored(tokens, [{ start: 5, end: 7 }], whole, existing);
+    expect(out).toEqual([
+      { start: 0, end: 3, text: '甲' },
+      { start: 3, end: 4, text: '乙' },
+      { start: 4, end: 4.5, text: '插入' },
+      { start: 8, end: 12, text: '丙' },
+    ]);
+    for (let i = 1; i < out.length; i += 1) expect(out[i].start).toBeGreaterThanOrEqual(out[i - 1].end);
+  });
+
+  it('此前版本已找回过的字幕不重复添加', () => {
+    const whole = plan([{ start: 1, end: 13 }]);
+    const once = captionsForRestored(tokens, [{ start: 5, end: 7 }], whole, [{ start: 0, end: 3, text: '甲' }]);
+    expect(captionsForRestored(tokens, [{ start: 5, end: 7 }], whole, once)).toEqual(once);
+  });
+
+  it('不在新成片里的 token 不生成字幕；没有 token 命中原样返回；不改入参', () => {
+    const existing = [{ start: 0, end: 3, text: '甲' }];
+    const frozen = JSON.stringify(existing);
+    expect(captionsForRestored(tokens, [{ start: 5, end: 7 }], plan([{ start: 1, end: 5 }]), existing)).toEqual(existing);
+    expect(captionsForRestored(tokens, [], plan([{ start: 1, end: 13 }]), existing)).toBe(existing);
+    expect(JSON.stringify(existing)).toBe(frozen);
+  });
+
+  it('长句按现有每行宽度规则切成多行', () => {
+    const long = word('这是一句话很长很长很长很长很长很长的口播', 5.0);
+    const out = captionsForRestored(long, [{ start: 5, end: 11 }], plan([{ start: 1, end: 13 }]), []);
+    expect(out.length).toBeGreaterThan(1);
+    expect(out.map((c) => c.text).join('')).toBe('这是一句话很长很长很长很长很长很长的口播');
+  });
+});
+
+describe('remapStoryboard 补充场景', () => {
+  const plan = (keep: CutPlan['keep'], source = 30): CutPlan => ({ keep, sourceDurationSec: source, outputDurationSec: keep.reduce((s, r) => s + r.end - r.start, 0) });
+  const photo2: CardSpec = { template: 'photo', props: { visual } };
+  const shotsOf = (last: CardSpec | undefined): Shot[] => [
+    { start: 0, end: 8, layout: 'split', card: title('A') },
+    { start: 8, end: 14, layout: 'full' },
+    { start: 14, end: 20, layout: 'split', card: photo2 },
+    { start: 20, end: 24, layout: 'full' },
+    last ? { start: 24, end: 30, layout: last.template === 'cta' ? 'full' : 'split', card: last } : { start: 24, end: 30, layout: 'full' },
+  ];
+  const whole = plan([{ start: 0, end: 30 }]);
+  const summarize = (shots: Shot[]) => shots.map((s) => [s.start, s.end, s.card?.template]);
+
+  it('删除跨多个镜头：中间镜头连同卡片消失，首尾相接', () => {
+    const sb = remapStoryboard(whole, plan([{ start: 0, end: 5 }, { start: 20, end: 30 }]), { shots: shotsOf(title('E')) });
+    expect(summarize(sb.shots)).toEqual([[0, 5, 'title'], [5, 9, undefined], [9, 15, 'title']]);
+    expect(droppedCardNotes({ shots: shotsOf(title('E')) }, sb)).toEqual(['去掉了 1 张卡片（photo）']);
+  });
+
+  it('末尾 cta 随镜头被删掉时在提示里说明', () => {
+    const cta: CardSpec = { template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } };
+    const before = { shots: shotsOf(cta) };
+    const sb = remapStoryboard(whole, plan([{ start: 0, end: 24 }]), before);
+    expect(sb.shots.some((s) => s.card?.template === 'cta')).toBe(false);
+    expect(droppedCardNotes(before, sb)[0]).toContain('cta');
+    expect(droppedCardNotes(before, before)).toEqual([]);
+  });
+
+  it('找回的内容落在两个镜头之间时并入前一个镜头', () => {
+    const base = makeState();
+    const sb = remapStoryboard(base.plan, plan([{ start: 1, end: 13 }], 14), base.storyboard);
+    expect(summarize(sb.shots)).toEqual([[0, 6, 'title'], [6, 9, undefined], [9, 12, 'photo']]);
+  });
+
+  it('找回的内容落在镜头中间时留在这个镜头里', () => {
+    const base = makeState();
+    const across = { ...base.storyboard, shots: [
+      { start: 0, end: 6, layout: 'split' as const, card: title('跨缝') },
+      { start: 6, end: 10, layout: 'split' as const, card: photo2 },
+    ] };
+    const sb = remapStoryboard(base.plan, plan([{ start: 1, end: 13 }], 14), across);
+    expect(summarize(sb.shots)).toEqual([[0, 8, 'title'], [8, 12, 'photo']]);
+  });
+
+  it('新成片长度为 0 时抛中文错误', () => {
+    expect(() => remapStoryboard(whole, plan([]), { shots: shotsOf(undefined) })).toThrow('长度为 0');
+  });
+});
+
+describe('同批 removeSpan + replaceCard', () => {
+  it('镜头序号指向应用前的镜头，removeSpan 不改分镜', () => {
+    const state = makeState();
+    const next = applyOps(state, [{ type: 'removeSpan', fromSec: 0, toSec: 1 }, { type: 'replaceCard', shotIndex: 2, card: title('新') }]);
+    expect(next.storyboard.shots[2].card).toEqual(title('新'));
+    expect(next.extraCuts).toEqual([{ start: 1, end: 2 }]);
   });
 });

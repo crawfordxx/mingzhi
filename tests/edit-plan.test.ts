@@ -31,6 +31,7 @@ describe('buildEditContext', () => {
     const text = formatContext(c);
     expect(text).toContain('@300 秒 超出成片时长，已忽略');
     expect(text).toContain('@5 秒 → 镜头 #1\n'.trim());
+    expect(text).toContain('仅列出前 30 段');
     expect(text).not.toContain('字幕 #-1');
     expect(text).not.toContain('字幕 #undefined');
   });

@@ -100,7 +100,7 @@ export function formatContext(ctx: EditContext): string {
     `分镜（序号 [起止秒] 版式 模板「标题」）：\n${shots}`,
     `字幕（序号 [起止秒] 文字）：\n${captions}`,
     `引用解析：${refs}`,
-    `已剪掉的片段（原片秒）：${gaps}`,
+    `已剪掉的片段（原片秒，仅列出前 ${MAX_GAPS} 段、不足 ${MIN_GAP_SEC} 秒的略去）：${gaps}`,
     `可用背景预设：${list(ctx.presets)}`,
     `可用字幕样式：${list(ctx.captionStyles)}`,
     `可用封面风格：${list(ctx.coverStyles)}`,

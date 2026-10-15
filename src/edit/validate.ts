@@ -7,7 +7,8 @@ import { EditOpSchema, type EditOp } from './ops.js';
 
 export interface ValidatedOps { ops: EditOp[]; dropped: string[] }
 
-const opName = (item: unknown): string => String((item as { type?: unknown } | null)?.type ?? '未知');
+const MAX_NAME = 20;
+const opName = (item: unknown): string => String((item as { type?: unknown } | null)?.type ?? '未知').slice(0, MAX_NAME);
 
 /**
  * 校验一批来自模型或 HTTP 请求体的操作：逐条过 zod、对照当前版本、再在运行中的状态上试应用（版式规则等在这里拦截），
