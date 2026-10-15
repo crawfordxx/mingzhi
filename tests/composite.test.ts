@@ -58,6 +58,28 @@ describe('compositeFrame', () => {
     compositeFrame(new Float32Array([1, 1, 1]), new Float32Array([0.5]), Buffer.from([0, 0, 0]), [1, 1, 1], out);
     expect([...out]).toEqual([128, 128, 128]);
   });
+  it('alpha 恰为 0 时直接复制背景，即使前景非零', () => {
+    const out = Buffer.alloc(3);
+    compositeFrame(new Float32Array([1, 1, 1]), new Float32Array([0]), Buffer.from([7, 8, 9]), [1.1, 0.9, 1], out);
+    expect([...out]).toEqual([7, 8, 9]);
+  });
+  it('非单位增益下 alpha=0.25 的混合结果手算校验', () => {
+    // 单像素：fgr=[0.8,0.4,0.2]，增益 [1.1,0.9,1]，背景 [100,200,50]
+    // R: 0.25·(0.8·1.1·255)+0.75·100 = 56.1+75 = 131.1 → 131
+    // G: 0.25·(0.4·0.9·255)+0.75·200 = 22.95+150 = 172.95 → 173
+    // B: 0.25·(0.2·1·255)+0.75·50 = 12.75+37.5 = 50.25 → 50
+    const out = Buffer.alloc(3);
+    compositeFrame(new Float32Array([0.8, 0.4, 0.2]), new Float32Array([0.25]), Buffer.from([100, 200, 50]), [1.1, 0.9, 1], out);
+    expect([...out]).toEqual([131, 173, 50]);
+  });
+  it('alpha 略大于 1 或略小于 0 时结果仍截到 0–255', () => {
+    const hi = Buffer.alloc(3);
+    compositeFrame(new Float32Array([1, 1, 1]), new Float32Array([1.02]), Buffer.from([255, 255, 255]), [1, 1, 1], hi);
+    expect([...hi]).toEqual([255, 255, 255]);
+    const lo = Buffer.alloc(3);
+    compositeFrame(new Float32Array([0, 0, 0]), new Float32Array([-0.01]), Buffer.from([10, 0, 255]), [1, 1, 1], lo);
+    [...lo].forEach((v) => { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThanOrEqual(255); });
+  });
 });
 
 describe('alphaBox / medianBox', () => {
@@ -67,6 +89,12 @@ describe('alphaBox / medianBox', () => {
     expect(alphaBox(pha, 4, 2)).toEqual({ top: 0, bottom: 1, left: 0.25, right: 0.75 });
     expect(alphaBox(new Float32Array(8), 4, 2)).toBeNull();
   });
+  it('可自定义阈值', () => {
+    // 4×2：(1,0)=0.6，(2,1)=0.3
+    const pha = new Float32Array([0, 0.6, 0, 0, 0, 0, 0.3, 0]);
+    expect(alphaBox(pha, 4, 2, 0.5)).toEqual({ top: 0, bottom: 0.5, left: 0.25, right: 0.5 });
+    expect(alphaBox(pha, 4, 2, 0.2)).toEqual({ top: 0, bottom: 1, left: 0.25, right: 0.75 });
+  });
   it('逐边取中位数；空数组返回 null', () => {
     const boxes = [
       { top: 0.1, bottom: 0.9, left: 0.2, right: 0.8 },
@@ -75,5 +103,12 @@ describe('alphaBox / medianBox', () => {
     ];
     expect(medianBox(boxes)).toEqual({ top: 0.2, bottom: 0.9, left: 0.2, right: 0.8 });
     expect(medianBox([])).toBeNull();
+  });
+  it('偶数个框时取中间两个值的平均', () => {
+    const boxes = [
+      { top: 0.25, bottom: 0.5, left: 0, right: 0.25 },
+      { top: 0.75, bottom: 1, left: 0.5, right: 0.75 },
+    ];
+    expect(medianBox(boxes)).toEqual({ top: 0.5, bottom: 0.75, left: 0.25, right: 0.5 });
   });
 });

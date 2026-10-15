@@ -48,15 +48,27 @@ export function colorMatchGains(fg: Rgb, bg: Rgb, wbStrength = 0.3, lumStrength 
   return [gain(0), gain(1), gain(2)];
 }
 
-/** out = alpha·(fgr·增益) + (1−alpha)·背景；fgr 平面 CHW 0–1，bg/out 为 rgb24 交错 */
+/**
+ * out = alpha·(fgr·增益·255) + (1−alpha)·背景；fgr 平面 CHW 0–1，bg/out 为 rgb24 交错。
+ * alpha 恰为 0 的像素直接复制背景（结果与公式一致，省去乘加）。
+ * 运算顺序与旧实现保持一致（fgr·增益 先乘、再乘 255），保证结果逐位相同。
+ */
 export function compositeFrame(fgr: Float32Array, pha: Float32Array, bg: Buffer, gains: Rgb, out: Buffer): void {
   const pixels = pha.length;
+  const [gr, gg, gb] = gains;
   for (let i = 0; i < pixels; i += 1) {
     const a = pha[i];
-    for (let c = 0; c < 3; c += 1) {
-      const fg = fgr[c * pixels + i] * gains[c] * 255;
-      out[i * 3 + c] = clamp(Math.round(a * fg + (1 - a) * bg[i * 3 + c]), 0, 255);
+    const o = i * 3;
+    if (a === 0) {
+      out[o] = bg[o];
+      out[o + 1] = bg[o + 1];
+      out[o + 2] = bg[o + 2];
+      continue;
     }
+    const ia = 1 - a;
+    out[o] = clamp(Math.round(a * (fgr[i] * gr * 255) + ia * bg[o]), 0, 255);
+    out[o + 1] = clamp(Math.round(a * (fgr[pixels + i] * gg * 255) + ia * bg[o + 1]), 0, 255);
+    out[o + 2] = clamp(Math.round(a * (fgr[2 * pixels + i] * gb * 255) + ia * bg[o + 2]), 0, 255);
   }
 }
 
