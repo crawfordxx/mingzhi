@@ -16,7 +16,7 @@ import { costsOf, makeComplete, type ProgressEvent } from '../pipeline/run.js';
 import type { Complete } from '../pipeline/stages.js';
 import { toWorkEvent, type EventBus } from './events.js';
 import { produceFirst } from './runner-first.js';
-import { FINAL_FILE, STATE_FILE, writeJsonAtomic } from './runner-files.js';
+import { FINAL_FILE, SOURCE_FILE, STATE_FILE, writeJsonAtomic } from './runner-files.js';
 import { produceNext } from './runner-next.js';
 import type { Space, SpaceStore, VersionMeta } from './store.js';
 
@@ -52,10 +52,13 @@ export interface VersionEnv {
 /** changedShots：本版实际重渲的镜头序号；qaScore：本版卡片自检的平均分（没有自检时沿用父版本） */
 export interface VersionOutcome { state: VersionState; changedShots: number[]; qaScore?: number }
 
-function inputOf(space: Space): string {
+/** 多段口播拼成的合成原片：之后的识别时间戳、剪口误、抠像、各版本修改都把它当作单段原片 */
+const sourceOf = (base: string): string => join(base, SOURCE_FILE);
+
+/** 流程使用的原片：单段口播就是上传的文件，多段是 base/ 里的合成原片（首个版本负责生成） */
+function inputOf(ctx: RunnerCtx, space: Space): string {
   if (space.inputs.length === 0) throw new Error('还没有上传口播视频');
-  if (space.inputs.length > 1) throw new Error('暂只支持一段口播视频');
-  return space.inputs[0];
+  return space.inputs.length > 1 ? sourceOf(ctx.store.baseDir(space.id)) : space.inputs[0];
 }
 
 function makeEnv(ctx: RunnerCtx, space: Space, n: number): VersionEnv {
@@ -101,7 +104,7 @@ async function runVersion(ctx: RunnerCtx, spaceId: string, meta: { parent?: numb
   }
   try {
     throwIfCancelled(ctx.signal);
-    return finish(env, await body(env, inputOf(space)));
+    return finish(env, await body(env, inputOf(ctx, space)));
   } catch (err) {
     throw fail(env, err);
   }

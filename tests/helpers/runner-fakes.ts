@@ -6,6 +6,7 @@ import type { BrollDeps } from '../../src/broll/fulfill.js';
 import { loadConfig, type AppConfig } from '../../src/config.js';
 import { CostMeter } from '../../src/cost/meter.js';
 import type { LlmClient } from '../../src/llm/kexiang.js';
+import { layoutClips } from '../../src/media/concat.js';
 import { RVM_FILE } from '../../src/matting/rvm.js';
 import type { CoverDeps } from '../../src/pipeline/finish-step.js';
 import type { MediaDeps } from '../../src/pipeline/media-deps.js';
@@ -30,18 +31,19 @@ const STORYBOARD = { bgm: 'tech', coverTitle: { title: '怎么存钱', subtitle:
 ] };
 
 export interface Calls {
-  llm: string[]; renderCut: unknown[][]; matte: string[]; composite: { bg: string; keep: unknown; cut: string; fgr: string; matte: string }[]; segments: string[]; audio: number;
+  llm: string[]; renderCut: unknown[][]; matte: string[]; composite: { bg: string; keep: unknown; cut: string; fgr: string; matte: string }[]; segments: string[]; concat: string[][]; cutInputs: string[]; audio: number;
   qaOnly: (number[] | undefined)[]; hard: string[]; covers: { style: string; workDir: string }[]; images: string[]; videos: string[];
 }
 
 const json = (file: string): Record<string, unknown> => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
 
 /** 假模型：剪掉「嗯」、字幕校对返回非法结果（走兜底分行）、分镜固定；每次调用记账 ¥0.01 */
-function fakeLlm(calls: Calls, meter: CostMeter): LlmClient {
+function fakeLlm(calls: Calls, meter: CostMeter, hooks: Hooks): LlmClient {
   return {
     chatJson: async (o) => {
       calls.llm.push(o.label ?? o.model);
       meter.addTask('fake', 0.01, o.label ?? 'llm');
+      if (o.system.includes('编排')) return { order: hooks.order ?? [] };
       if (o.system.includes('分镜')) return STORYBOARD;
       if (o.system.includes('剪辑师')) return { cuts: [{ from: TEXT.indexOf('嗯'), to: TEXT.indexOf('嗯'), type: 'filler', reason: '语气词' }] };
       return { lines: [] };
@@ -56,7 +58,7 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
     probe: async (path) => ({ durationSec: Number(json(path).durationSec), width: 540, height: 960, fps: 30, hasAudio: true }),
     extractWav: async (_i, wav) => { writeFileSync(wav, 'wav'); },
     transcribe: () => ({ durationSec: SOURCE_SEC, segments: SEGMENTS, tokens: TOKENS }),
-    renderCut: async (_input, keep, output) => { calls.renderCut.push(keep); writeFileSync(output, JSON.stringify({ kind: 'cut', keep, durationSec: keepSec(keep) })); },
+    renderCut: async (input, keep, output) => { calls.cutInputs.push(input); calls.renderCut.push(keep); writeFileSync(output, JSON.stringify({ kind: 'cut', keep, durationSec: keepSec(keep) })); },
     matte: async (o) => {
       calls.matte.push(o.input);
       const src = json(o.input);
@@ -76,6 +78,10 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
       renderVideo: async (o) => { calls.segments.push(`${o.startFrame}-${o.endFrame}`); await hooks.onSegment?.(); writeFileSync(o.output, `${o.startFrame}-${o.endFrame}`); },
       renderAudio: async (o) => { calls.audio += 1; writeFileSync(o.output, 'aac'); },
       concat: async (o) => { writeFileSync(o.output, JSON.stringify({ kind: 'final', files: o.files.length, durationSec: o.durationSec })); },
+    },
+    concat: async (o) => {
+      calls.concat.push(o.clips.map((c) => c.path));
+      writeFileSync(o.output, JSON.stringify({ kind: 'source', clips: o.clips.length, durationSec: layoutClips(o.clips.map((c) => c.durationSec)).totalSec }));
     },
     loudness: async (input, output) => { copyFileSync(input, output); return { before: -20, after: -14, truePeak: -2, mode: 'linear' }; },
   };
@@ -111,25 +117,25 @@ const fakeBroll = (calls: Calls) => (meter: CostMeter): BrollDeps => ({
   video: async (prompt, out) => { calls.videos.push(prompt); writeFileSync(out, 'mp4'); meter.addTask('video', 2.4, '视频'); return { cost: 2.4 }; },
 });
 
-export interface Hooks { onSegment?: () => Promise<void> | void; beforeComposite?: () => Promise<void> | void }
+export interface Hooks { onSegment?: () => Promise<void> | void; beforeComposite?: () => Promise<void> | void; /** 多段口播时假模型给出的段落顺序 */ order?: number[] }
 
 export interface Fixture { ctx: RunnerCtx; store: SpaceStore; spaceId: string; calls: Calls; events: WorkEvent[]; hooks: Hooks; reset: () => void; cfg: AppConfig }
 
 export const DEFAULT_SETTINGS: SpaceSettings = { background: { kind: 'preset', id: 'study' }, captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 1 };
 
-const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], audio: 0, qaOnly: [], hard: [], covers: [], images: [], videos: [] });
+const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], concat: [], cutInputs: [], audio: 0, qaOnly: [], hard: [], covers: [], images: [], videos: [] });
 
 /** 建一个临时项目与全部假依赖；reset() 清空调用记录（在 v1 跑完之后调用，只看修改版本做了什么） */
-export function makeFixture(settings: Partial<SpaceSettings> = {}): Fixture {
+export function makeFixture(settings: Partial<SpaceSettings> = {}, inputSecs: number[] = [SOURCE_SEC]): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'mz-runner-'));
   const modelsDir = join(root, 'models');
   mkdirSync(modelsDir);
   writeFileSync(join(modelsDir, RVM_FILE), 'fake'); // 只用于通过「抠像模型已下载」的前置检查
   const cfg: AppConfig = { ...loadConfig({}), dataDir: join(root, 'data'), modelsDir, kexiangKey: undefined };
-  const input = join(root, 'talk.mp4');
-  writeFileSync(input, JSON.stringify({ kind: 'input', durationSec: SOURCE_SEC }));
+  const inputs = inputSecs.map((durationSec, i) => join(root, `talk${i}.mp4`));
+  inputs.forEach((input, i) => writeFileSync(input, JSON.stringify({ kind: 'input', durationSec: inputSecs[i] })));
   const store = new SpaceStore(join(root, 'spaces'));
-  const space = store.create('测试项目', [input], { ...DEFAULT_SETTINGS, ...settings });
+  const space = store.create('测试项目', inputs, { ...DEFAULT_SETTINGS, ...settings });
   const bus = new EventBus((id, n) => store.versionDir(id, n));
   const events: WorkEvent[] = [];
   bus.subscribe(space.id, (e) => events.push(e));
@@ -137,7 +143,7 @@ export function makeFixture(settings: Partial<SpaceSettings> = {}): Fixture {
   const hooks: Hooks = {};
   const ctx: RunnerCtx = {
     store, bus, cfg,
-    clients: (meter) => ({ llm: fakeLlm(calls, meter) }),
+    clients: (meter) => ({ llm: fakeLlm(calls, meter, hooks) }),
     media: fakeMedia(calls, hooks), qaDeps: fakeQa(calls), coverDeps: fakeCover(calls), brollDeps: fakeBroll(calls),
   };
   const reset = (): void => { Object.assign(calls, emptyCalls()); events.length = 0; };

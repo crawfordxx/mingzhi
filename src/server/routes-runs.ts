@@ -34,8 +34,6 @@ async function estimate(app: AppCtx, c: RouteCtx): Promise<void> {
 async function start(app: AppCtx, c: RouteCtx): Promise<void> {
   const space = loadSpace(app, c.params.id);
   if (space.inputs.length === 0) throw new HttpError(400, '还没有上传口播视频');
-  // 运行器暂只支持一段口播（Task 9 支持多段后删掉这一行）
-  if (space.inputs.length > 1) throw new HttpError(400, '暂只支持一段口播视频，请先删掉多余的');
   if (space.versions.some((v) => v.status === 'done')) throw new HttpError(409, '已经出过片了，请在对话里提出修改');
   const { version, ahead } = await app.runs.submit(space.id, { kind: 'first' });
   sendJson(c.res, 202, { version, queued: ahead });

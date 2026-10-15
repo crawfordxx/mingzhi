@@ -4,6 +4,7 @@ import type { SegmentBackend } from '../compose/segments.js';
 import { renderCut } from '../cut/render-cut.js';
 import { compositeCut } from '../matting/composite-matte.js';
 import { matteVideo } from '../matting/rvm.js';
+import { concatSources } from '../media/concat.js';
 import { extractWav16k } from '../media/extract-audio.js';
 import { probe } from '../media/probe.js';
 
@@ -19,10 +20,12 @@ export interface MediaDeps {
   /** 分段渲染的打包、渲染与拼接；缺省为真实 Remotion + ffmpeg */
   segments?: SegmentBackend;
   loudness: typeof normalizeLoudness;
+  /** 多段口播拼成一条合成原片 */
+  concat: typeof concatSources;
 }
 
 const REAL_MEDIA: MediaDeps = {
-  probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut, matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness,
+  probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut, matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness, concat: concatSources,
 };
 
 /** 注入的实现覆盖真实实现 */

@@ -193,14 +193,13 @@ describe('服务本身', () => {
     expect(await head(`/media/${id}/1/final.mp4`)).toEqual({ code: 200, length: '1000' });
   });
 
-  it('多段口播时 start 先拦住，不白占队列和版本号', async () => {
+  it('多段口播时 start 照常受理（运行器会识别、按语义重排并拼成合成原片）', async () => {
     t = await startTestApp({ key: GOOD_KEY });
     const id = await spaceWithInput(t);
     await fetch(`${t.url}/api/spaces/${id}/inputs`, { method: 'POST', headers: { 'x-filename': 'b.mp4' }, body: 'ok-2' });
     const r = await t.call('POST', `/api/spaces/${id}/start`);
-    expect(r.status).toBe(400);
-    expect(r.json.error).toContain('一段');
-    expect(await versionsOf(id)).toEqual([]);
+    expect(r.status).toBe(202);
+    expect((await versionsOf(id)).length).toBe(1);
   });
 
   it('Windows 保留设备名加前缀', () => {

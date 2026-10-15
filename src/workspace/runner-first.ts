@@ -1,7 +1,9 @@
 import { join } from 'node:path';
+import type { Transcript } from '../asr/types.js';
 import { DEFAULT_COVER_STYLE } from '../cover/styles.js';
 import { DEFAULT_PLAN_OPTIONS } from '../cut/plan.js';
 import type { VersionState } from '../edit/apply.js';
+import { prepareMultiSource } from '../pipeline/multi.js';
 import { validateArgs, type PipelineArgs } from '../pipeline/run.js';
 import { analyzeStage, backgroundStage, captionsStage, composeStage, cutStage, finalQaStage, qaCardsStage, storyboardStage, type Analysis } from '../pipeline/stages.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
@@ -15,8 +17,8 @@ function initialState(env: VersionEnv): Pick<VersionState, 'settings' | 'coverSt
 }
 
 /** 分析写 base/：之后的版本重建剪辑方案与补字幕都读 analysis.json */
-async function analyze(env: VersionEnv, args: PipelineArgs): Promise<Analysis> {
-  const a = await analyzeStage(args, join(env.base, 'audio16k.wav'), env.complete);
+async function analyze(env: VersionEnv, args: PipelineArgs, known?: Transcript): Promise<Analysis> {
+  const a = await analyzeStage(args, join(env.base, 'audio16k.wav'), env.complete, known);
   writeJsonAtomic(join(env.base, ANALYSIS_FILE), { media: a.media, transcript: a.transcript, cuts: a.cuts } satisfies BaseAnalysis);
   return a;
 }
@@ -36,7 +38,9 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const init = initialState(env);
   const args = pipelineArgs(env, input, { ...init, plan: { keep: [], sourceDurationSec: 0, outputDurationSec: 0 }, captions: [], storyboard: { shots: [] } }, { style: init.coverStyle });
   validateArgs(args);
-  const a = await analyze(env, args);
+  // 多段口播：先识别、排序、拼成合成原片（input 已指向它），识别结果按偏移拼好直接用
+  const multi = env.space.inputs.length > 1 ? await prepareMultiSource({ inputs: env.space.inputs, output: input, tmpDir: env.base, cfg: env.ctx.cfg, llm: env.llm, media: env.ctx.media, signal: env.ctx.signal, emit: env.emit }) : undefined;
+  const a = await analyze(env, args, multi?.transcript);
   const { person, subject } = await makePerson(env, args, a);
   const captions = await captionsStage(args, a, join(env.dir, 'captions.ass'), env.complete);
   const planned = await storyboardStage(args, captions, a.plan.outputDurationSec, env.base, env.complete);

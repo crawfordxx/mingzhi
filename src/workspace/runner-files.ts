@@ -10,6 +10,8 @@ import type { Storyboard } from '../storyboard/schema.js';
 export const FINAL_FILE = 'final.mp4';
 /** 版本目录里的版本状态；最后才写，存在即表示这个版本已完整产出 */
 export const STATE_FILE = 'state.json';
+/** base/ 里多段口播拼成的合成原片（单段口播没有这个文件） */
+export const SOURCE_FILE = 'source.mp4';
 /** base/ 里与版本无关的分析结果（探测、识别、剪口误），修改版本重建剪辑方案时读它 */
 export const ANALYSIS_FILE = 'analysis.json';
 /** base/ 里整条原片的抠像图层：RVM 去溢色前景与灰度遮罩（30fps，与原片逐帧对应） */

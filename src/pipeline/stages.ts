@@ -46,18 +46,20 @@ export const fmtSec = (s: number): string => {
 /** 给封面预留的花费：封面开启才预留，B-roll 与卡片自检的预算检查都要扣掉它 */
 export const coverReserve = (args: Pick<PipelineArgs, 'cover'>): number => (args.cover === false ? 0 : COVER_YUAN);
 
-/** 探测 → 抽音频（写到 wav）→ 识别 → 剪口误 → 剪辑方案 */
-export async function analyzeStage(args: PipelineArgs, wav: string, complete: Complete): Promise<Analysis> {
+/** 探测 → 抽音频（写到 wav）→ 识别 → 剪口误 → 剪辑方案；传入 known 时直接用这份识别结果（多段口播已按偏移拼好），不再抽音频与识别 */
+export async function analyzeStage(args: PipelineArgs, wav: string, complete: Complete, known?: Transcript): Promise<Analysis> {
   const { input, cfg, llm } = args;
   const m = mediaOf(args.media);
   const media = await m.probe(input, cfg);
   if (!media.hasAudio) throw new Error('输入视频没有音轨，无法识别口播');
   complete('probe', `${media.width}×${media.height} · ${fmtSec(media.durationSec)}`, { media });
 
-  await m.extractWav(input, wav, cfg);
-  complete('audio', '已抽取 16kHz 音频', { artifacts: { wav } });
+  if (!known) {
+    await m.extractWav(input, wav, cfg);
+    complete('audio', '已抽取 16kHz 音频', { artifacts: { wav } });
+  }
 
-  const transcript = m.transcribe(wav, cfg.modelsDir);
+  const transcript = known ?? m.transcribe(wav, cfg.modelsDir);
   complete('asr', `识别 ${transcript.tokens.length} 字 · ${transcript.segments.length} 个语音段`, { transcript });
 
   const { cuts, dropped } = await detectCuts(llm, transcript.tokens);
