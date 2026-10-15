@@ -9,16 +9,21 @@
   },
   "scripts": {
     "test": "vitest run --exclude \"tests/{compose,templates,caption-band,cover,segments,runner-e2e}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts tests/cover.test.ts tests/segments.test.ts tests/runner-e2e.test.ts --no-file-parallelism",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "fetch-models": "node scripts/fetch-models.mjs",
     "fetch-assets": "node scripts/fetch-assets.mjs",
     "make-fixture": "bash scripts/make-fixture.sh",
-    "mingzhi": "tsx src/cli.ts"
+    "mingzhi": "tsx src/cli.ts",
+    "build:web": "vite build web",
+    "dev:web": "vite web"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "5.1.0",
+    "@fontsource/ibm-plex-serif": "5.1.0",
     "@remotion/bundler": "4.0.531",
     "@remotion/fonts": "4.0.531",
     "@remotion/renderer": "4.0.531",
+    "motion": "11.18.2",
     "onnxruntime-node": "1.20.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
@@ -29,8 +34,12 @@
   "devDependencies": {
     "@types/node": "22.10.2",
     "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "playwright": "1.48.2",
     "tsx": "4.19.2",
     "typescript": "5.6.3",
+    "vite": "5.4.21",
     "vitest": "2.1.8"
   }
 }
