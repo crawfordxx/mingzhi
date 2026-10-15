@@ -25,4 +25,13 @@ describe('镜头与 @ 引用', () => {
     expect(splitMessage(msg)).toEqual({ refs: [{ sec: 58, label: '对比条卡' }, { sec: 4, label: '钩子卡2/3' }], text: '数据太弱' });
     expect(mmss(125.9)).toBe('02:05');
   });
+
+  it('手打的 @00:07 只认时间：后面的话留在正文里，不被吞进胶囊', () => {
+    expect(splitMessage('@00:07 这张卡换成大字标题「2. 手机放到另一个房间」')).toEqual({
+      refs: [{ sec: 7, label: '' }], text: '这张卡换成大字标题「2. 手机放到另一个房间」',
+    });
+    expect(splitMessage('@00:07')).toEqual({ refs: [{ sec: 7, label: '' }], text: '' });
+    expect(splitMessage('@00:07 标题卡写得太长')).toEqual({ refs: [{ sec: 7, label: '' }], text: '标题卡写得太长' });
+    expect(splitMessage('@00:04 钩子卡2/3 @00:09 纯人像 换掉')).toEqual({ refs: [{ sec: 4, label: '钩子卡2/3' }, { sec: 9, label: '纯人像' }], text: '换掉' });
+  });
 });

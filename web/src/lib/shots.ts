@@ -39,12 +39,17 @@ export const refText = (r: TimeRef): string => `@${mmss(r.sec)} ${r.label}`;
 /** 发给后端的消息：每个引用后面固定跟一个空格，避免卡片名吃到后面的话 */
 export const composeMessage = (refs: readonly TimeRef[], text: string): string => `${refs.map((r) => `${refText(r)} `).join('')}${text.trim()}`;
 
-/** 把消息拆回「引用 + 正文」以便显示（引用形如 @mm:ss 名字，名字到空格为止） */
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** 「插入」生成的卡片名（cardName 的全部取值）；手打的 @mm:ss 后面跟的是正文，不算卡片名（与 src/edit/refs.ts 一致） */
+const LABEL = `钩子卡\\d/\\d|${[...Object.values(CARD_NAME), '纯人像', '画面'].map(escapeRe).join('|')}`;
+const REF_HEAD = new RegExp(`^@(\\d{1,2}):(\\d{2})(?: (${LABEL}))?(?: |$)`);
+
+/** 把消息拆回「引用 + 正文」以便显示：引用形如 @mm:ss 加可选的卡片名（只认插入按钮生成的名字） */
 export function splitMessage(message: string): { refs: TimeRef[]; text: string } {
   const refs: TimeRef[] = [];
   let rest = message;
   for (;;) {
-    const m = /^@(\d{1,2}):(\d{2})(?: ([^\s@]+))? /.exec(rest);
+    const m = REF_HEAD.exec(rest);
     if (!m) break;
     refs.push({ sec: Number(m[1]) * 60 + Number(m[2]), label: m[3] ?? '' });
     rest = rest.slice(m[0].length);
