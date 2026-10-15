@@ -26,11 +26,20 @@ const CardMotion: React.FC<{ shot: Shot & { card: CardSpec }; sec: number }> = (
   return <div style={style}>{renderCard(shot.card, local)}</div>;
 };
 
-/** 分屏镜头在上半屏（0–960）画卡片区底色、模板固定底与卡片；底色不随镜头切换闪烁 */
+/** 分屏镜头在上半屏（0–960）画卡片区底色、模板固定底与卡片；底色不随镜头切换闪烁。全屏镜头只叠加 cta */
 export const CardLayer: React.FC<{ shots: Shot[]; sec: number }> = ({ shots, sec }) => {
   const hit = shotAt(shots, sec);
-  if (!hit || hit.shot.layout !== 'split') return null;
+  if (!hit) return null;
   const { shot } = hit;
+  if (shot.layout === 'full') {
+    // 全屏只叠 cta：不画卡片区底色，胶囊由模板自己放在画布上方 y=180
+    if (shot.card?.template !== 'cta') return null;
+    return (
+      <div style={{ position: 'absolute', left: 0, top: 0, width: CANVAS.width, height: CANVAS.seam }}>
+        <CardMotion shot={{ ...shot, card: shot.card }} sec={sec} />
+      </div>
+    );
+  }
   return (
     <div style={{ position: 'absolute', left: 0, top: 0, width: CANVAS.width, height: CANVAS.seam, background: THEME.stage, overflow: 'hidden' }}>
       {shot.card ? renderBackdrop(shot.card, sec - shot.start) : null}

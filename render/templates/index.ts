@@ -1,27 +1,39 @@
 import React from 'react';
 import type { CardSpec, TemplateId } from '../../src/storyboard/schema.js';
 import { BigNumber } from './BigNumber.js';
+import { Browser } from './Browser.js';
 import { Chips } from './Chips.js';
 import { CompareBars } from './CompareBars.js';
+import { Cta } from './Cta.js';
 import { EvidenceList } from './EvidenceList.js';
 import { Hook, HookBackdrop } from './Hook.js';
+import { Photo, PhotoBackdrop } from './Photo.js';
+import { StrikeList } from './StrikeList.js';
+import { Terminal } from './Terminal.js';
 import { Title } from './Title.js';
+import { Toggles } from './Toggles.js';
 
 /** 模板组件：props 为该模板的数据，local 为镜头内的秒数（从 0 开始） */
 export type TemplateComponent = React.FC<{ props: any; local: number }>;
 
 /** 模板注册表 */
-export const TEMPLATES: Partial<Record<TemplateId, TemplateComponent>> = {
+export const TEMPLATES: Record<TemplateId, TemplateComponent> = {
   hook: Hook,
   title: Title,
   bigNumber: BigNumber,
   chips: Chips,
   compareBars: CompareBars,
   evidenceList: EvidenceList,
+  terminal: Terminal,
+  toggles: Toggles,
+  strikeList: StrikeList,
+  browser: Browser,
+  photo: Photo,
+  cta: Cta,
 };
 
 /** 铺满卡片区、不随卡片进出场移动的底（例如钩子卡的黑底与配图），避免相邻镜头之间底色闪烁 */
-const BACKDROPS: Partial<Record<TemplateId, TemplateComponent>> = { hook: HookBackdrop };
+const BACKDROPS: Partial<Record<TemplateId, TemplateComponent>> = { hook: HookBackdrop, photo: PhotoBackdrop };
 
 /** 按模板 id 渲染卡片内容；未登记的模板直接抛错 */
 export function renderCard(card: CardSpec, local: number): React.ReactNode {

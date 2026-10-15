@@ -1,14 +1,17 @@
 // tests/templates.test.ts
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { renderCardStill } from '../src/compose/render.js';
-import { CardSpecSchema, type CardSpec } from '../src/storyboard/schema.js';
+import { CardSpecSchema, TEMPLATE_IDS, type CardSpec } from '../src/storyboard/schema.js';
+import { loadConfig } from '../src/config.js';
+import { run } from '../src/media/exec.js';
 import { fitFontSize, textEm } from '../render/templates/parts.js';
 import { balanceLines, tokenize } from '../render/templates/headline.js';
 import { countUp } from '../render/templates/BigNumber.js';
 import { bottleLabel } from '../render/templates/CompareBars.js';
+import { TYPE_START, typedChars } from '../render/templates/Terminal.js';
 
 export const SAMPLES: CardSpec[] = [
   { template: 'hook', props: { index: 1, total: 3, kicker: '这 3 句话都出自 GitHub 近 3.5 万星的《高性价比人生指南》', headline: '吃抗氧化补剂的人死亡率反而略高', highlight: ['略高'], stat: { value: '78 项试验', label: '近 30 万人' } } },
@@ -61,5 +64,39 @@ describe('模板文字与数值工具', () => {
   it('瓶身标签取名称括号里的词', () => {
     expect(bottleLabel('甜饮料（含糖）')).toBe('含糖');
     expect(bottleLabel('可乐')).toBeNull();
+  });
+});
+
+const SAMPLES_B: CardSpec[] = [
+  { template: 'terminal', props: { lines: ['读一遍《高性价比人生指南》，结合我的工作和生活习惯，挑出我该改进的事', '结合你的情况，建议优先改这几件：', '1. 少喝含糖饮料，换成无糖的也不算解决'] } },
+  { template: 'toggles', props: { title: '信用卡设置', rows: [{ label: '最低还款', on: false }, { label: '消费分期', on: true }], footnote: '最低还款折合下来，一年要付 18% 上下的利息' } },
+  { template: 'strikeList', props: { items: ['自动续费的会员', '冲动下单', '用不上的订阅'] } },
+  { template: 'browser', props: { url: 'github.com/eternity4719/HowToLiveBetter', image: 'broll/test.jpg' } },
+  { template: 'photo', props: { image: 'broll/test.jpg', label: '应急金：3 到 6 个月生活费', sublabel: '放在随时取得到的地方' } },
+  { template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } },
+];
+
+describe('卡片模板 B 组', () => {
+  it('A、B 两组样例覆盖全部 12 个模板', () => {
+    expect(new Set([...SAMPLES, ...SAMPLES_B].map((s) => s.template))).toEqual(new Set(TEMPLATE_IDS));
+  });
+  it.each(SAMPLES_B.map((s) => [s.template, s] as const))('%s 能渲染出静帧', async (_id, card) => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-tpl-'));
+    mkdirSync(join(dir, 'broll'));
+    await run(loadConfig({}).ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1080x1080', '-frames:v', '1', join(dir, 'broll', 'test.jpg')]);
+    const output = join(dir, `${card.template}.png`);
+    await renderCardStill({ workDir: dir, output, card });
+    expect(statSync(output).size).toBeGreaterThan(5000);
+  }, 300_000);
+});
+
+describe('终端逐字打出', () => {
+  it('每秒 28 字，行间停顿 0.2 秒，按码点计数', () => {
+    const lines = ['一二三', 'ab'];
+    expect(typedChars(lines, 0)).toEqual([0, 0]);
+    expect(typedChars(lines, TYPE_START + 2 / 28 + 0.001)).toEqual([2, 0]);
+    expect(typedChars(lines, TYPE_START + 3 / 28 + 0.1)).toEqual([3, 0]);
+    expect(typedChars(lines, TYPE_START + 3 / 28 + 0.2 + 1 / 28 + 0.001)).toEqual([3, 1]);
+    expect(typedChars(lines, 99)).toEqual([3, 2]);
   });
 });
