@@ -14,6 +14,6 @@ export const THEME = {
   hookLime: '#D4F23C',
   hookBg: '#0E0F0C',
   terminal: '#1E1E1E',
-  font: '"PingFang SC", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif',
+  font: '"PingFang SC", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif',
   mono: '"SF Mono", Menlo, "JetBrains Mono", monospace',
 } as const;

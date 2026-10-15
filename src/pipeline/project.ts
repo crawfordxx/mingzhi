@@ -10,6 +10,9 @@ import type { SubjectBox } from '../matting/composite.js';
 import type { MediaInfo } from '../media/probe.js';
 import type { Storyboard } from '../storyboard/schema.js';
 import type { Mood } from '../assets/catalog.js';
+import type { CaptionStyleId } from '../captions/styles.js';
+import type { CoverAspect } from '../cover/generate.js';
+import type { CoverStyleId } from '../cover/styles.js';
 
 export interface ProjectArtifacts { wav?: string; cut?: string; person?: string; ass?: string; output?: string; final?: string; cover43?: string; cover34?: string }
 
@@ -43,6 +46,10 @@ export interface ProjectFile {
   broll?: { assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number };
   /** 配乐与音效（P3c）：所选曲目 id（无配乐为 null）、情绪、触发的音效数 */
   audio?: { track: string | null; mood: Mood; sfxCount: number };
+  /** 字幕样式（P3c） */
+  captionStyle?: CaptionStyleId;
+  /** 封面（P3c）：风格、花费（元）、标题核对未通过的比例、直接复用已有底图的比例；封面关闭或失败时缺省 */
+  cover?: { style: CoverStyleId; costYuan: number; unverified: CoverAspect[]; reused: CoverAspect[] };
   /** 响度统一（P3c）：处理前后的综合响度（LUFS）；音轨静音无法归一时缺省 */
   loudness?: { before: number; after: number };
   artifacts: ProjectArtifacts;

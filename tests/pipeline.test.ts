@@ -115,7 +115,7 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     const covers: { title: string; subtitle?: string; personVideo: string }[] = [];
     const coverDeps = { makeCovers: async (o: { title: string; subtitle?: string; personVideo: string }) => {
       covers.push(o);
-      return { cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png'), attempts: 2, costYuan: 1.2, unverified: [], person: true };
+      return { cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png'), attempts: 2, costYuan: 1.2, unverified: [], person: true, reused: [] };
     } };
     const events: ProgressEvent[] = [];
     let rawSeen = false;
@@ -132,6 +132,8 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
     expect(project.audio).toMatchObject({ track: null, mood: 'tech' });
     expect(project.loudness?.after).toBeDefined();
+    expect(project.captionStyle).toBe('blade');
+    expect(project.cover).toEqual({ style: 'bauhaus', costYuan: 1.2, unverified: [], reused: [] });
     expect(project.artifacts).toMatchObject({ output, final: output, cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png') });
     expect(covers).toEqual([expect.objectContaining({ title: '高性价比', subtitle: '测试封面', personVideo: join(workDir, 'cut.mp4') })]);
     expect((await probe(output, cfg)).hasAudio).toBe(true);
@@ -207,7 +209,7 @@ describe('runPipeline 背景提前校验', () => {
   });
 });
 
-const BROLL_STORYBOARD = { shots: [
+const BROLL_STORYBOARD = { bgm: 'upbeat', coverTitle: { title: '钱放哪里', subtitle: '应急金' }, shots: [
   { start: 0, end: 3, layout: 'split', card: { template: 'hook', props: { index: 1, total: 1, headline: '钱要放在取得到的地方', highlight: ['取得到'], visual: { source: 'video', prompt: 'a jar of coins on a wooden table, slow push in' } } } },
   { start: 3, end: 8, layout: 'split', card: { template: 'photo', props: { label: '应急金', visual: { source: 'generate', prompt: 'a savings jar on a desk, editorial photo' } } } },
   { start: 8, end: 17, layout: 'full' },
@@ -242,6 +244,7 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     expect(brollEvents.at(-1)).toBe('素材 2 个（截图 0 / 生图 1 / 视频 1）· 花费 ¥2.60 · 失败 0 个');
     expect(calls.video).toHaveLength(1);
     expect(calls.image).toHaveLength(1);
+    expect(res.storyboard).toMatchObject({ bgm: 'upbeat', coverTitle: { title: '钱放哪里', subtitle: '应急金' } });
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
     expect(project.broll?.assets.map((a) => a.source).sort()).toEqual(['generate', 'video']);
     expect(project.broll?.failures).toEqual([]);
@@ -266,6 +269,7 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     expect(calls).toEqual({ image: [], video: [] });
     expect(events.find((e) => e.step === 'broll')?.message).toContain('已去掉待取素材的需求');
     expect(res.storyboard.shots.some((s) => s.card?.template === 'photo')).toBe(false);
+    expect(res.storyboard).toMatchObject({ bgm: 'upbeat', coverTitle: { title: '钱放哪里', subtitle: '应急金' } });
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
     expect(project.broll).toBeUndefined();
     expect(existsSync(join(workDir, 'broll'))).toBe(false);
@@ -295,6 +299,22 @@ describe('B-roll 选项', () => {
     expect(() => makeTaskClient(loadConfig({}), { background: true, broll: off })).toThrow('一句话生成背景需要可想 AI key');
     expect(makeTaskClient(loadConfig({}), { background: false, broll: off })).toBeUndefined();
     expect(makeTaskClient(loadConfig({ MINGZHI_KX_KEY: 'k' }), { background: false, broll: on })).toBeDefined();
+  });
+
+  it('取素材成功与降级两条路径都保留分镜的 bgm 与 coverTitle', async () => {
+    const cfg = loadConfig({});
+    const visual = { source: 'generate' as const, prompt: 'a savings jar on a desk, editorial photo' };
+    const storyboard = { bgm: 'tech' as const, coverTitle: { title: '钱放哪里', subtitle: '应急金' }, shots: [
+      { start: 0, end: 5, layout: 'split' as const, card: { template: 'photo' as const, props: { visual } } },
+      { start: 5, end: 10, layout: 'full' as const },
+    ] };
+    const complete = (_step: 'broll', _message: string): ProjectFile => ({}) as ProjectFile;
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-keep-'));
+    const fulfilled = await runBroll({ workDir, cfg, broll: { enabled: true, maxVideos: 0, budgetYuan: 10 }, brollDeps: fakeBrollDeps(cfg.ffmpeg).deps }, storyboard, 10, complete);
+    expect(fulfilled.shots.some((s) => s.card?.template === 'photo')).toBe(true);
+    expect(fulfilled).toMatchObject({ bgm: 'tech', coverTitle: { title: '钱放哪里', subtitle: '应急金' } });
+    const degraded = await runBroll({ workDir, cfg, broll: { enabled: false, maxVideos: 0, budgetYuan: 10 } }, storyboard, 10, complete);
+    expect(degraded).toMatchObject({ bgm: 'tech', coverTitle: { title: '钱放哪里', subtitle: '应急金' } });
   });
 
   it('素材步骤整步异常：降级为去掉待取素材的需求，进度消息含「素材获取失败」，不抛错', async () => {

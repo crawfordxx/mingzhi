@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fontsReady, loadTracks, musicReady } from '../src/assets/catalog.js';
+import { downloadedTracks, fontsReady, loadTracks, musicReady, trackPath } from '../src/assets/catalog.js';
 import { loadConfig } from '../src/config.js';
 import { prepareAudio, validateAudio } from '../src/pipeline/audio-step.js';
-import { parseFinishArgs, runCover } from '../src/pipeline/finish-step.js';
+import { parseFinishArgs, runCover, runLoudness, validateStyles } from '../src/pipeline/finish-step.js';
 import type { ProjectFile, ProjectPatch } from '../src/pipeline/project.js';
 import type { Storyboard } from '../src/storyboard/schema.js';
 
@@ -53,7 +53,53 @@ describe('prepareAudio', () => {
   });
 });
 
+/** 给空数据目录放几首假曲目（非空文件即视为已下载） */
+function cfgWithTracks(ids: string[]) {
+  const cfg = emptyCfg();
+  for (const t of loadTracks().filter((x) => ids.includes(x.id))) {
+    mkdirSync(join(cfg.dataDir, 'assets', 'music'), { recursive: true });
+    writeFileSync(trackPath(cfg, t), 'fake-mp3');
+  }
+  return cfg;
+}
+
+describe('配乐素材就绪判断', () => {
+  const [a, b] = loadTracks();
+
+  it('--bgm <id>：只要所选曲目已下载就行，不要求全部下载', () => {
+    const cfg = cfgWithTracks([a.id]);
+    expect(musicReady(cfg, a.id)).toBe(true);
+    expect(musicReady(cfg, b.id)).toBe(false);
+    expect(musicReady(cfg)).toBe(false);
+  });
+
+  it('auto：至少一首已下载即可，选曲只在已下载的曲目里挑（同情绪没有就退到任意已下载曲目）', async () => {
+    const other = loadTracks().find((t) => t.mood !== 'tech')!;
+    const cfg = cfgWithTracks([other.id]);
+    expect(musicReady(cfg, 'auto')).toBe(true);
+    expect(downloadedTracks(cfg).map((t) => t.id)).toEqual([other.id]);
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-au-'));
+    const plan = await prepareAudio({ workDir, cfg, input: 'a.mp4' }, sb, caps, 8);
+    expect(plan.info.track).toBe(other.id);
+    expect(plan.props.bgm).toMatchObject({ file: 'audio/bgm.mp3' });
+    expect(musicReady(emptyCfg(), 'auto')).toBe(false);
+  });
+
+  it('--bgm 指定的曲目没下载：降级为无配乐并提示 fetch-assets', async () => {
+    const cfg = cfgWithTracks([a.id]);
+    const plan = await prepareAudio({ workDir: mkdtempSync(join(tmpdir(), 'mz-au-')), cfg, input: 'a.mp4', audio: { bgm: b.id } }, sb, caps, 8);
+    expect(plan.info.track).toBeNull();
+    expect(plan.notes[0]).toContain('pnpm fetch-assets');
+  });
+});
+
 describe('参数校验', () => {
+  it('validateStyles：constructor / toString 这类原型链上的名字也按未知处理', () => {
+    expect(() => validateStyles('constructor' as never, undefined)).toThrow('未知字幕样式');
+    expect(() => validateStyles(undefined, { style: 'toString' as never })).toThrow('未知封面风格');
+    expect(() => validateStyles('blade', { style: 'neon' })).not.toThrow();
+  });
+
   it('validateAudio：未知曲目报错并列出可选项', () => {
     expect(() => validateAudio({ bgm: 'nope' })).toThrow('未知曲目');
     expect(() => validateAudio({ bgm: 'none' })).not.toThrow();
@@ -88,20 +134,46 @@ describe('runCover', () => {
   it('生成失败：降级并写明原因；成功：用分镜给的标题，记录两张封面路径', async () => {
     const failing = record();
     await runCover({ ...ctx, coverDeps: { makeCovers: async () => { throw new Error('额度不足'); } } }, { style: 'neon' }, sb, caps, '/tmp/w/cut.mp4', failing.complete);
-    expect(failing.events[0].message).toContain('额度不足');
+    expect(failing.events[0].message).toContain('生成封面中');
+    expect(failing.events[0].message).toContain('约 2 分钟');
+    expect(failing.events.at(-1)?.message).toContain('额度不足');
     const seen: { title: string; subtitle?: string; personVideo: string }[] = [];
     const ok = record();
     const makeCovers = async (o: { title: string; subtitle?: string; personVideo: string }) => {
       seen.push(o);
-      return { cover34: '/tmp/w/cover-3x4.png', cover43: '/tmp/w/cover-4x3.png', attempts: 2, costYuan: 1.2, unverified: [], person: true };
+      return { cover34: '/tmp/w/cover-3x4.png', cover43: '/tmp/w/cover-4x3.png', attempts: 2, costYuan: 1.2, unverified: [], person: true, reused: [] };
     };
     const withTitle: Storyboard = { ...sb, coverTitle: { title: '取得到才算钱', subtitle: '应急金' } };
     await runCover({ ...ctx, coverDeps: { makeCovers: makeCovers as never } }, undefined, withTitle, caps, '/tmp/w/cut.mp4', ok.complete);
     expect(seen[0]).toMatchObject({ title: '取得到才算钱', subtitle: '应急金', personVideo: '/tmp/w/cut.mp4' });
-    expect(ok.events[0].patch?.artifacts).toEqual({ cover34: '/tmp/w/cover-3x4.png', cover43: '/tmp/w/cover-4x3.png' });
+    expect(ok.events[0].message).toContain('生成封面中');
+    expect(ok.events[1].patch?.artifacts).toEqual({ cover34: '/tmp/w/cover-3x4.png', cover43: '/tmp/w/cover-4x3.png' });
+    expect(ok.events[1].patch?.cover).toEqual({ style: 'bauhaus', costYuan: 1.2, unverified: [], reused: [] });
     // 分镜没给标题：用 hook 卡片标题兜底
     await runCover({ ...ctx, coverDeps: { makeCovers: makeCovers as never } }, undefined, sb, caps, '/tmp/w/cut.mp4', ok.complete);
     expect(seen[1].title).toBe('钱要放在取得到的地方');
+  });
+
+  it('复用底图在摘要里说明；-o 在工作目录之外时封面复制到成片旁边并列出路径', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-cv-'));
+    const outDir = mkdtempSync(join(tmpdir(), 'mz-out-'));
+    const cover34 = join(workDir, 'cover-3x4.png');
+    const cover43 = join(workDir, 'cover-4x3.png');
+    writeFileSync(cover34, 'a');
+    writeFileSync(cover43, 'b');
+    const makeCovers = async () => ({ cover34, cover43, attempts: 0, costYuan: 0, unverified: [], person: true, reused: ['3:4', '4:3'] });
+    const { events, complete } = record();
+    await runCover({ ...ctx, workDir, output: join(outDir, '我的视频_精剪.mp4'), coverDeps: { makeCovers: makeCovers as never } }, { style: 'neon' }, sb, caps, 'x', complete);
+    const msg = events[1].message;
+    expect(msg).toContain('复用已有底图');
+    expect(existsSync(join(outDir, '我的视频_精剪_封面3x4.png'))).toBe(true);
+    expect(existsSync(join(outDir, '我的视频_精剪_封面4x3.png'))).toBe(true);
+    expect(msg).toContain(join(outDir, '我的视频_精剪_封面3x4.png'));
+    expect(events[1].patch?.cover).toMatchObject({ style: 'neon', reused: ['3:4', '4:3'] });
+    // 成片就在工作目录里：不复制
+    const inside = record();
+    await runCover({ ...ctx, workDir, output: join(workDir, 'x_精剪.mp4'), coverDeps: { makeCovers: makeCovers as never } }, undefined, sb, caps, 'x', inside.complete);
+    expect(existsSync(join(workDir, 'x_精剪_封面3x4.png'))).toBe(false);
   });
 
   it('cover: false 什么都不做', async () => {
@@ -111,3 +183,18 @@ describe('runCover', () => {
   });
 });
 
+
+describe('runLoudness', () => {
+  it('开始前清掉遗留的 output：这次失败后不会留下上一次的旧文件', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-ld-'));
+    const raw = join(dir, 'final.raw.mp4');
+    const output = join(dir, 'out.mp4');
+    writeFileSync(raw, 'not a real video');
+    writeFileSync(output, 'old result');
+    const events: string[] = [];
+    await expect(runLoudness({ ...loadConfig({}), ffprobe: '/nonexistent/ffprobe' }, raw, output, (_step, message) => { events.push(message); return {} as ProjectFile; })).rejects.toThrow('响度统一失败');
+    expect(existsSync(output)).toBe(false);
+    expect(existsSync(raw)).toBe(true);
+    expect(events).toEqual([]);
+  });
+});

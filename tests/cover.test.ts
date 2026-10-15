@@ -30,9 +30,10 @@ function fakeLlm(replies: (unknown | (() => never))[]): LlmClient & { calls: Cha
 }
 
 /** 假任务客户端：记录输入，返回固定地址与花费 */
-function fakeTask(cost: number | null = 0.6): TaskClient & { inputs: TaskInput[] } {
+function fakeTask(cost: number | null = 0.6): TaskClient & { inputs: TaskInput[]; timeouts: (number | undefined)[] } {
   const inputs: TaskInput[] = [];
-  return { inputs, async run(input) { inputs.push(input); return { taskId: String(inputs.length), url: `https://img.example/${inputs.length}.png`, ...(cost === null ? {} : { cost }) }; } };
+  const timeouts: (number | undefined)[] = [];
+  return { inputs, timeouts, async run(input, opts) { inputs.push(input); timeouts.push(opts.timeoutMs); return { taskId: String(inputs.length), url: `https://img.example/${inputs.length}.png`, ...(cost === null ? {} : { cost }) }; } };
 }
 
 /** 假下载：用 lavfi 生成纯色 PNG（尺寸接近 GPT Image 2 的 1k 输出） */
@@ -126,6 +127,7 @@ describe('generateCoverArt', () => {
     expect(COVER_MODEL).toBe('GPT-Image-2-Official');
     expect(task.inputs[0]).toEqual({ modelName: COVER_MODEL, modelType: 'text2img', prompt: coverPrompt('neon', '标题', '小标题', '4:3'), size: '4:3', resolution: '1k', quality: 'medium', output_format: 'png' });
     expect(downloads).toEqual([['https://img.example/1.png', '/tmp/x.png']]);
+    expect(task.timeouts).toEqual([5 * 60_000]);
     expect(res).toEqual({ cost: 0.6 });
   });
 });
@@ -208,9 +210,9 @@ describe('generateVerifiedArt', () => {
 describe('coverTitle（兜底标题）', () => {
   const hook = (headline: string, kicker?: string): Storyboard['shots'][number] => ({ start: 0, end: 3, layout: 'split', card: { template: 'hook', props: { index: 1, total: 1, headline, highlight: [], ...(kicker ? { kicker } : {}) } } });
 
-  it('取第一张 hook 的 headline（截断到 14 字），kicker 作小标题', () => {
+  it('取第一张 hook 的 headline（截断到 COVER_TITLE_MAX=12 字），kicker 作小标题', () => {
     const sb: Storyboard = { shots: [{ start: 0, end: 1, layout: 'full' }, hook('为什么说前线部署工程师是今年最缺的人才岗位', '一个新岗位'), hook('第二张')] };
-    expect(coverTitle(sb, [{ start: 0, end: 1, text: '字幕' }])).toEqual({ title: '为什么说前线部署工程师是今年', subtitle: '一个新岗位' });
+    expect(coverTitle(sb, [{ start: 0, end: 1, text: '字幕' }])).toEqual({ title: '为什么说前线部署工程师是', subtitle: '一个新岗位' });
   });
 
   it('没有 hook 时取第一句字幕；都没有时报错', () => {

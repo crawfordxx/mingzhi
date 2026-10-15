@@ -76,26 +76,39 @@ async function measure(input: string, filter: string, cfg: AppConfig): Promise<L
   return parseLoudnormJson(stderr);
 }
 
-/** 第二遍：视频流拷贝，音频按第一遍的测量值归一；先写临时文件再改名，失败时清掉临时文件 */
-async function applyPass(input: string, output: string, first: LoudnormMeasure, linear: boolean, cfg: AppConfig): Promise<void> {
+/** 第二遍：视频流拷贝，音频按第一遍的测量值归一，写到 dest（调用方传临时文件） */
+async function applyPass(input: string, dest: string, first: LoudnormMeasure, linear: boolean, cfg: AppConfig): Promise<void> {
   const filter =
     `${BASE_FILTER}:measured_I=${first.input_i}:measured_TP=${first.input_tp}:measured_LRA=${first.input_lra}` +
     `:measured_thresh=${first.input_thresh}:offset=${first.target_offset}:linear=${linear}:print_format=json${linear ? '' : `,${DYNAMIC_LIMITER}`}`;
-  const tmp = `${output}.tmp.mp4`;
-  try {
-    // 只映射第一路视频：流水线成片必有视频；纯音频输入不在支持范围
-    await run(cfg.ffmpeg, [
-      '-y', '-hide_banner', '-nostats', '-i', input, '-map', '0:v', '-map', '0:a:0',
-      '-c:v', 'copy', '-af', filter, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', ...FASTSTART, tmp,
-    ]);
-    await rename(tmp, output);
-  } finally {
-    await rm(tmp, { force: true });
-  }
+  // 只映射第一路视频：流水线成片必有视频；纯音频输入不在支持范围
+  await run(cfg.ffmpeg, [
+    '-y', '-hide_banner', '-nostats', '-i', input, '-map', '0:v', '-map', '0:a:0',
+    '-c:v', 'copy', '-af', filter, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', ...FASTSTART, dest,
+  ]);
 }
 
 function meetsTarget(m: LoudnormMeasure): boolean {
   return Math.abs(m.input_i - TARGET.I) <= MAX_LUFS_DEVIATION && m.input_tp <= MAX_TRUE_PEAK;
+}
+
+/** 全部通过且复测完成后才把临时文件改名为最终文件：任何一步失败都不会留下半成品 output */
+async function normalizeInto(input: string, tmp: string, cfg: AppConfig): Promise<LoudnessResult> {
+  const first = await measure(input, `${BASE_FILTER}:print_format=json`, cfg);
+  if (!Number.isFinite(first.input_i)) {
+    await run(cfg.ffmpeg, ['-y', '-hide_banner', '-i', input, '-c', 'copy', ...FASTSTART, '-f', 'mp4', tmp]);
+    return { before: first.input_i, after: first.input_i, truePeak: first.input_tp, mode: 'linear' };
+  }
+  const verifyFilter = `${BASE_FILTER}:print_format=json`;
+  await applyPass(input, tmp, first, true, cfg);
+  let verify = await measure(tmp, verifyFilter, cfg);
+  let mode: LoudnessResult['mode'] = 'linear';
+  if (!meetsTarget(verify)) {
+    await applyPass(input, tmp, first, false, cfg);
+    verify = await measure(tmp, verifyFilter, cfg);
+    mode = 'dynamic';
+  }
+  return { before: first.input_i, after: verify.input_i, truePeak: verify.input_tp, mode };
 }
 
 /**
@@ -103,23 +116,18 @@ function meetsTarget(m: LoudnormMeasure): boolean {
  * 先走 linear 模式；成片复测达不到目标（响度偏差 > 1 LU 或真峰值 > -1.0 dBTP）时，
  * 从原始输入改用动态模式（linear=false，并接限幅器）重做并再次复测，mode 报告最终采用的模式。
  * 静音音轨无法归一：重封装（faststart）后原样输出，before 与 after 均为 -Infinity。
+ * 所有遍次与复测都写 `<output>.tmp.mp4`，最后才改名为 output；失败时 output 不会出现，临时文件被清掉。
  */
 export async function normalizeLoudness(input: string, output: string, cfg: AppConfig): Promise<LoudnessResult> {
   if (resolve(input) === resolve(output)) throw new Error('输入与输出路径不能相同');
   if (!(await probe(input, cfg)).hasAudio) throw new Error('成片没有音轨，无法统一响度');
-  const first = await measure(input, `${BASE_FILTER}:print_format=json`, cfg);
-  if (!Number.isFinite(first.input_i)) {
-    await run(cfg.ffmpeg, ['-y', '-hide_banner', '-i', input, '-c', 'copy', ...FASTSTART, '-f', 'mp4', output]);
-    return { before: first.input_i, after: first.input_i, truePeak: first.input_tp, mode: 'linear' };
+  const tmp = `${output}.tmp.mp4`;
+  await rm(tmp, { force: true });
+  try {
+    const result = await normalizeInto(input, tmp, cfg);
+    await rename(tmp, output);
+    return result;
+  } finally {
+    await rm(tmp, { force: true });
   }
-  const verifyFilter = `${BASE_FILTER}:print_format=json`;
-  await applyPass(input, output, first, true, cfg);
-  let verify = await measure(output, verifyFilter, cfg);
-  let mode: LoudnessResult['mode'] = 'linear';
-  if (!meetsTarget(verify)) {
-    await applyPass(input, output, first, false, cfg);
-    verify = await measure(output, verifyFilter, cfg);
-    mode = 'dynamic';
-  }
-  return { before: first.input_i, after: verify.input_i, truePeak: verify.input_tp, mode };
 }

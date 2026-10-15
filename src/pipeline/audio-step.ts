@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import type { AppConfig } from '../config.js';
-import { loadTracks, musicReady, type Track } from '../assets/catalog.js';
+import { downloadedTracks, loadTracks, musicReady, type Track } from '../assets/catalog.js';
 import { bgmEnvelope, pickTrack, sfxCues } from '../audio/plan.js';
 import type { TimedCaption } from '../captions/lines.js';
 import { DEFAULT_CAPTION_STYLE, type CaptionStyleId } from '../captions/styles.js';
@@ -36,8 +36,8 @@ export function validateAudio(audio: AudioOptions | undefined): void {
 function chooseTrack(ctx: AudioContext, storyboard: Storyboard): { track: Track | null; note?: string } {
   const want = ctx.audio?.bgm ?? 'auto';
   if (want === 'none') return { track: null };
-  if (!musicReady(ctx.cfg)) return { track: null, note: `配乐素材未下载，本次不加背景乐；${FETCH_HINT}` };
-  const tracks = loadTracks();
+  if (!musicReady(ctx.cfg, want)) return { track: null, note: `配乐素材未下载，本次不加背景乐；${FETCH_HINT}` };
+  const tracks = downloadedTracks(ctx.cfg);
   const track = want === 'auto' ? pickTrack(tracks, storyboard.bgm ?? DEFAULT_MOOD, basename(ctx.input)) : tracks.find((t) => t.id === want);
   if (!track) throw new Error(`未知曲目「${want}」`);
   return { track };

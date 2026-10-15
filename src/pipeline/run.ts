@@ -171,7 +171,7 @@ async function compose(args: PipelineArgs, a: Analysis, p: Produced, complete: C
   const durationSec = Math.min(a.plan.outputDurationSec, baseInfo.durationSec);
   const audio = await prepareAudio({ workDir, cfg, input: args.input, audio: args.audio, captionStyle: args.captionStyle }, p.storyboard, p.captions, durationSec);
   audio.notes.forEach((note) => complete('compose', note));
-  complete('compose', audio.summary, { audio: audio.info });
+  complete('compose', audio.summary, { audio: audio.info, captionStyle: audio.props.captionStyle });
   const raw = join(workDir, 'final.raw.mp4');
   await renderTalk({
     workDir, output: raw, onProgress: throttledRenderProgress((e) => args.onProgress?.(e)),
@@ -201,7 +201,7 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   const analysis = await analyze(args, complete);
   const produced = await produce(args, analysis, complete);
   await compose(args, analysis, produced, complete);
-  await runCover({ workDir: args.workDir, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
+  await runCover({ workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
   complete('done', args.output);
   return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: produced.captions, storyboard: produced.storyboard };
 }

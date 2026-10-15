@@ -4,7 +4,7 @@ import type { AppConfig } from '../config.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { downloadTo, type TaskClient } from '../llm/kexiang-task.js';
 import type { Download } from '../broll/generate-media.js';
-import type { Storyboard } from '../storyboard/schema.js';
+import { COVER_SUBTITLE_MAX, COVER_TITLE_MAX, type Storyboard } from '../storyboard/schema.js';
 import type { TimedCaption } from '../captions/lines.js';
 import { renderCoverStills } from '../compose/render.js';
 import { COVER_STYLES, slotRegion, type CoverStyleId } from './styles.js';
@@ -16,8 +16,8 @@ export type CoverAspect = '3:4' | '4:3';
 
 /** 标题核对不通过时最多生成几次（含第一次） */
 const MAX_ART_ATTEMPTS = 2;
-const TITLE_MAX = 14;
-const SUBTITLE_MAX = 16;
+/** 生图任务等待上限：单张约 50 秒，5 分钟足够排队 */
+const COVER_TASK_TIMEOUT_MS = 5 * 60_000;
 const ORIENT: Record<CoverAspect, string> = { '3:4': '竖版 3:4', '4:3': '横版 4:3' };
 const FILE_TAG: Record<CoverAspect, string> = { '3:4': '3x4', '4:3': '4x3' };
 const PERSON_FILE = 'cover-person.png';
@@ -47,7 +47,7 @@ export function coverPrompt(style: CoverStyleId, title: string, subtitle: string
 export async function generateCoverArt(task: TaskClient, style: CoverStyleId, title: string, subtitle: string | undefined, aspect: CoverAspect, dest: string, download: Download = downloadTo): Promise<{ cost?: number }> {
   const { url, cost } = await task.run(
     { modelName: COVER_MODEL, modelType: 'text2img', prompt: coverPrompt(style, title, subtitle, aspect), size: aspect, resolution: '1k', quality: 'medium', output_format: 'png' },
-    { kind: 'image' },
+    { kind: 'image', timeoutMs: COVER_TASK_TIMEOUT_MS },
   );
   await download(url, dest);
   return cost !== undefined ? { cost } : {};
@@ -83,7 +83,7 @@ export function coverTitle(storyboard: Storyboard, captions: TimedCaption[]): { 
   const hook = card?.template === 'hook' ? card.props : undefined;
   const source = hook?.headline ?? captions.find((c) => c.text.trim())?.text;
   if (!source?.trim()) throw new Error('无法确定封面标题：分镜里没有 hook 卡片，也没有字幕');
-  return { title: clip(source, TITLE_MAX), ...(hook?.kicker ? { subtitle: clip(hook.kicker, SUBTITLE_MAX) } : {}) };
+  return { title: clip(source, COVER_TITLE_MAX), ...(hook?.kicker ? { subtitle: clip(hook.kicker, COVER_SUBTITLE_MAX) } : {}) };
 }
 
 export interface ArtOptions { task: TaskClient; client: LlmClient; style: CoverStyleId; title: string; subtitle?: string; aspect: CoverAspect; dest: string; download?: Download }

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
@@ -138,4 +138,18 @@ describe('normalizeLoudness', () => {
     await expect(normalizeLoudness(input, output, cfg)).rejects.toThrow();
     expect(existsSync(`${output}.tmp.mp4`)).toBe(false);
   });
+
+  it('动态模式的第二遍失败：output 不会出现，临时文件也被清掉', async () => {
+    const input = await makeInput('atomic.mp4', "aevalsrc='0.2*sin(2*PI*1000*t)*lt(mod(t,1),0.05)+0.005*(random(0)*2-1)':s=48000:d=8");
+    // 包一层 ffmpeg：前 3 次调用（测量、线性第二遍、复测）直接转发，第 4 次（动态第二遍）失败
+    const counter = join(dir, 'ffmpeg-count');
+    const wrapper = join(dir, 'ffmpeg-flaky.sh');
+    writeFileSync(wrapper, `#!/bin/sh\nn=$(cat '${counter}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '${counter}'\nif [ "$n" -ge 4 ]; then echo boom >&2; exit 1; fi\nexec '${cfg.ffmpeg}' "$@"\n`);
+    chmodSync(wrapper, 0o755);
+    const output = join(dir, 'atomic-norm.mp4');
+    await expect(normalizeLoudness(input, output, { ...cfg, ffmpeg: wrapper })).rejects.toThrow('boom');
+    expect(readFileSync(counter, 'utf8').trim()).toBe('4');
+    expect(existsSync(output)).toBe(false);
+    expect(existsSync(`${output}.tmp.mp4`)).toBe(false);
+  }, 60_000);
 });

@@ -4,6 +4,7 @@
 // 清单见 assets/music.json、assets/fonts.json；所有下载都校验 sha256；已存在且大于 0 字节的产物跳过
 // Node 内置 fetch 默认不走系统代理；需要代理时用 NODE_USE_ENV_PROXY=1 pnpm fetch-assets
 // 解压用 `tar -xOf`：macOS 与 Windows 10+ 自带的 bsdtar 都能直接读 zip，不依赖 unzip
+// 下载有 10 分钟超时；失败时清掉 .part 半成品
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, createReadStream, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -24,6 +25,11 @@ const EXE = process.platform === 'win32' ? '.exe' : '';
 const bundledFfmpeg = join(dataDir, 'bin', `ffmpeg${EXE}`);
 const ffmpeg = process.env.MINGZHI_FFMPEG ?? (existsSync(bundledFfmpeg) ? bundledFfmpeg : 'ffmpeg');
 
+// 清单里的 id / 文件名会拼进磁盘路径：只允许 [\w.-]+（与 src/assets/catalog.ts 的校验一致）
+const SAFE_NAME = /^[\w.-]+$/;
+const assertSafe = (kind, value) => {
+  if (!SAFE_NAME.test(value) || value === '.' || value === '..') throw new Error(`素材清单里的${kind}不合法：${value}`);
+};
 const readManifest = (name) => JSON.parse(readFileSync(join(REPO_ASSETS, name), 'utf8'));
 const ready = (path) => existsSync(path) && statSync(path).size > 0;
 
@@ -33,34 +39,46 @@ async function sha256Of(path) {
   return hash.digest('hex');
 }
 
-/** 先下载到 <dest>.part，完整后改名；校验 sha256，不符则删除并报错 */
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+
+/** 先下载到 <dest>.part，完整后改名；校验 sha256，不符则报错；无论成败都不留 .part */
 async function download(url, dest, sha256) {
   console.log(`下载 ${url}`);
-  const res = await fetch(url);
-  if (!res.ok || !res.body) throw new Error(`下载失败 ${res.status}: ${url}`);
   const part = `${dest}.part`;
-  await pipeline(Readable.fromWeb(res.body), createWriteStream(part));
-  const actual = await sha256Of(part);
-  if (actual !== sha256) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    if (!res.ok || !res.body) throw new Error(`下载失败 ${res.status}: ${url}`);
+    await pipeline(Readable.fromWeb(res.body), createWriteStream(part));
+    const actual = await sha256Of(part);
+    if (actual !== sha256) throw new Error(`sha256 校验失败：${url}\n  期望 ${sha256}\n  实际 ${actual}`);
+    renameSync(part, dest);
+  } finally {
     rmSync(part, { force: true });
-    throw new Error(`sha256 校验失败：${url}\n  期望 ${sha256}\n  实际 ${actual}`);
   }
-  renameSync(part, dest);
 }
+
+// Windows 上固定用系统自带的 bsdtar（System32\tar.exe）：PATH 里的 tar 可能是 Git Bash 的 GNU tar，它读不了 zip
+const TAR = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
 
 /** 从 zip 里取出单个文件的内容（stdout） */
 function extractEntry(zip, entry) {
-  return execFileSync('tar', ['-xOf', zip, entry], { maxBuffer: 1 << 30 });
+  return execFileSync(TAR, ['-xOf', zip, entry], { maxBuffer: 1 << 30 });
 }
 
 function transcodeMp3(input, dest) {
   const part = `${dest}.part.mp3`;
-  execFileSync(ffmpeg, ['-y', '-v', 'error', '-i', 'pipe:0', '-vn', '-ac', '2', '-ar', '44100', '-b:a', '128k', part], { input });
-  renameSync(part, dest);
+  try {
+    execFileSync(ffmpeg, ['-y', '-v', 'error', '-i', 'pipe:0', '-vn', '-ac', '2', '-ar', '44100', '-b:a', '128k', part], { input });
+    renameSync(part, dest);
+  } finally {
+    rmSync(part, { force: true });
+  }
 }
 
 async function fetchMusic() {
   const { zips, tracks } = readManifest('music.json');
+  Object.keys(zips).forEach((key) => assertSafe('压缩包简称', key));
+  tracks.forEach((t) => assertSafe('曲目 id', t.id));
   for (const [key, zip] of Object.entries(zips)) {
     const todo = tracks.filter((t) => t.zip === key && !ready(join(dirs.music, `${t.id}.mp3`)));
     if (todo.length === 0) continue;
@@ -75,13 +93,19 @@ async function fetchMusic() {
 }
 
 async function fetchFont(f) {
+  assertSafe('字体 id', f.id);
+  assertSafe('字体文件名', f.file);
   const dest = join(dirs.fonts, f.file);
   if (ready(dest)) return;
   if (!f.zipEntry) return download(f.url, dest, f.sha256);
   const zipPath = join(dirs.tmp, `${f.id}.zip`);
   await download(f.url, zipPath, f.sha256);
-  writeFileSync(`${dest}.part`, extractEntry(zipPath, f.zipEntry));
-  renameSync(`${dest}.part`, dest);
+  try {
+    writeFileSync(`${dest}.part`, extractEntry(zipPath, f.zipEntry));
+    renameSync(`${dest}.part`, dest);
+  } finally {
+    rmSync(`${dest}.part`, { force: true });
+  }
   rmSync(zipPath, { force: true });
 }
 

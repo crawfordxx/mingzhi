@@ -46,8 +46,11 @@ export type SfxId = keyof typeof SFX;
 
 const REPO_ASSETS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets');
 
+/** 清单里的 id 与文件名会拼进磁盘路径：只允许字母数字、下划线、点、横线；没有斜杠，再排除 . 和 ..，就不会路径穿越 */
+const SafeName = z.string().regex(/^[\w.-]+$/, '只能包含字母、数字、下划线、点和横线').refine((v) => v !== '.' && v !== '..', '不能是 . 或 ..');
+
 const TrackSchema = z.object({
-  id: z.string().min(1),
+  id: SafeName,
   title: z.string().min(1),
   zip: z.string().min(1),
   entry: z.string().min(1),
@@ -58,31 +61,48 @@ const TrackSchema = z.object({
 
 const MusicSchema = z.object({
   license: z.string(),
-  zips: z.record(z.object({ url: z.string().url(), sha256: z.string().regex(/^[0-9a-f]{64}$/) })),
+  zips: z.record(SafeName, z.object({ url: z.string().url(), sha256: z.string().regex(/^[0-9a-f]{64}$/) })),
   tracks: z.array(TrackSchema),
+}).superRefine((music, ctx) => {
+  const seen = new Set<string>();
+  music.tracks.forEach((t, i) => {
+    if (seen.has(t.id)) ctx.addIssue({ code: 'custom', path: ['tracks', i, 'id'], message: `曲目 id 重复：${t.id}` });
+    seen.add(t.id);
+    if (!Object.hasOwn(music.zips, t.zip)) ctx.addIssue({ code: 'custom', path: ['tracks', i, 'zip'], message: `曲目 ${t.id} 的压缩包「${t.zip}」不在 zips 里` });
+  });
 });
 
 const FontSchema = z.object({
-  id: z.string().min(1),
+  id: SafeName,
   family: z.string().min(1),
   url: z.string().url(),
-  file: z.string().min(1),
+  file: SafeName,
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   zipEntry: z.string().optional(),
 });
 
-const FontsSchema = z.object({ license: z.string(), fonts: z.array(FontSchema) });
+const FontsSchema = z.object({ license: z.string(), fonts: z.array(FontSchema) }).superRefine((data, ctx) => {
+  const seen = new Set<string>();
+  data.fonts.forEach((f, i) => {
+    if (seen.has(f.id)) ctx.addIssue({ code: 'custom', path: ['fonts', i, 'id'], message: `字体 id 重复：${f.id}` });
+    seen.add(f.id);
+  });
+});
+
+/** 解析并校验清单（导出供测试） */
+export const parseMusicManifest = (raw: unknown) => MusicSchema.parse(raw);
+export const parseFontsManifest = (raw: unknown) => FontsSchema.parse(raw);
 
 function readJson(name: string): unknown {
   return JSON.parse(readFileSync(join(REPO_ASSETS, name), 'utf8'));
 }
 
 export function loadTracks(): Track[] {
-  return MusicSchema.parse(readJson('music.json')).tracks;
+  return parseMusicManifest(readJson('music.json')).tracks;
 }
 
 export function loadFonts(): FontAsset[] {
-  return FontsSchema.parse(readJson('fonts.json')).fonts;
+  return parseFontsManifest(readJson('fonts.json')).fonts;
 }
 
 export function assetsDir(cfg: AppConfig): string {
@@ -105,8 +125,19 @@ function nonEmpty(path: string): boolean {
   return existsSync(path) && statSync(path).size > 0;
 }
 
-export function musicReady(cfg: AppConfig): boolean {
-  return loadTracks().every((t) => nonEmpty(trackPath(cfg, t)));
+/** 已下载（存在且非空）的曲目 */
+export function downloadedTracks(cfg: AppConfig): Track[] {
+  return loadTracks().filter((t) => nonEmpty(trackPath(cfg, t)));
+}
+
+/**
+ * 配乐素材是否够用：不带 want 时要求全部曲目都已下载；
+ * want 为曲目 id 时只要该曲目已下载；want 为 'auto' 时至少有一首已下载（选曲优先同情绪，没有就退到任意已下载曲目）。
+ */
+export function musicReady(cfg: AppConfig, want?: string): boolean {
+  if (want === undefined) return loadTracks().every((t) => nonEmpty(trackPath(cfg, t)));
+  if (want === 'auto') return downloadedTracks(cfg).length > 0;
+  return downloadedTracks(cfg).some((t) => t.id === want);
 }
 
 export function fontsReady(cfg: AppConfig): boolean {
