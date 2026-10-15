@@ -74,7 +74,11 @@ function runBrowser(browserPath: string, args: string[], timeoutMs: number): Pro
     };
     const timer = setTimeout(() => finish(new Error(`网页截图超时（${timeoutMs / 1000} 秒）`)), timeoutMs);
     child.on('error', (err) => finish(new Error(`无法启动无头浏览器：${err.message}`)));
-    child.on('exit', (code) => finish(code === 0 ? undefined : new Error(`无头浏览器异常退出（退出码 ${code}）：${stderr.trim()}`)));
+    // 用 close 而不是 exit，确保 stderr 已读完
+    child.on('close', (code, signal) => {
+      const how = signal ? `被信号 ${signal} 终止` : `退出码 ${code}`;
+      finish(code === 0 ? undefined : new Error(`无头浏览器异常退出（${how}）：${stderr.trim()}`));
+    });
   });
 }
 

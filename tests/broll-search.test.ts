@@ -22,6 +22,40 @@ describe('extractUrls', () => {
   });
 });
 
+describe('extractUrls 下划线与星号', () => {
+  it('末尾下划线属于网址，不剥离', () => {
+    expect(extractUrls('见 https://a.com/foo_')).toEqual(['https://a.com/foo_']);
+  });
+  it('网址中间的星号保留，末尾星号剥离', () => {
+    expect(extractUrls('https://a.com/a*b?q=1**')).toEqual(['https://a.com/a*b?q=1']);
+  });
+});
+
+describe('isPublicHttpUrl 内网网段（语法判断，不做 DNS 解析）', () => {
+  const rejected = [
+    // 主机名：尾点、特殊后缀
+    'http://localhost./', 'http://foo.localhost./', 'http://printer.local/', 'http://db.internal/', 'http://db.internal./',
+    // IPv4
+    'http://0.1.2.3/', 'http://10.255.0.1/', 'http://100.64.0.1/', 'http://100.127.255.255/', 'http://127.0.0.1/',
+    'http://169.254.1.1/', 'http://172.16.0.1/', 'http://172.31.255.255/', 'http://192.0.0.5/', 'http://192.168.1.1/',
+    'http://198.18.0.1/', 'http://198.19.255.255/', 'http://224.0.0.1/', 'http://239.255.255.255/', 'http://240.0.0.1/',
+    'http://255.255.255.255/',
+    // IPv6
+    'http://[::]/', 'http://[::1]/', 'http://[::7f00:1]/', 'http://[::ffff:127.0.0.1]/', 'http://[::ffff:10.0.0.1]/',
+    'http://[64:ff9b::7f00:1]/', 'http://[2002:7f00:1::]/', 'http://[2002:c0a8:101::1]/',
+    'http://[fc00::1]/', 'http://[fd12:3456::1]/', 'http://[fe80::1]/', 'http://[febf::1]/', 'http://[fec0::1]/',
+    'http://[ff02::1]/',
+  ];
+  const allowed = [
+    'https://example.com/', 'https://example.com./', 'http://8.8.8.8/', 'http://100.63.255.255/', 'http://100.128.0.1/',
+    'http://172.15.0.1/', 'http://172.32.0.1/', 'http://198.17.0.1/', 'http://198.20.0.1/', 'http://223.255.255.255/',
+    'http://[2606:4700::1111]/', 'http://[2001:4860:4860::8888]/', 'http://[::ffff:8.8.8.8]/',
+    'http://[64:ff9b::808:808]/', 'http://[2002:808:808::1]/',
+  ];
+  it.each(rejected)('拒绝 %s', (u) => expect(isPublicHttpUrl(u)).toBe(false));
+  it.each(allowed)('放行 %s', (u) => expect(isPublicHttpUrl(u)).toBe(true));
+});
+
 describe('isPublicHttpUrl', () => {
   it.each([
     'https://example.com/a',

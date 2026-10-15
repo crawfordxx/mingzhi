@@ -4,11 +4,11 @@ const DEFAULT_MAX = 3;
 const SEARCH_TIMEOUT_MS = 90_000;
 const MAX_LIMIT = 10;
 const NON_PAGE_EXT = /\.(pdf|zip|png|jpe?g|gif|webp|svg|bmp|ico)$/i;
-const TRAILING_STRIP = /[`'"”’\]}>,.;:!?*_]$/u;
+const TRAILING_STRIP = /[`'"”’\]}>,.;:!?*]$/u;
 // markdown 链接 [text](url)，url 内允许一层成对括号
 const MARKDOWN_LINK = /\[[^\]]*\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))*)\)/gu;
-// 网址字符：排除空白、引号、方括号、星号、中日韩字符与全角标点
-const URL_PATTERN = /https?:\/\/[^\s`'"<>\[\]*\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+/gu;
+// 网址字符：排除空白、引号、方括号、中日韩字符与全角标点（星号允许出现在中间，末尾会被剥离）
+const URL_PATTERN = /https?:\/\/[^\s`'"<>\[\]\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+/gu;
 
 interface ResponsesMessageContent {
   text?: unknown;
@@ -24,7 +24,7 @@ export interface SearchOptions {
   max?: number;
 }
 
-/** 去掉网址末尾的标点、星号；右括号只有在网址里有配对的左括号时才保留 */
+/** 去掉网址末尾的标点与星号；右括号只有在网址里有配对的左括号时才保留 */
 function trimUrl(raw: string): string {
   let url = raw;
   for (;;) {
@@ -49,14 +49,78 @@ function dedupe(items: string[]): string[] {
   return [...new Set(items)];
 }
 
-const PRIVATE_IPV4 = [/^127\./, /^10\./, /^192\.168\./, /^169\.254\./, /^0\./, /^172\.(1[6-9]|2\d|3[01])\./];
-const PRIVATE_IPV6 = [/^\[::1?\]$/, /^\[::ffff:/i, /^\[f[cd][0-9a-f]{2}:/i, /^\[fe[89ab][0-9a-f]:/i];
+const RESERVED_HOST_SUFFIXES = ['.localhost', '.local', '.internal'];
 
-/** 仅从语法上判断主机是否为本机或内网（不做 DNS 解析） */
+/** IPv4 是否落在本机、内网、保留或组播网段 */
+function isPrivateIpv4(o: readonly number[]): boolean {
+  const [a, b, c] = o;
+  return (
+    a === 0 || a === 10 || a === 127 || a >= 224 || // 0/8、10/8、127/8、组播 224/4 与保留 240/4（含 255.255.255.255）
+    (a === 100 && b >= 64 && b <= 127) || // 100.64/10 运营商级 NAT
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0 && c === 0) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) // 198.18/15 基准测试网段
+  );
+}
+
+function parseIpv4(host: string): number[] | undefined {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  const octets = m ? m.slice(1).map(Number) : [];
+  return octets.length === 4 && octets.every((n) => n <= 255) ? octets : undefined;
+}
+
+/** 把 IPv6 文本展开成 8 个 16 位组；解析失败返回 undefined */
+function parseIpv6(text: string): number[] | undefined {
+  let body = text;
+  const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(body);
+  if (dotted) {
+    const v4 = parseIpv4(dotted[1]);
+    if (!v4) return undefined;
+    body = body.slice(0, -dotted[1].length) + ((v4[0] << 8) | v4[1]).toString(16) + ':' + ((v4[2] << 8) | v4[3]).toString(16);
+  }
+  const halves = body.split('::');
+  if (halves.length > 2) return undefined;
+  const side = (part: string): string[] => (part === '' ? [] : part.split(':'));
+  const head = side(halves[0]);
+  const tail = halves.length === 2 ? side(halves[1]) : [];
+  const fill = 8 - head.length - tail.length;
+  if (halves.length === 2 ? fill < 1 : fill !== 0) return undefined;
+  const groups = [...head, ...Array<string>(halves.length === 2 ? fill : 0).fill('0'), ...tail];
+  const nums = groups.map((g) => (/^[0-9a-f]{1,4}$/i.test(g) ? parseInt(g, 16) : Number.NaN));
+  return nums.length === 8 && nums.every((n) => !Number.isNaN(n)) ? nums : undefined;
+}
+
+const embeddedV4 = (hi: number, lo: number): number[] => [hi >> 8, hi & 255, lo >> 8, lo & 255];
+
+/** IPv6 是否为本机、内网、保留地址；内嵌 IPv4 的形式（映射、NAT64、6to4）按 IPv4 规则判断 */
+function isPrivateIpv6(g: readonly number[]): boolean {
+  if (g.slice(0, 6).every((n) => n === 0)) return true; // ::、::1 以及 IPv4 兼容地址 ::/96
+  if (g.slice(0, 5).every((n) => n === 0) && g[5] === 0xffff) return isPrivateIpv4(embeddedV4(g[6], g[7]));
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((n) => n === 0)) return isPrivateIpv4(embeddedV4(g[6], g[7]));
+  if (g[0] === 0x2002) return isPrivateIpv4(embeddedV4(g[1], g[2]));
+  return (
+    (g[0] & 0xfe00) === 0xfc00 || // fc00::/7 唯一本地
+    (g[0] & 0xffc0) === 0xfe80 || // fe80::/10 链路本地
+    (g[0] & 0xffc0) === 0xfec0 || // fec0::/10 站点本地（已弃用）
+    (g[0] & 0xff00) === 0xff00 // ff00::/8 组播
+  );
+}
+
+/**
+ * 仅从语法上判断主机是否为本机或内网（不做 DNS 解析）。
+ * 域名解析到内网地址（DNS rebinding）与重定向到内网不在本函数范围内。
+ */
 function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  return PRIVATE_IPV4.some((re) => re.test(host)) || PRIVATE_IPV6.some((re) => re.test(host));
+  const host = hostname.toLowerCase().replace(/\.+$/, '');
+  if (host === 'localhost' || RESERVED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return true;
+  if (host.startsWith('[') && host.endsWith(']')) {
+    const groups = parseIpv6(host.slice(1, -1));
+    return groups === undefined || isPrivateIpv6(groups);
+  }
+  const v4 = parseIpv4(host);
+  return v4 !== undefined && isPrivateIpv4(v4);
 }
 
 /** 是否为公网 http(s) 网址：拒绝其他协议、本机与内网地址 */

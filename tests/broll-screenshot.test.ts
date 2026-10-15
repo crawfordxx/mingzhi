@@ -70,6 +70,11 @@ describe('screenshotUrl 子进程处理（假浏览器）', () => {
     expect(existsSync(out)).toBe(false);
   });
 
+  posixOnly('被信号杀掉时报信号名而不是退出码 null', async () => {
+    const { dir, fake } = fakeBrowser('kill -TERM $$');
+    await expect(screenshotUrl('https://example.com', join(dir, 'o.png'), { browserPath: fake })).rejects.toThrow('SIGTERM');
+  });
+
   posixOnly('浏览器异常退出时错误里带 stderr 末尾', async () => {
     const { dir, fake } = fakeBrowser('echo boom-stderr >&2\nexit 3');
     await expect(screenshotUrl('https://example.com', join(dir, 'o.png'), { browserPath: fake })).rejects.toThrow('boom-stderr');
