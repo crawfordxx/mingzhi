@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
@@ -10,7 +10,7 @@ import { generateImage, generateVideo, searchPexels } from './generate-media.js'
 import { screenshotUrl } from './screenshot.js';
 import { searchUrls } from './search.js';
 
-export interface BrollAsset { key: string; file: string; source: 'screenshot' | 'generate' | 'pexels' | 'video'; url?: string; cost?: number }
+export interface BrollAsset { key: string; file: string; source: 'screenshot' | 'generate' | 'pexels' | 'video'; url?: string; cost?: number; cached?: boolean }
 export interface BrollDeps {
   screenshot(url: string, out: string): Promise<void>;
   search(query: string): Promise<string[]>;
@@ -26,6 +26,7 @@ export interface FulfillOptions {
   budgetYuan: number;
   onAsset?: (a: BrollAsset | { key: string; failed: string }) => void;
 }
+/** failures[].shotIndex 指输入分镜（传入 fulfillVisuals 的 storyboard）的镜头下标；归一化可能合并或丢弃镜头，返回的 storyboard 下标可能不同 */
 export interface FulfillResult { storyboard: Storyboard; assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number }
 
 /** 单次付费请求的预估花费（元），用于发起前的预算检查；接口没返回 cost 时也按它计 */
@@ -37,11 +38,22 @@ const PEXELS_WORDS = 6;
 
 type Attempt = { asset: BrollAsset } | { reason: string };
 interface Env { deps: BrollDeps; workDir: string; budgetYuan: number; maxVideos: number }
+/** yuan：已花费；videos：已发起（含失败、含缓存命中）的视频请求数 */
 interface Spend { yuan: number; videos: number }
 
-/** 素材需求的缓存键：需求内容相同则文件相同 */
+/** 递归按键名排序后序列化，字段顺序不同的同一需求得到同一个缓存键 */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (typeof value === 'object' && value !== null) {
+    const entries = Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/** 素材需求的缓存键：需求内容相同（与字段顺序无关）则文件相同 */
 export function visualKey(v: Visual): string {
-  return createHash('sha1').update(JSON.stringify(v)).digest('hex').slice(0, 12);
+  return createHash('sha1').update(canonical(v)).digest('hex').slice(0, 12);
 }
 
 export function makeDeps(opts: { apiKey: string; task: TaskClient; cfg: AppConfig; pexelsKey?: string }): BrollDeps {
@@ -57,28 +69,45 @@ export function makeDeps(opts: { apiKey: string; task: TaskClient; cfg: AppConfi
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const relFile = (key: string, ext: string): string => `broll/${key}.${ext}`;
-const spendOf = (assets: BrollAsset[]): Spend => ({ yuan: assets.reduce((s, a) => s + (a.cost ?? 0), 0), videos: assets.filter((a) => a.source === 'video').length });
+const yuanOf = (assets: BrollAsset[]): number => assets.reduce((s, a) => s + (a.cost ?? 0), 0);
 
-/** 执行一次产出：成功返回 deps 的结果，失败（抛错或没写出文件）返回原因，并清掉残留文件以免被当成缓存 */
-async function produce<T extends { cost?: number } | boolean | void>(out: string, fn: () => Promise<T>): Promise<{ result: T } | string> {
+/**
+ * 执行一次产出：deps 先写到同目录的临时文件（key.part.ext，保留扩展名供 ffmpeg 判断格式），
+ * 校验非空后再改名为正式文件，这样中途失败或进程被杀都不会留下看似有效的缓存。
+ * 失败（抛错、没结果、没写出文件或文件为空）返回原因。
+ */
+async function produce<T extends { cost?: number } | boolean | void>(out: string, fn: (tmp: string) => Promise<T>): Promise<{ result: T } | string> {
+  const tmp = out.replace(/\.(\w+)$/, '.part.$1');
+  rmSync(tmp, { force: true });
   try {
-    const result = await fn();
+    const result = await fn(tmp);
     if (result === false) return '没有结果';
-    if (!existsSync(out)) return '未生成文件';
+    if (!existsSync(tmp)) return '未生成文件';
+    if (statSync(tmp).size === 0) return '生成的文件为空';
+    renameSync(tmp, out);
     return { result };
   } catch (err) {
-    rmSync(out, { force: true });
     return message(err);
+  } finally {
+    rmSync(tmp, { force: true });
   }
 }
 
 const costOf = (result: unknown, estimate: number): number => (typeof result === 'object' && result !== null && typeof (result as { cost?: unknown }).cost === 'number' ? (result as { cost: number }).cost : estimate);
 
+/** 缓存文件必须存在且非空；空文件（异常中断的残留）删除后视为缺失 */
+function validCache(path: string): boolean {
+  if (!existsSync(path)) return false;
+  if (statSync(path).size > 0) return true;
+  rmSync(path, { force: true });
+  return false;
+}
+
 /** 按来源在缓存里找已有文件：截图 png（或退化成的 jpg）、生图 jpg、视频 mp4（或退化成的 jpg） */
 function findCached(env: Env, key: string, source: Visual['source']): BrollAsset | undefined {
   const candidates: [string, BrollAsset['source']][] = source === 'screenshot' ? [['png', 'screenshot'], ['jpg', 'generate']] : source === 'video' ? [['mp4', 'video'], ['jpg', 'generate']] : [['jpg', 'generate']];
-  const hit = candidates.find(([ext]) => existsSync(join(env.workDir, relFile(key, ext))));
-  return hit ? { key, file: relFile(key, hit[0]), source: hit[1] } : undefined;
+  const hit = candidates.find(([ext]) => validCache(join(env.workDir, relFile(key, ext))));
+  return hit ? { key, file: relFile(key, hit[0]), source: hit[1], cached: true } : undefined;
 }
 
 async function tryScreenshot(env: Env, key: string, need: { url?: string; query?: string }): Promise<Attempt> {
@@ -92,8 +121,7 @@ async function tryScreenshot(env: Env, key: string, need: { url?: string; query?
   if (urls.length === 0) return { reason: '没有找到可截图的网址' };
   let lastReason = '';
   for (const url of urls) {
-    const out = join(env.workDir, file);
-    const r = await produce(out, () => env.deps.screenshot(url, out));
+    const r = await produce(join(env.workDir, file), (tmp) => env.deps.screenshot(url, tmp));
     if (typeof r !== 'string') return { asset: { key, file, source: 'screenshot', url } };
     lastReason = r;
   }
@@ -103,50 +131,51 @@ async function tryScreenshot(env: Env, key: string, need: { url?: string; query?
 async function tryImage(env: Env, key: string, prompt: string, spend: Spend): Promise<Attempt> {
   if (spend.yuan + EST_IMAGE_YUAN > env.budgetYuan) return { reason: OVER_BUDGET };
   const file = relFile(key, 'jpg');
-  const out = join(env.workDir, file);
-  const r = await produce(out, () => env.deps.image(prompt, out));
+  const r = await produce(join(env.workDir, file), (tmp) => env.deps.image(prompt, tmp));
   return typeof r === 'string' ? { reason: `生图失败：${r}` } : { asset: { key, file, source: 'generate', cost: costOf(r.result, EST_IMAGE_YUAN) } };
 }
 
-async function tryPexels(env: Env, key: string, prompt: string): Promise<Attempt> {
+async function tryPexels(env: Env, key: string, term: string): Promise<Attempt> {
   const pexels = env.deps.pexels;
   if (!pexels) return { reason: '未配置图库' };
   const file = relFile(key, 'jpg');
-  const out = join(env.workDir, file);
-  const r = await produce(out, () => pexels(prompt.split(/\s+/).slice(0, PEXELS_WORDS).join(' '), out));
+  const r = await produce(join(env.workDir, file), (tmp) => pexels(term, tmp));
   return typeof r === 'string' ? { reason: `图库失败：${r}` } : { asset: { key, file, source: 'pexels' } };
 }
 
-/** 生图优先，失败再试 Pexels（有依赖时），都失败放弃 */
-async function tryGenerate(env: Env, key: string, prompt: string, spend: Spend): Promise<Attempt> {
+const firstWords = (prompt: string): string => prompt.split(/\s+/).slice(0, PEXELS_WORDS).join(' ');
+
+/** 生图优先，失败再试 Pexels（有依赖时），都失败放弃；Pexels 搜索词默认取提示词前 6 个单词，截图退化时传原始 query */
+async function tryGenerate(env: Env, key: string, prompt: string, spend: Spend, pexelsTerm: string = firstWords(prompt)): Promise<Attempt> {
   const img = await tryImage(env, key, prompt, spend);
   if ('asset' in img || !env.deps.pexels) return img;
-  const px = await tryPexels(env, key, prompt);
+  const px = await tryPexels(env, key, pexelsTerm);
   return 'asset' in px ? px : { reason: `${img.reason}；${px.reason}` };
 }
 
-/** 视频：达到 maxVideos 或预算不够时直接返回原因，由调用方退到生图 */
-async function tryVideo(env: Env, key: string, prompt: string, spend: Spend): Promise<Attempt> {
-  if (spend.videos >= env.maxVideos) return { reason: '视频数量已达上限' };
-  if (spend.yuan + EST_VIDEO_YUAN > env.budgetYuan) return { reason: OVER_BUDGET };
+/** 视频：达到 maxVideos（尝试次数）或预算不够时不发起请求（tried=false），由调用方退到生图 */
+async function tryVideo(env: Env, key: string, prompt: string, spend: Spend): Promise<{ attempt: Attempt; tried: boolean }> {
+  if (spend.videos >= env.maxVideos) return { attempt: { reason: '视频数量已达上限' }, tried: false };
+  if (spend.yuan + EST_VIDEO_YUAN > env.budgetYuan) return { attempt: { reason: OVER_BUDGET }, tried: false };
   const file = relFile(key, 'mp4');
-  const out = join(env.workDir, file);
-  const r = await produce(out, () => env.deps.video(prompt, out));
-  return typeof r === 'string' ? { reason: `生视频失败：${r}` } : { asset: { key, file, source: 'video', cost: costOf(r.result, EST_VIDEO_YUAN) } };
+  const r = await produce(join(env.workDir, file), (tmp) => env.deps.video(prompt, tmp));
+  const attempt: Attempt = typeof r === 'string' ? { reason: `生视频失败：${r}` } : { asset: { key, file, source: 'video', cost: costOf(r.result, EST_VIDEO_YUAN) } };
+  return { attempt, tried: true };
 }
 
-/** 按优先级取一份素材：截图（photo 失败退生图）、生成、视频（失败退生图） */
-async function fetchAsset(env: Env, need: VisualNeed, key: string, spend: Spend): Promise<Attempt> {
+/** 按优先级取一份素材：截图（photo 失败退生图）、生成、视频（失败退生图）；videoTried 表示是否发起过视频请求 */
+async function fetchAsset(env: Env, need: VisualNeed, key: string, spend: Spend): Promise<{ outcome: Attempt; videoTried: boolean }> {
   const v = need.visual;
-  if (v.source === 'generate') return tryGenerate(env, key, v.prompt, spend);
+  if (v.source === 'generate') return { outcome: await tryGenerate(env, key, v.prompt, spend), videoTried: false };
   if (v.source === 'video') {
-    const vid = await tryVideo(env, key, v.prompt, spend);
-    return 'asset' in vid ? vid : tryGenerate(env, key, v.prompt, spend);
+    const { attempt, tried } = await tryVideo(env, key, v.prompt, spend);
+    return { outcome: 'asset' in attempt ? attempt : await tryGenerate(env, key, v.prompt, spend), videoTried: tried };
   }
   const shot = await tryScreenshot(env, key, v);
-  if ('asset' in shot || need.template !== 'photo') return shot;
-  const gen = await tryGenerate(env, key, `Editorial photo illustrating: ${v.query ?? v.url ?? ''}`, spend);
-  return 'asset' in gen ? gen : { reason: `${shot.reason}；${gen.reason}` };
+  if ('asset' in shot || need.template !== 'photo') return { outcome: shot, videoTried: false };
+  const original = v.query ?? v.url ?? '';
+  const gen = await tryGenerate(env, key, `Editorial photo illustrating: ${original}`, spend, original);
+  return { outcome: 'asset' in gen ? gen : { reason: `${shot.reason}；${gen.reason}` }, videoTried: false };
 }
 
 /** 把文件名（相对工作目录）写回对应镜头的卡片；visual 保留，返回新分镜 */
@@ -192,10 +221,12 @@ export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, op
   let current = storyboard;
   let assets: BrollAsset[] = [];
   let failures: FulfillResult['failures'] = [];
+  let videoRequests = 0;
   for (const need of visualsOf(storyboard)) {
     const key = visualKey(need.visual);
     const cached = findCached(env, key, need.visual.source);
-    const outcome: Attempt = cached ? { asset: cached } : await fetchAsset(env, need, key, spendOf(assets));
+    const { outcome, videoTried } = cached ? { outcome: { asset: cached } as Attempt, videoTried: cached.source === 'video' } : await fetchAsset(env, need, key, { yuan: yuanOf(assets), videos: videoRequests });
+    videoRequests += videoTried ? 1 : 0;
     if ('asset' in outcome) {
       assets = [...assets, outcome.asset];
       current = applyAsset(current, need.shotIndex, outcome.asset);
@@ -207,6 +238,7 @@ export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, op
     }
   }
   const files = [...assets.map((a) => a.file), ...existingFiles(storyboard, opts.workDir)];
+  // 注意：最终归一化会去掉已取到素材的 photo 的 visual（既定行为：P5 的 regenerateVisual 编辑操作自带 visual）
   const normalized = normalizeStoryboard(current, opts.durationSec, files).storyboard;
-  return { storyboard: normalized, assets, failures, costYuan: spendOf(assets).yuan };
+  return { storyboard: normalized, assets, failures, costYuan: yuanOf(assets) };
 }

@@ -41,6 +41,7 @@ describe('visualKey', () => {
   it('相同需求同键，12 位十六进制', () => {
     expect(visualKey(gen('a jar of coins'))).toBe(visualKey(gen('a jar of coins')));
     expect(visualKey(gen('a jar of coins'))).toMatch(/^[0-9a-f]{12}$/);
+    expect(visualKey({ source: 'generate', prompt: 'a jar of coins' })).toBe(visualKey({ prompt: 'a jar of coins', source: 'generate' } as Visual));
     expect(visualKey(gen('a jar of coins'))).not.toBe(visualKey(gen('another prompt here')));
   });
 });
@@ -58,6 +59,40 @@ describe('fulfillVisuals 缓存', () => {
     expect(r.costYuan).toBe(0);
     expect(r.failures).toEqual([]);
     expect(shotCard(r.storyboard, 0)).toMatchObject({ template: 'photo', props: { image: `broll/${key}.jpg` } });
+  });
+});
+
+describe('fulfillVisuals 缓存校验', () => {
+  it('缓存命中的素材标记 cached: true，jpg 标为 generate', async () => {
+    const dir = workDir();
+    const visual = gen('a jar of coins on a table');
+    mkdirSync(join(dir, 'broll'));
+    touch(join(dir, 'broll', `${visualKey(visual)}.jpg`));
+    const r = await fulfillVisuals(board(photo(0, visual)), fakeDeps().deps, opts(dir));
+    expect(r.assets[0]).toMatchObject({ cached: true, source: 'generate' });
+  });
+
+  it('大小为 0 的缓存文件视为缺失：删除后重新获取', async () => {
+    const dir = workDir();
+    const visual = gen('a jar of coins on a table');
+    mkdirSync(join(dir, 'broll'));
+    writeFileSync(join(dir, 'broll', `${visualKey(visual)}.jpg`), '');
+    const { deps, calls } = fakeDeps();
+    const r = await fulfillVisuals(board(photo(0, visual)), deps, opts(dir));
+    expect(calls.image).toHaveLength(1);
+    expect(r.assets[0]?.cached).toBeUndefined();
+  });
+
+  it('依赖写到临时文件再改名：成功后只留正式文件，失败不留残留', async () => {
+    const dir = workDir();
+    const outs: string[] = [];
+    const { deps } = fakeDeps({ video: async (_p, out) => { outs.push(out); touch(out); return { cost: 2.4 }; } });
+    const visual = vid('slow push-in on a glass of cola');
+    await fulfillVisuals(board(hook(0, visual)), deps, opts(dir));
+    const final = join(dir, `broll/${visualKey(visual)}.mp4`);
+    expect(outs[0]).toMatch(/\.part\.mp4$/);
+    expect(existsSync(final)).toBe(true);
+    expect(existsSync(outs[0] as string)).toBe(false);
   });
 });
 
@@ -122,6 +157,12 @@ describe('fulfillVisuals 生图与图库', () => {
     expect(r.costYuan).toBe(0);
   });
 
+  it('截图退到生图再退 Pexels 时，搜索词用原始 query 而非改写后的提示词', async () => {
+    const { deps, calls } = fakeDeps({ screenshot: async () => { throw new Error('boom'); }, image: async () => { throw new Error('生成失败'); } });
+    await fulfillVisuals(board(photo(0, { source: 'screenshot', query: 'gold price chart' })), { ...deps, ...withPexels(calls) }, opts(workDir()));
+    expect(calls.pexels).toEqual(['gold price chart']);
+  });
+
   it('生图成功时不调 Pexels', async () => {
     const { deps, calls } = fakeDeps();
     await fulfillVisuals(board(photo(0, gen('a jar of coins on a table'))), { ...deps, ...withPexels(calls) }, opts(workDir()));
@@ -150,7 +191,25 @@ describe('fulfillVisuals 生图与图库', () => {
   });
 });
 
+describe('fulfillVisuals photo 的 visual', () => {
+  it('取到素材的 photo 经最终归一化后不再带 visual（P5 重新生成自带 visual）', async () => {
+    const r = await fulfillVisuals(board(photo(0, gen('a jar of coins on a table'))), fakeDeps().deps, opts(workDir()));
+    expect(shotCard(r.storyboard, 0)).toMatchObject({ template: 'photo', props: { image: r.assets[0]?.file } });
+    expect(shotCard(r.storyboard, 0)).not.toHaveProperty('props.visual');
+  });
+});
+
 describe('fulfillVisuals 视频与预算', () => {
+  it('视频失败也计入 maxVideos：第 2 个视频需求不再发起视频', async () => {
+    const videoPrompts: string[] = [];
+    const { deps, calls } = fakeDeps({ video: async (p) => { videoPrompts.push(p); throw new Error('超时'); } });
+    const sb = board(hook(0, vid('first video prompt here')), hook(4, vid('second video prompt here')));
+    const r = await fulfillVisuals(sb, deps, opts(workDir(), { maxVideos: 1 }));
+    expect(videoPrompts).toEqual(['first video prompt here']);
+    expect(calls.image).toEqual(['first video prompt here', 'second video prompt here']);
+    expect(r.assets.map((a) => a.source)).toEqual(['generate', 'generate']);
+  });
+
   it('hook 视频写回 hook.props.video', async () => {
     const { deps } = fakeDeps();
     const visual = vid('slow push-in on a glass of cola');
