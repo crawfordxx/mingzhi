@@ -4,15 +4,16 @@
 
 ## 中文
 
-口播视频自动精剪工具：本地语音识别 → 大模型判断废话/口误 → ffmpeg 剪切并压缩长停顿 → 生成并烧录字幕。一条命令出成片。
+口播视频自动精剪工具：本地语音识别 → 大模型判断废话/口误 → ffmpeg 剪切并压缩长停顿 →（可选）抠像换背景 → 生成字幕 → 大模型设计分镜（上半屏信息卡片、下半屏人物，或人物全屏）→ Remotion 渲染成片（卡片、人像版式切换与字幕一起画，不再用 ffmpeg 烧录字幕）。一条命令出成片。
 
-当前进度：P1（精剪内核，命令行）。花式字幕样式、换背景、B-roll、工作台界面等在后续阶段。
+当前进度：P3a（分镜与成片渲染核心，命令行）。B-roll 配图、配乐、工作台界面等在后续阶段。
 
 ### 环境要求
 
 - Node.js 22 或更高，以及 pnpm
-- ffmpeg 和 ffprobe。**烧录字幕需要带 libass 的 ffmpeg**：Homebrew 默认安装的 ffmpeg 不带 libass，会在烧录步骤失败。程序会优先使用 `~/.mingzhi/bin/ffmpeg` 和 `~/.mingzhi/bin/ffprobe`，可以把带 libass 的静态版放到这里；也可以用环境变量 `MINGZHI_FFMPEG`、`MINGZHI_FFPROBE` 指定路径
-- 联网（首次下载语音模型；剪辑判断需要调用大模型接口）
+- ffmpeg 和 ffprobe。程序会优先使用 `~/.mingzhi/bin/ffmpeg` 和 `~/.mingzhi/bin/ffprobe`，也可以用环境变量 `MINGZHI_FFMPEG`、`MINGZHI_FFPROBE` 指定路径
+- 联网（首次下载语音模型；剪辑判断与分镜需要调用大模型接口）
+- 成片由 [Remotion](https://www.remotion.dev) 渲染。**首次渲染会自动下载 Chrome Headless Shell（约 94MB）**；需要走代理时设置 `NODE_USE_ENV_PROXY=1`（让 Node 使用 `HTTPS_PROXY` 等环境变量），或使用镜像
 
 ### 安装
 
@@ -40,8 +41,8 @@ pnpm mingzhi edit <口播视频.mp4> [-o 输出.mp4] [--work 工作目录]
 ```
 
 - 不指定 `-o` 时，成片写到 `work/<视频名>/<视频名>_精剪.mp4`
-- 工作目录里还会保留 `project.json`（识别稿、剪切点、剪辑方案、字幕）、`cut.mp4`（未加字幕的剪切结果）和 `captions.ass`
-- 控制台依次打印 9 个步骤：probe、audio、asr、cuts、plan、render、captions、burn、done
+- 工作目录里还会保留 `project.json`（识别稿、剪切点、剪辑方案、字幕、分镜）、`cut.mp4`（未加字幕的剪切结果）和 `captions.ass`（供外部使用，成片里的字幕由 Remotion 绘制）
+- 控制台依次打印步骤：probe、audio、asr、cuts、plan、render、captions、storyboard、compose、done（换背景时在 render 之后还有 background、matte）
 
 ### 开发
 
@@ -53,17 +54,20 @@ pnpm typecheck && pnpm test
 
 MIT
 
+本项目依赖的 Remotion 使用自己的许可证：个人、非营利组织以及不超过 3 人的公司可以免费使用；**超过 3 人的公司需要购买 Remotion 公司许可证**，详见 https://www.remotion.dev/license 。
+
 ## English
 
-An automatic editor for talking-head videos: local speech recognition, an LLM that flags fillers and slips, ffmpeg cutting with long pauses squeezed, then captions generated and burned in. One command in, one finished video out.
+An automatic editor for talking-head videos: local speech recognition, an LLM that flags fillers and slips, ffmpeg cutting with long pauses squeezed, optional matting onto a new background, captions, an LLM-designed storyboard (info cards on the top half with the speaker below, or the speaker full screen), then a Remotion render that draws cards, layout moves and captions together (captions are no longer burned in with ffmpeg). One command in, one finished video out.
 
-Status: P1 (the editing core, command line only). Styled captions, background replacement, B-roll and a GUI come in later phases.
+Status: P3a (storyboard and final render core, command line only). B-roll images, music and a GUI come in later phases.
 
 ### Requirements
 
 - Node.js 22+ and pnpm
-- ffmpeg and ffprobe. **Burning captions needs an ffmpeg built with libass.** Homebrew's default ffmpeg lacks it and the burn step will fail. The app prefers `~/.mingzhi/bin/ffmpeg` and `~/.mingzhi/bin/ffprobe`, so drop a libass-enabled static build there, or point to your own with `MINGZHI_FFMPEG` / `MINGZHI_FFPROBE`
-- Internet access (first-time model download; the LLM calls)
+- ffmpeg and ffprobe. The app prefers `~/.mingzhi/bin/ffmpeg` and `~/.mingzhi/bin/ffprobe`, or point to your own with `MINGZHI_FFMPEG` / `MINGZHI_FFPROBE`
+- Internet access (first-time model download; the LLM calls for cuts and the storyboard)
+- The final video is rendered with [Remotion](https://www.remotion.dev). **The first render downloads Chrome Headless Shell (about 94MB).** Behind a proxy, set `NODE_USE_ENV_PROXY=1` so Node honours `HTTPS_PROXY` and friends, or use a mirror
 
 ### Install
 
@@ -91,8 +95,8 @@ pnpm mingzhi edit <video.mp4> [-o out.mp4] [--work workdir]
 ```
 
 - Without `-o`, the result goes to `work/<name>/<name>_精剪.mp4`
-- The work directory also keeps `project.json` (transcript, cuts, edit plan, captions), `cut.mp4` (cut without captions) and `captions.ass`
-- The console prints nine steps: probe, audio, asr, cuts, plan, render, captions, burn, done
+- The work directory also keeps `project.json` (transcript, cuts, edit plan, captions, storyboard), `cut.mp4` (cut without captions) and `captions.ass` (for external use; captions in the video are drawn by Remotion)
+- The console prints the steps: probe, audio, asr, cuts, plan, render, captions, storyboard, compose, done (with a background replacement, background and matte follow render)
 
 ### Development
 
@@ -103,3 +107,5 @@ pnpm typecheck && pnpm test
 ### License
 
 MIT
+
+Remotion, which this project depends on, has its own license: individuals, non-profits and companies of up to 3 people may use it for free; **companies with more than 3 people need a Remotion company license**. See https://www.remotion.dev/license .
