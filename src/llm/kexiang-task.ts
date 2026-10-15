@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { EST_TASK_YUAN } from '../cost/constants.js';
 import type { CostMeter } from '../cost/meter.js';
-import { balanceErrorFrom, causeCode, networkReason, RETRY_BACKOFF_MS } from './errors.js';
+import { balanceErrorFrom, causeCode, networkReason, rethrowIfBalance, RETRY_BACKOFF_MS } from './errors.js';
 
 export const KEXIANG_TASK_BASE = 'https://kexiangai.com/api/v1/user_task';
 const FAILED = new Set(['failed', 'fail', 'error', 'cancelled']);
@@ -70,6 +70,7 @@ export class KexiangTaskClient implements TaskClient {
         q = await this.request<TaskQuery>(`${KEXIANG_TASK_BASE}/get/passAuth/${taskId}`);
         pollFailures = 0;
       } catch (err) {
+        rethrowIfBalance(err);
         pollFailures += 1;
         if (pollFailures > MAX_POLL_FAILURES) throw new Error(`可想任务 ${taskId} 查询失败：${err instanceof Error ? err.message : String(err)}`);
         continue;

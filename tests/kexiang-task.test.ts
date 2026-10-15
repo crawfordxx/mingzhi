@@ -92,6 +92,12 @@ describe('KexiangTaskClient', () => {
     expect(err).toBeInstanceOf(InsufficientBalanceError);
   });
 
+  it('轮询时返回余额不足也直接抛 InsufficientBalanceError，不当作普通查询失败', async () => {
+    const { impl } = fakeFetch([{ body: { id: 1 } }, { status: 400, body: { msg: '余额不足' } }]);
+    const err = await new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InsufficientBalanceError);
+  });
+
   it('缺 cost 时优先按调用方给的 estimateYuan 记账', async () => {
     const meter = new CostMeter({}, 10);
     const { impl } = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', service_output: { imgUrl: 'u' } } }]);

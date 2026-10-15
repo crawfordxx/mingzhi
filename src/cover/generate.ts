@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
-import { COVER_ART_YUAN } from '../cost/estimate.js';
+import { COVER_ART_YUAN, COVER_READ_YUAN } from '../cost/estimate.js';
 import type { CostMeter } from '../cost/meter.js';
 import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
@@ -94,6 +94,8 @@ export interface ArtOptions {
   task: TaskClient; client: LlmClient; style: CoverStyleId; title: string; subtitle?: string; aspect: CoverAspect; dest: string; download?: Download;
   /** 每次生图前检查预算；缺省不检查 */
   meter?: CostMeter;
+  /** 重生时要额外留出的预算（例如还没生成的另一比例），避免重生挤掉它 */
+  reserveYuan?: number;
 }
 export interface ArtResult {
   /** 本次实际生图次数（复用时为 0） */
@@ -137,7 +139,8 @@ export async function generateVerifiedArt(o: ArtOptions): Promise<ArtResult> {
   let costYuan = 0;
   let kept: ArtResult | undefined;
   for (let attempts = 1; ; attempts += 1) {
-    if (o.meter && !o.meter.canSpend(COVER_ART_YUAN)) {
+    const need = kept ? COVER_ART_YUAN + COVER_READ_YUAN + (o.reserveYuan ?? 0) : COVER_ART_YUAN;
+    if (o.meter && !o.meter.canSpend(need)) {
       if (kept) return kept;
       throw new Error(`预算不足，无法生成封面底图（剩余 ¥${o.meter.remaining().toFixed(2)}，约需 ¥${COVER_ART_YUAN.toFixed(2)}）`);
     }
@@ -179,9 +182,10 @@ export async function makeCovers(opts: MakeCoversOptions): Promise<MakeCoversRes
   const sec = await pickPersonFrame(opts.personVideo, opts.cfg, opts.client);
   const fadeCutSides = !COVER_STYLES[opts.style].personStyle.outline;
   const person = await cutoutPersonWithRetry(opts.personVideo, sec, join(opts.workDir, PERSON_FILE), opts.cfg, { fadeCutSides });
-  const art = (aspect: CoverAspect): Promise<ArtResult> => generateVerifiedArt({ ...opts, aspect, dest: join(opts.workDir, `cover-art-${FILE_TAG[aspect]}.png`) });
-  const art34 = await art('3:4');
-  const art43 = await art('4:3');
+  const art = (aspect: CoverAspect, reserveYuan: number): Promise<ArtResult> => generateVerifiedArt({ ...opts, aspect, reserveYuan, dest: join(opts.workDir, `cover-art-${FILE_TAG[aspect]}.png`) });
+  // 3:4 重生时给 4:3 的首张留出预算，免得付了钱却两张都出不了
+  const art34 = await art('3:4', COVER_ART_YUAN + COVER_READ_YUAN);
+  const art43 = await art('4:3', 0);
   const cover34 = join(opts.workDir, 'cover-3x4.png');
   const cover43 = join(opts.workDir, 'cover-4x3.png');
   const props = (aspect: CoverAspect) => ({ bg: `cover-art-${FILE_TAG[aspect]}.png`, person: person ? PERSON_FILE : '', style: opts.style });

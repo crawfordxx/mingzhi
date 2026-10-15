@@ -175,15 +175,24 @@ describe('generateVerifiedArt', () => {
     expect(task.inputs).toHaveLength(1);
   });
 
-  it('预算刚好够再生一张时照常重生；第一张就没预算则报错且不生图', async () => {
+  it('预算刚好够再生一张（含核对读图）时照常重生；第一张就没预算则报错且不生图', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mz-cover-gb2-'));
-    const meter = new CostMeter({}, 1.2);
+    const meter = new CostMeter({}, 1.25);
     const task = fakeTask(0.6, meter);
     const res = await generateVerifiedArt({ task, client: fakeLlm([{ title: '错字' }]), style: 'bauhaus', title: '标题', aspect: '3:4', dest: join(dir, 'a.png'), download: pngDownload, meter });
     expect(res.attempts).toBe(2);
     const broke = fakeTask(0.6, meter);
     await expect(generateVerifiedArt({ task: broke, client: fakeLlm([{ title: '标题' }]), style: 'y2k', title: '标题', aspect: '4:3', dest: join(dir, 'b.png'), download: pngDownload, meter })).rejects.toThrow('预算不足');
     expect(broke.inputs).toHaveLength(0);
+  });
+
+  it('重生要给 reserveYuan 留出预算：够再生一张但不够留给另一比例时，不重生', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-cover-gb3-'));
+    const meter = new CostMeter({}, 1.5);
+    const task = fakeTask(0.6, meter);
+    const res = await generateVerifiedArt({ task, client: fakeLlm([{ title: '错字' }]), style: 'bauhaus', title: '标题', aspect: '3:4', dest: join(dir, 'a.png'), download: pngDownload, meter, reserveYuan: 0.65 });
+    expect(res.attempts).toBe(1);
+    expect(meter.canSpend(0.65)).toBe(true);
   });
 
   it('第一次通过就不再重生；任务没有返回花费时按 0 计', async () => {
