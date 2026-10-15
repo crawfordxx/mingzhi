@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="base.css">
+<!--
+  使用流程条，1000×250 CSS 像素（2x）。参数：?theme=light|dark&lang=zh|en
+  每一步下面的数字都是 README 实测（横屏样片「怎么用 AI 剪口播」）。
+-->
+<style>
+  html, body { width: 1000px; height: 250px; }
+  body { display: flex; align-items: center; padding: 0 2px; }
+  ol { list-style: none; display: grid; grid-template-columns: repeat(5, 1fr); width: 100%; position: relative; }
+  ol::before { content: ''; position: absolute; left: 40px; right: 40px; top: 21px; height: 1px; background: linear-gradient(90deg, var(--b3), var(--b2)); opacity: 0.7; }
+  li { position: relative; padding-right: 18px; }
+  .n { position: relative; width: 42px; height: 42px; border-radius: 50%; background: var(--panel); box-shadow: 0 0 0 1px var(--b2); display: grid; place-items: center; }
+  .n .it { font-size: 21px; color: var(--b5); font-weight: 300; line-height: 1; margin-top: -2px; }
+  :root[data-theme='dark'] .n .it { color: #8fa9ec; }
+  li.on .n { background: #000; box-shadow: none; }
+  li.on .n .it { color: #fff; }
+  :root[data-theme='dark'] li.on .n { background: #fff; }
+  :root[data-theme='dark'] li.on .n .it { color: #000; }
+  h3 { margin-top: 20px; font: 600 20px/1.2 var(--sans); color: var(--t1); }
+  p { margin-top: 8px; font: 400 15px/1.5 var(--sans); color: var(--t2); min-height: 45px; }
+  .m { margin-top: 12px; display: inline-flex; gap: 6px; align-items: baseline; font: 400 14px/1 var(--mono); color: var(--t3); }
+  .m b { font-weight: 500; color: var(--t1); }
+</style></head>
+<body><ol id="ol"></ol>
+<script>
+  const q = new URLSearchParams(location.search);
+  document.documentElement.dataset.theme = q.get('theme') || 'light';
+  document.documentElement.lang = q.get('lang') || 'zh';
+  const en = q.get('lang') === 'en';
+  const S = en ? [
+    ['Drop the talk', 'One clip or several, in any order', 'mp4 · mov · mkv'],
+    ['Pick the look', 'Background, captions, cover; see the cost first', 'est. <b>¥1.96–6.21</b>'],
+    ['Make the cut', 'Slips, storyboard, cards, render, cover', '<b>5 min 26 s</b> · <b>¥2.05</b>'],
+    ['Say what to change', '"Switch to the night window"', '<b>19 s</b> · <b>¥0.00</b>'],
+    ['Compare, export', 'Synced playback, then video + 2 covers', '→ <b>~/Downloads</b>'],
+  ] : [
+    ['拖进口播', '一段或多段，顺序我来排', 'mp4 · mov · mkv'],
+    ['选背景、字幕、封面', '开始前先看预估花费', '预估 <b>¥1.96–6.21</b>'],
+    ['开始出片', '剪口误、分镜、卡片、渲染、封面', '实测 <b>5 分 26 秒</b> · <b>¥2.05</b>'],
+    ['一句话修改', '「背景换成夜景落地窗」', '<b>19 秒</b> · <b>¥0.00</b>'],
+    ['对比，导出', '两版同步播放，导出成片和两张封面', '→ <b>~/Downloads</b>'],
+  ];
+  document.getElementById('ol').innerHTML = S.map(([h, p, m], i) =>
+    `<li class="${i === 3 ? 'on' : ''}"><div class="n"><span class="it">${String(i + 1).padStart(2, '0')}</span></div><h3>${h}</h3><p>${p}</p><span class="m">${m}</span></li>`).join('');
+</script>
+</body></html>

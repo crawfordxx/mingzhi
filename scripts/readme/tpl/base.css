@@ -1,0 +1,45 @@
+/* README 视觉物料的公共 token：沿用工作台 G1（web/src/theme.css），另加深色一套 */
+@font-face { font-family: 'Plex Serif'; font-style: italic; font-weight: 200; src: url('../../../node_modules/@fontsource/ibm-plex-serif/files/ibm-plex-serif-latin-200-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Plex Serif'; font-style: italic; font-weight: 300; src: url('../../../node_modules/@fontsource/ibm-plex-serif/files/ibm-plex-serif-latin-300-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Plex Mono'; font-weight: 400; src: url('../../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Plex Mono'; font-weight: 500; src: url('../../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2') format('woff2'); }
+
+:root {
+  --bg: #ffffff; --panel: #ffffff; --line: #0000000f; /* 与 GitHub 浅色页面同底，横幅与流程条不显出方框 */
+  --t1: #000000e6; --t2: #000000b3; --t3: #0000008f; --t4: #0000003d;
+  --logo: #014df9;
+  --b1: #d6dff5; --b2: #adc0eb; --b3: #85a0e0; --b4: #5c81d6; --b5: #3361cc; --b6: #294ea3;
+  --neg: #d65c5c;
+  --chip-bg: var(--b1); --chip-fg: var(--b6);
+  --shadow: 0 0 0 1px #0000000f, 0 8px 32px 4px #0000000f;
+  --shadow-win: 0 0 0 1px #0000000f, 0 25px 50px -12px rgba(0, 0, 0, 0.45);
+  --term: #1f1f22; --term-bar: #2a2a2e; --term-1: #e8e8ea; --term-2: #a3a3a8;
+  --sans: 'PingFang SC', system-ui, -apple-system, sans-serif;
+  --serif-i: 'Plex Serif', 'Songti SC', serif;
+  --serif-zh: 'Songti SC', 'STSong', serif;
+  --mono: 'Plex Mono', 'SF Mono', Menlo, monospace;
+}
+:root[data-theme='dark'] {
+  --bg: #0d1117; --panel: #161b22; --line: #ffffff14;
+  --t1: #ffffffeb; --t2: #ffffffb3; --t3: #ffffff85; --t4: #ffffff33;
+  --chip-bg: #1d2a4a; --chip-fg: #a9bdf0;
+  --shadow: 0 0 0 1px #ffffff12, 0 8px 32px 4px #00000066;
+  --shadow-win: 0 0 0 1px #ffffff14, 0 30px 60px -12px rgba(0, 0, 0, 0.8);
+}
+
+/* 英文版用系统西文字体（PingFang 里的西文连字符等字形偏宽） */
+:root[lang='en'] { --sans: system-ui, -apple-system, 'PingFang SC', sans-serif; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--t1); }
+body { font: 400 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; overflow: hidden; }
+img { display: block; }
+.it { font-family: var(--serif-i); font-style: italic; font-weight: 200; font-synthesis: none; }
+.it.l { font-weight: 300; }
+.mono { font-family: var(--mono); }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--chip-bg); color: var(--chip-fg); font-weight: 600; border-radius: 999px; padding: 4px 12px; white-space: nowrap; }
+.lights { display: flex; gap: 7px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }

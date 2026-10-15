@@ -1,0 +1,84 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="base.css">
+<!--
+  功能网格配图，800×520 CSS 像素（2x 渲染成 1600×1040），六张统一底色与点阵，内容是真实界面裁图或成片截帧。
+  参数：?id=cut|bg|board|chat|compare|qa&theme=light|dark&lang=zh|en&m=素材目录（build.sh 产出的裁图与截帧）
+  素材全部来自 README 实测的两条样片（scripts/readme/build.sh 里写明了出处），这里只排版、不造数据。
+-->
+<style>
+  html, body { width: 800px; height: 520px; }
+  body { background: var(--tile); position: relative; }
+  :root { --tile: #eef1f8; --tile-line: #0000000a; }
+  :root[data-theme='dark'] { --tile: #151b26; --tile-line: #ffffff0d; }
+  .dots { position: absolute; inset: 0; background-image: radial-gradient(var(--tile-line) 1.2px, transparent 1.3px); background-size: 18px 18px; }
+  .card { position: absolute; background: #fff; border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; }
+  .card img { width: 100%; display: block; }
+  .phone { position: absolute; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-win); background: #000; }
+  .phone img { width: 100%; height: 100%; object-fit: cover; }
+  .cap { position: absolute; font: 500 13px/1 var(--sans); color: var(--t2); text-align: center; }
+  .cap .it { font-size: 15px; color: var(--t3); margin-left: 4px; }
+  .qa { position: absolute; left: 410px; top: 40px; width: 350px; background: #fff; border-radius: 20px; box-shadow: var(--shadow); padding: 10px 24px; }
+  .qa ul { list-style: none; }
+  .qa li { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 8px; padding: 14.5px 0; border-top: 1px solid #0000000d; font: 400 19px/1.2 var(--sans); color: #000000b3; }
+  .qa li:first-child { border-top: 0; }
+  .qa li b { font-weight: 600; color: #000000e6; }
+  .qa li span { font-family: var(--mono); font-size: 17px; }
+  .qa li svg { width: 22px; height: 22px; color: #3361cc; }
+  .big-cap { font-size: 24px; font-weight: 600; color: var(--t1); }
+  .big-note { font: 400 23px/1.3 var(--sans); color: var(--t2); text-align: center; }
+  .big-note b { color: var(--t1); font-weight: 600; }
+  .strip { position: absolute; left: 60px; right: 60px; top: 50px; display: flex; gap: 22px; }
+  .strip figure { flex: 1; display: flex; flex-direction: column; gap: 14px; }
+  .strip .ph { border-radius: 14px; overflow: hidden; aspect-ratio: 9 / 16; box-shadow: var(--shadow-win); background: #000; }
+  .strip .ph img { width: 100%; height: 100%; object-fit: cover; }
+  .strip figcaption { font: 600 23px/1.2 var(--sans); color: var(--t1); display: flex; gap: 8px; align-items: baseline; justify-content: center; }
+  .strip figcaption .it { font-size: 24px; color: var(--t3); font-weight: 300; }
+  .tl { position: absolute; left: 60px; right: 60px; top: 24px; height: 6px; display: flex; gap: 5px; }
+  .tl i { border-radius: 3px; background: var(--b2); opacity: 0.6; }
+  .tl i.on { background: var(--b4); opacity: 1; }
+  .big { position: absolute; display: flex; flex-direction: column; gap: 14px; }
+  .big .it { font-size: 120px; line-height: 0.9; color: var(--t1); letter-spacing: -0.03em; }
+  .big small { font: 500 24px/1 var(--sans); color: var(--t2); }
+</style></head>
+<body>
+<div class="dots"></div>
+<div id="root"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  document.documentElement.dataset.theme = q.get('theme') || 'light';
+  document.documentElement.lang = q.get('lang') || 'zh';
+  const en = q.get('lang') === 'en';
+  const m = (f) => `${q.get('m')}/${f}`;
+  const t = (zh, e) => (en ? e : zh);
+  const tick = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>';
+  // README 里每张图只有约 400px 宽（缩到一半），所以图里不放标题、只放大号内容；标题与说明写在 README 的 h4 里
+  const T = {
+    cut: () => `<div class="card" style="left:70px;top:60px;width:660px"><img src="${m('live-head.png')}"><img src="${m('live-tx.png')}"></div>`,
+    bg: () => [
+      ['bg-orig.jpg', '原片', 'original', 70],
+      ['bg-studio.jpg', '极简工作室', 'studio', 300],
+      ['bg-night.jpg', '夜景落地窗', 'night window', 530],
+    ].map(([f, zh, e, x]) => `<div class="phone" style="left:${x}px;top:36px;width:200px;height:356px"><img src="${m(f)}"></div>
+      <div class="cap big-cap" style="left:${x - 20}px;width:240px;top:412px">${t(zh, e)}</div>`).join('') + `
+      <div class="cap big-note" style="left:0;right:0;top:458px">${t('改成夜景只重新合成 <b>0.8 秒</b>，花费 <b>¥0</b>', 'night window: <b>0.8 s</b> recomposite, <b>¥0</b>')}</div>`,
+    board: () => `
+      <div class="tl">${[1.47, 1.8, 2.93, 2.9, 2.03].map((d, i) => `<i class="${i >= 1 && i <= 3 ? 'on' : ''}" style="flex:${d}"></i>`).join('')}</div>
+      <div class="strip">${[
+        ['s1.jpg', '钩子卡', 'hook card', '0:01'], ['s2.jpg', '对比条卡', 'bar card', '0:03'], ['s3.jpg', '划线清单卡', 'strike list', '0:06'],
+      ].map(([f, zh, e, tc]) => `<figure><div class="ph"><img src="${m(f)}"></div><figcaption>${t(zh, e)}<span class="it">${tc}</span></figcaption></figure>`).join('')}</div>`,
+    chat: () => `<div class="card" style="left:80px;top:34px;width:640px;padding:22px 26px 8px"><img src="${m('chat.png')}"></div>`,
+    compare: () => `<div class="card" style="left:160px;top:22px;width:480px;border-radius:22px"><img src="${m('compare.png')}"></div>`,
+    qa: () => `
+      <div class="big" style="left:52px;top:58px"><span class="it l">7 / 7</span><small>${t('成片检查全部通过', 'final checks passed')}</small></div>
+      <div class="card" style="left:44px;top:254px;width:330px;padding:4px 0"><img src="${m('scores.png')}"></div>
+      <div class="cap big-note" style="left:52px;top:352px;width:320px;text-align:left">${t('卡片自检平均 <b>7.3</b> 分', 'card score <b>7.3</b> / 10')}</div>
+      <div class="qa"><ul>${[
+        ['分辨率', 'Resolution', '1080×1920'], ['帧率', 'Frame rate', '30 fps'], ['响度', 'Loudness', '-14.1 LUFS'],
+        ['真峰值', 'True peak', '-1.8 dBTP'], ['黑帧', 'Black frames', t('无', 'none')], ['字幕安全区', 'Safe area', t('不出界', 'inside')],
+        ['配色对比度', 'Contrast', '≥ 4.5'],
+      ].map(([zh, e, v]) => `<li>${tick}<b>${t(zh, e)}</b><span>${v}</span></li>`).join('')}</ul></div>`,
+  };
+  document.getElementById('root').innerHTML = T[q.get('id')]();
+</script>
+</body></html>

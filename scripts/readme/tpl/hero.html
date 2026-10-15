@@ -1,0 +1,84 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="base.css">
+<!--
+  README 主横幅，1200×600 CSS 像素（2x 渲染成 2400×1200）。
+  参数：?theme=light|dark&art=油画路径&frame=成片截帧路径&lang=zh|en
+  右侧复刻工作台的预览台：油画画框 + 9:16 白色浮窗（真实成片截帧）+ 深色终端（真实出片日志）+ 对话气泡。
+-->
+<style>
+  html, body { width: 1200px; height: 600px; }
+  body { position: relative; }
+  .copy { position: absolute; left: 36px; top: 0; bottom: 0; width: 490px; display: flex; flex-direction: column; justify-content: center; }
+  .brand { display: flex; align-items: center; gap: 12px; font: 600 17px/1 var(--sans); color: var(--t1); }
+  .brand img { width: 40px; height: 40px; border-radius: 10px; }
+  .brand .it { font-size: 18px; color: var(--t3); font-weight: 300; }
+  h1 { margin-top: 40px; font: 700 54px/1.18 var(--sans); letter-spacing: -0.01em; color: var(--t1); }
+  h1 .it { font-weight: 200; font-size: 64px; letter-spacing: -0.02em; color: var(--b5); }
+  :root[data-theme='dark'] h1 .it { color: #8fa9ec; }
+  .lede { margin-top: 24px; font: 400 19px/1.7 var(--sans); color: var(--t2); max-width: 470px; }
+  .lede .hl { white-space: nowrap; background: var(--chip-bg); color: var(--chip-fg); font-weight: 600; border-radius: 7px; padding: 1px 7px; }
+  .facts { margin-top: 36px; display: flex; gap: 30px; }
+  .facts div { display: flex; flex-direction: column; gap: 6px; }
+  .facts b { font: 300 italic 34px/1 var(--serif-i); color: var(--t1); letter-spacing: -0.01em; }
+  .facts span { font: 400 14.5px/1.2 var(--sans); color: var(--t3); }
+  .frame { position: absolute; left: 580px; top: 36px; width: 584px; height: 528px; border-radius: 26px; overflow: hidden; box-shadow: var(--shadow); }
+  .frame > img { width: 100%; height: 100%; object-fit: cover; object-position: 30% 50%; }
+  :root[data-theme='dark'] .frame > img { object-position: 18% 50%; }
+  :root[lang='en'] h1 { font-size: 44px; line-height: 1.2; }
+  :root[lang='en'] h1 .it { font-size: 54px; }
+  .win { position: absolute; left: 862px; top: 62px; width: 244px; border-radius: 16px; background: #fff; box-shadow: var(--shadow-win); overflow: hidden; }
+  .win .bar { height: 30px; display: flex; align-items: center; padding: 0 11px; position: relative; }
+  .win .bar .lights i { width: 9px; height: 9px; }
+  .win .bar .lights { gap: 5px; }
+  .win .bar span { position: absolute; left: 0; right: 0; text-align: center; font: 500 10.5px/1 var(--sans); color: #0000008f; }
+  .win .shot { margin: 0 6px; border-radius: 9px; overflow: hidden; aspect-ratio: 9 / 16; }
+  .win .shot img { width: 100%; height: 100%; object-fit: cover; }
+  .win .ctl { display: flex; align-items: center; gap: 8px; padding: 9px 10px 11px; font: 500 10px/1 var(--mono); color: #000000b3; }
+  .win .ctl .play { width: 20px; height: 20px; border-radius: 50%; background: #f5f5f5; display: grid; place-items: center; }
+  .win .ctl .play::after { content: ''; border-left: 6px solid #000000b3; border-top: 4px solid transparent; border-bottom: 4px solid transparent; margin-left: 2px; }
+  .win .ctl .track { flex: 1; height: 3px; border-radius: 2px; background: #eee; position: relative; }
+  .win .ctl .track::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 46%; border-radius: 2px; background: #5c81d6; }
+  .term { position: absolute; left: 600px; top: 312px; width: 332px; border-radius: 12px; background: var(--term); box-shadow: 0 0 0 1px #ffffff14, 0 22px 44px -10px #000000a6; overflow: hidden; }
+  .term .bar { height: 26px; background: var(--term-bar); display: flex; align-items: center; padding: 0 10px; position: relative; }
+  .term .bar .lights i { width: 8px; height: 8px; }
+  .term .bar .lights { gap: 5px; }
+  .term .bar span { position: absolute; left: 0; right: 0; text-align: center; font: 400 9.5px/1 var(--mono); color: var(--term-2); }
+  .term pre { padding: 10px 12px 12px; font: 400 11.2px/1.75 var(--mono); color: var(--term-1); white-space: pre; }
+  .term pre em { font-style: normal; color: #8fa9ec; }
+  .term pre s { text-decoration: none; color: var(--term-2); }
+  .bubble { position: absolute; right: 352px; top: 84px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .bubble .me { background: #000; color: #fff; font: 500 13px/1 var(--sans); padding: 11px 15px; border-radius: 18px 18px 4px 18px; box-shadow: 0 10px 24px -8px #00000066; }
+  :root[data-theme='dark'] .bubble .me { box-shadow: 0 0 0 1px #ffffff2e, 0 10px 24px -8px #000000aa; }
+  .bubble .re { background: #fff; color: #000000e6; font: 400 12px/1 var(--sans); padding: 9px 12px; border-radius: 14px; box-shadow: 0 0 0 1px #0000000f, 0 10px 24px -8px #00000040; display: flex; gap: 7px; align-items: center; }
+  .bubble .re b { color: #294ea3; background: #d6dff5; border-radius: 6px; padding: 2px 6px; font: 600 11px/1 var(--sans); }
+</style></head>
+<body>
+<div class="copy">
+  <div class="brand"><img src="../../../assets/brand/logo-180.png" alt="">明知AI剪辑 <span class="it">(MIT)</span></div>
+  <h1 id="h1"></h1>
+  <p class="lede" id="lede"></p>
+  <div class="facts" id="facts"></div>
+</div>
+<div class="frame"><img id="art" alt=""></div>
+<div class="bubble" id="bubble"></div>
+<div class="win"><div class="bar"><div class="lights"><i></i><i></i><i></i></div><span id="wt"></span></div>
+  <div class="shot"><img id="frame" alt=""></div>
+  <div class="ctl"><div class="play"></div><span id="tc"></span><div class="track"></div></div></div>
+<div class="term"><div class="bar"><div class="lights"><i></i><i></i><i></i></div><span>Terminal — mingzhi</span></div><pre id="log"></pre></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  document.documentElement.dataset.theme = q.get('theme') || 'light';
+  document.documentElement.lang = q.get('lang') || 'zh';
+  document.getElementById('art').src = q.get('art');
+  document.getElementById('frame').src = q.get('frame');
+  const T = JSON.parse(decodeURIComponent(q.get('copy')));
+  document.getElementById('h1').innerHTML = T.h1;
+  document.getElementById('lede').innerHTML = T.lede;
+  document.getElementById('facts').innerHTML = T.facts.map(([b, s]) => `<div><b>${b}</b><span>${s}</span></div>`).join('');
+  document.getElementById('bubble').innerHTML = `<div class="me">${T.ask}</div><div class="re">${T.reply}</div>`;
+  document.getElementById('wt').textContent = T.win;
+  document.getElementById('tc').textContent = T.tc;
+  document.getElementById('log').innerHTML = T.log.join('\n');
+</script>
+</body></html>
