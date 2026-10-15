@@ -7,6 +7,7 @@ import { confirmRun } from './cost/confirm.js';
 import { estimateCost } from './cost/estimate.js';
 import { CostMeter } from './cost/meter.js';
 import { loadPrices } from './cost/prices.js';
+import { InsufficientBalanceError, RECHARGE_URL } from './llm/errors.js';
 import { KexiangClient } from './llm/kexiang.js';
 import { makeTaskClient, parseBrollArgs } from './pipeline/broll-step.js';
 import { parseFinishArgs } from './pipeline/finish-step.js';
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   const res = await runPipeline({ input, workDir, output, cfg, llm, background, task, broll, meter, qa: !values['no-qa'], ...finish, onProgress: (e) => console.log(`[${e.step}] ${e.message}`) }).catch((err: unknown) => {
     console.error(`已花费 ¥${meter.total.toFixed(2)}`);
+    if (err instanceof InsufficientBalanceError) console.error(`请先到 ${RECHARGE_URL} 充值，再重新运行（已完成的付费素材在工作目录里有缓存，重跑不会重复付费）`);
     throw err;
   });
   const secs = Math.round((Date.now() - started) / 1000);

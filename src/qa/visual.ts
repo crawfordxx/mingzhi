@@ -2,6 +2,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import { z } from 'zod';
 import type { TimedCaption } from '../captions/lines.js';
 import type { CostMeter } from '../cost/meter.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { renderCardFrames, withBundle } from '../compose/render.js';
 import { reviseCard } from '../storyboard/revise.js';
@@ -110,6 +111,7 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
       card = next;
     }
   } catch (err) {
+    rethrowIfBalance(err);
     skipped = `自检失败：${err instanceof Error ? err.message : String(err)}`;
   }
   const best = versions.reduce<Version | undefined>((a, b) => (a ? better(a, b) : b), undefined);
@@ -138,6 +140,7 @@ export async function qaCards(opts: QaCardsOptions): Promise<{ storyboard: Story
         }
       });
     } catch (err) {
+      rethrowIfBalance(err);
       const skipped = `打包失败：${err instanceof Error ? err.message : String(err)}`;
       return { storyboard: opts.storyboard, report: targets.map((shotIndex) => ({ shotIndex, scores: [], revised: 0, passed: false, skipped })) };
     }

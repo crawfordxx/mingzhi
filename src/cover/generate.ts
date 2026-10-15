@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { downloadTo, type TaskClient } from '../llm/kexiang-task.js';
 import type { Download } from '../broll/generate-media.js';
@@ -68,7 +69,8 @@ export async function verifyTitle(client: LlmClient, png: string, title: string)
   let res: unknown;
   try {
     res = await client.chatJson({ model: TITLE_CHECK_MODEL, system: '你是图片文字识别助手，只输出 JSON。', user, images: [image], reasoningEffort: 'low' });
-  } catch {
+  } catch (err) {
+    rethrowIfBalance(err);
     return 'error';
   }
   const seen = (res as { title?: unknown } | null)?.title;

@@ -8,6 +8,7 @@ import type { TimedCaption } from '../captions/lines.js';
 import { CAPTION_STYLES, type CaptionStyleId } from '../captions/styles.js';
 import { COVER_STYLES, DEFAULT_COVER_STYLE, type CoverStyleId } from '../cover/styles.js';
 import { coverTitle, makeCovers, type MakeCoversOptions, type MakeCoversResult } from '../cover/generate.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
 import type { Storyboard } from '../storyboard/schema.js';
@@ -100,6 +101,7 @@ export async function runCover(ctx: CoverContext, cover: CoverOptions | undefine
       cover: { style, costYuan: res.costYuan, unverified: res.unverified, reused: res.reused },
     });
   } catch (err) {
+    rethrowIfBalance(err);
     complete('cover', `封面生成失败，已跳过（成片不受影响）：${errText(err)}`);
   }
 }

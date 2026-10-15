@@ -1,4 +1,5 @@
 import type { CostMeter } from '../cost/meter.js';
+import { balanceErrorFrom } from '../llm/errors.js';
 
 export const SEARCH_MODEL = 'openai/gpt-5.6-luna';
 export const KEXIANG_RESPONSES_URL = 'https://kexiangai.com/api/v1/responses';
@@ -182,7 +183,10 @@ export async function searchUrls(apiKey: string, query: string, opts: SearchOpti
   } catch (err) {
     throw new Error(`联网搜索请求失败：${err instanceof Error ? err.message : String(err)}`);
   }
-  if (!res.ok) throw new Error(`联网搜索失败 ${res.status}：${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw balanceErrorFrom(res.status, text) ?? new Error(`联网搜索失败 ${res.status}：${text.slice(0, 200)}`);
+  }
   let data: ResponsesBody;
   try {
     data = (await res.json()) as ResponsesBody;

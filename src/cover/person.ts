@@ -1,4 +1,5 @@
 import type { AppConfig } from '../config.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { runBuffer } from '../media/exec.js';
 import { probe } from '../media/probe.js';
@@ -38,7 +39,8 @@ export async function pickPersonFrame(video: string, cfg: AppConfig, client: Llm
     const res = await client.chatJson({ model: FRAME_PICK_MODEL, system: SYSTEM, user, images: [grid], reasoningEffort: 'low' });
     const index = Number((res as { index?: unknown } | null)?.index);
     if (Number.isInteger(index) && index >= 1 && index <= times.length) return times[index - 1];
-  } catch {
+  } catch (err) {
+    rethrowIfBalance(err);
     // 选帧只是锦上添花：模型不可用时用兜底帧，不中断出封面
   }
   return durationSec / 3;

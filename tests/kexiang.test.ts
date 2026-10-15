@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
 import { KexiangClient, KEXIANG_CHAT_URL, parseJsonContent } from '../src/llm/kexiang.js';
 
 const ok = (content: string) => new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
@@ -54,7 +55,7 @@ describe('KexiangClient', () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer sk-abc');
   });
 
-  it('5xx/429 重试，最多 3 次', async () => {
+  it('5xx/429 重试，之后成功', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('busy', { status: 502 }))
       .mockResolvedValueOnce(new Response('limit', { status: 429 }))
@@ -75,8 +76,8 @@ describe('KexiangClient', () => {
     const sleep = vi.fn().mockResolvedValue(undefined);
     await expect(new KexiangClient('abc', fetchMock, sleep).chatJson({ model: 'm', system: 's', user: 'u' }))
       .rejects.toThrow('可想 AI 暂时不可用');
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(sleep.mock.calls).toEqual([[1000], [2000]]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(sleep.mock.calls).toEqual([[2000], [5000], [10000]]);
   });
 
   it('网络错误按同样退避重试，之后成功', async () => {
@@ -93,10 +94,11 @@ describe('KexiangClient', () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(timeout)
       .mockResolvedValueOnce(new Response('<html>', { status: 200 }))
+      .mockResolvedValueOnce(new Response('<html>', { status: 200 }))
       .mockResolvedValueOnce(new Response('<html>', { status: 200 }));
     await expect(new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }))
       .rejects.toThrow('可想 AI 暂时不可用：响应不是合法 JSON');
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     const onlyTimeout = vi.fn().mockRejectedValue(timeout);
     await expect(new KexiangClient('abc', onlyTimeout, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }))
       .rejects.toThrow('可想 AI 暂时不可用：请求超时');
@@ -107,5 +109,40 @@ describe('KexiangClient', () => {
     await expect(new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }))
       .rejects.toThrow('可想 AI 返回格式异常');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('网络中断持续几秒时耐心重试：前 3 次 fetch failed，第 4 次成功，退避 2s/5s/10s', async () => {
+    const down = (): TypeError => new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(down()).mockRejectedValueOnce(down()).mockRejectedValueOnce(down())
+      .mockResolvedValueOnce(ok('{"x":3}'));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const out = await new KexiangClient('abc', fetchMock, sleep).chatJson({ model: 'm', system: 's', user: 'u' });
+    expect(out).toEqual({ x: 3 });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(sleep.mock.calls).toEqual([[2000], [5000], [10000]]);
+  });
+
+  it('网络错误的报错带上 cause 的错误码与信息', async () => {
+    const cause = Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' });
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause }));
+    await expect(new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }))
+      .rejects.toThrow('网络错误 fetch failed（UND_ERR_SOCKET other side closed）');
+  });
+
+  it('400 且响应 JSON 的 msg 或 message 含「余额不足」时抛 InsufficientBalanceError，不重试', async () => {
+    for (const body of [{ msg: '余额不足，请充值' }, { message: '账户余额不足' }]) {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 400 }));
+      const err = await new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(InsufficientBalanceError);
+      expect((err as Error).message).toBe('可想 AI 账户余额不足，请充值后重试');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('其他 400（含不含「余额不足」的 JSON）仍是普通错误', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ msg: '参数错误' }), { status: 400 }));
+    const err = await new KexiangClient('abc', fetchMock, noSleep).chatJson({ model: 'm', system: 's', user: 'u' }).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(InsufficientBalanceError);
   });
 });

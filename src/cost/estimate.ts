@@ -1,4 +1,4 @@
-import { EST_TASK_YUAN } from '../llm/kexiang-task.js';
+import { EST_TASK_YUAN } from './constants.js';
 
 /** 开跑前的花费预估：系数来自实测，全部写成具名常量；low 为「可能不需要」时的下限，high 为最坏情况 */
 export const CUT_YUAN_PER_MIN = 0.15;

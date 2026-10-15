@@ -1,6 +1,7 @@
 import type { AppConfig } from '../config.js';
 import type { CostMeter } from '../cost/meter.js';
 import { fulfillVisuals, makeDeps, type BrollAsset, type BrollDeps, type FulfillOptions } from '../broll/fulfill.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import { KexiangTaskClient, type TaskClient } from '../llm/kexiang-task.js';
 import { normalizeStoryboard } from '../storyboard/normalize.js';
 import type { Shot, Storyboard } from '../storyboard/schema.js';
@@ -118,6 +119,7 @@ async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: St
       { storyboard: res.storyboard, broll: { assets: res.assets, failures: res.failures, costYuan: res.costYuan } });
     return res.storyboard;
   } catch (err) {
+    rethrowIfBalance(err);
     const fallback = withoutBroll(storyboard, durationSec);
     complete('broll', `素材获取失败，已去掉待取素材的需求（图片卡改为全屏人像）：${err instanceof Error ? err.message : String(err)}`, { storyboard: fallback });
     return fallback;

@@ -1,7 +1,7 @@
 import type { CostMeter } from '../cost/meter.js';
+import { balanceErrorFrom, networkReason, RETRY_BACKOFF_MS } from './errors.js';
 
 export const KEXIANG_CHAT_URL = 'https://kexiangai.com/api/v1/chat/completions';
-const MAX_ATTEMPTS = 3;
 
 export interface ChatOptions {
   model: string;
@@ -41,11 +41,6 @@ function userContent(opts: ChatOptions): UserContent {
 /** 可重试的失败（网络错误、超时、429/5xx、响应体不是 JSON）；其他错误直接抛出 */
 class RetryableError extends Error {}
 
-function networkReason(err: unknown): string {
-  if (err instanceof Error && err.name === 'TimeoutError') return '请求超时';
-  return `网络错误 ${err instanceof Error ? err.message : String(err)}`;
-}
-
 export class KexiangClient implements LlmClient {
   private readonly auth: string;
 
@@ -63,8 +58,8 @@ export class KexiangClient implements LlmClient {
       messages: [{ role: 'system', content: opts.system }, { role: 'user', content: userContent(opts) }],
     });
     let lastError = new Error('可想 AI 请求失败');
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-      if (attempt > 0) await this.sleep(1000 * 2 ** (attempt - 1)); // 只在两次请求之间退避，最后一次失败后不再等待
+    for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt += 1) {
+      if (attempt > 0) await this.sleep(RETRY_BACKOFF_MS[attempt - 1]); // 只在两次请求之间退避，最后一次失败后不再等待
       try {
         return await this.requestOnce(body, opts);
       } catch (err) {
@@ -89,7 +84,10 @@ export class KexiangClient implements LlmClient {
       throw new RetryableError(`可想 AI 暂时不可用：${networkReason(err)}`);
     }
     if (res.status === 429 || res.status >= 500) throw new RetryableError(`可想 AI 暂时不可用 ${res.status}：${(await res.text()).slice(0, 200)}`);
-    if (!res.ok) throw new Error(`可想 AI 请求失败 ${res.status}：${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw balanceErrorFrom(res.status, text) ?? new Error(`可想 AI 请求失败 ${res.status}：${text.slice(0, 200)}`);
+    }
     let data: { choices?: { message?: { content?: unknown } }[]; usage?: unknown };
     try {
       data = (await res.json()) as typeof data;

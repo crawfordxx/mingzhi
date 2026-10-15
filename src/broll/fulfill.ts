@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { EST_TASK_YUAN } from '../cost/constants.js';
 import { SEARCH_YUAN } from '../cost/estimate.js';
 import type { CostMeter } from '../cost/meter.js';
-import { EST_TASK_YUAN, type TaskClient } from '../llm/kexiang-task.js';
+import { rethrowIfBalance } from '../llm/errors.js';
+import type { TaskClient } from '../llm/kexiang-task.js';
 import { normalizeStoryboard } from '../storyboard/normalize.js';
 import type { Storyboard, Visual } from '../storyboard/schema.js';
 import { visualsOf, type VisualNeed } from '../storyboard/visuals.js';
@@ -103,6 +105,7 @@ async function produce<T extends { cost?: number } | boolean | void>(out: string
     renameSync(tmp, out);
     return { result };
   } catch (err) {
+    rethrowIfBalance(err); // 余额不足：不逐项重试，整条流程停下来让用户充值
     return message(err);
   } finally {
     rmSync(tmp, { force: true });
@@ -134,6 +137,7 @@ async function tryScreenshot(env: Env, key: string, need: { url?: string; query?
   try {
     urls = need.url ? [need.url] : (await env.deps.search(need.query ?? '')).slice(0, SEARCH_TRIES);
   } catch (err) {
+    rethrowIfBalance(err);
     return { reason: `搜索失败：${message(err)}` };
   }
   if (urls.length === 0) return { reason: '没有找到可截图的网址' };

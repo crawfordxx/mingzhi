@@ -1,4 +1,5 @@
 import type { TimedCaption } from '../captions/lines.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { CATALOG } from './catalog.js';
 import { normalizeStoryboard, type NormalizeResult } from './normalize.js';
@@ -98,6 +99,7 @@ export async function generateStoryboard(client: LlmClient, captions: TimedCapti
     const second = normalizeStoryboard(await ask(user + retryHint(first, raw1)), durationSec, availableImages);
     return { ...fixCtaActions(better(first, second)), attempts: 2 };
   } catch (err) {
+    rethrowIfBalance(err);
     return { ...fixCtaActions(first), attempts: 2, retryError: err instanceof Error ? err.message : String(err) };
   }
 }

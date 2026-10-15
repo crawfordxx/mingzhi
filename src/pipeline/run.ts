@@ -13,6 +13,7 @@ import { resolveBackground, validateBackground, type BackgroundSpec } from '../b
 import { detectCuts, type Cut } from '../cut/llm-cuts.js';
 import { buildEditPlan, cutsToRanges, type EditPlan } from '../cut/plan.js';
 import { renderCut } from '../cut/render-cut.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
 import { renderTalk } from '../compose/render.js';
@@ -141,6 +142,7 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   try {
     res = await generateStoryboard(llm, captions, durationSec, []);
   } catch (err) {
+    rethrowIfBalance(err); // 余额不足降级也没用：后面的付费步骤同样会失败
     const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }], bgm: DEFAULT_MOOD };
     complete('storyboard', `分镜生成失败，改为全程人像：${err instanceof Error ? err.message : String(err)}`, { storyboard });
     return storyboard;

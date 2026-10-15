@@ -6,6 +6,7 @@ import { burnSubtitles } from '../src/captions/burn.js';
 import { toAss } from '../src/captions/ass.js';
 import { loadConfig } from '../src/config.js';
 import { CostMeter } from '../src/cost/meter.js';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
 import type { LlmClient } from '../src/llm/kexiang.js';
 import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
@@ -344,6 +345,20 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     expect(existsSync(join(workDir, photoImage))).toBe(true);
     expect(existsSync(join(workDir, hookVideo))).toBe(true);
     expect(existsSync(res.output)).toBe(true);
+  }, 240_000);
+
+  it('B-roll 阶段余额不足：不降级、不逐项重试，runPipeline 拒绝，project.json 仍保留已花费', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-br-'));
+    const meter = new CostMeter({}, 10);
+    meter.addTask('M', 0.6, '前序花费');
+    let attempts = 0;
+    const deps: BrollDeps = { ...fakeBrollDeps(cfg.ffmpeg).deps, video: async () => { attempts += 1; throw new InsufficientBalanceError(); }, image: async () => { attempts += 1; throw new InsufficientBalanceError(); } };
+    await expect(runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps, qaDeps: fakeQa().deps, meter,
+      broll: { enabled: true, maxVideos: 1, budgetYuan: 10 } })).rejects.toBeInstanceOf(InsufficientBalanceError);
+    expect(attempts).toBe(1);
+    const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
+    expect(project.costs).toMatchObject({ total: 0.6, budget: 10 });
   }, 240_000);
 
   it('关闭：不调用素材依赖，只靠 visual 的 photo 被去掉并补成全屏，project.json 无 broll', async () => {

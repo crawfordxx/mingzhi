@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Token } from '../asr/types.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { alignLines, splitWide } from './align.js';
 import { displayWidth, fallbackLines, MAX_DISPLAY_WIDTH, MAX_LINE_WIDTH, type CaptionLine } from './lines.js';
@@ -55,7 +56,8 @@ async function askSplit(client: LlmClient, wide: string[]): Promise<(string[] | 
       const ok = sameChars(trimmed.join(''), wide[i]) && trimmed.every((p) => p.length > 0 && displayWidth(p) <= MAX_DISPLAY_WIDTH);
       return ok ? trimmed : null;
     });
-  } catch {
+  } catch (err) {
+    rethrowIfBalance(err);
     return wide.map(() => null);
   }
 }
@@ -85,6 +87,7 @@ export async function polishCaptions(client: LlmClient, tokens: Token[], kept: n
     if (fitted.hardSplits === 0) return { lines, source: 'llm' };
     return { lines, source: 'partial', warning: `字幕校对：${fitted.hardSplits} 行超宽，已在行中自动切开` };
   } catch (err) {
+    rethrowIfBalance(err);
     return fallback(tokens, kept, `字幕校对失败，改用自动分行：${errorText(err)}`);
   }
 }
