@@ -81,7 +81,8 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
     },
     concat: async (o) => {
       calls.concat.push(o.clips.map((c) => c.path));
-      writeFileSync(o.output, JSON.stringify({ kind: 'source', clips: o.clips.length, durationSec: layoutClips(o.clips.map((c) => c.durationSec)).totalSec }));
+      o.clips.forEach((_, i) => o.onSegment?.(i, o.clips.length));
+      writeFileSync(o.output, JSON.stringify({ kind: 'source', clips: o.clips.map((c) => c.path), durationSec: layoutClips(o.clips.map((c) => c.durationSec)).totalSec }));
     },
     loudness: async (input, output) => { copyFileSync(input, output); return { before: -20, after: -14, truePeak: -2, mode: 'linear' }; },
   };

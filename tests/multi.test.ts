@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Transcript } from '../src/asr/types.js';
@@ -7,10 +7,11 @@ import { loadConfig } from '../src/config.js';
 import { CostMeter } from '../src/cost/meter.js';
 import { InsufficientBalanceError } from '../src/llm/errors.js';
 import { KexiangClient, type ChatOptions, type LlmClient } from '../src/llm/kexiang.js';
-import { buildConcatFilter, concatSources, GAP_FRAMES, layoutClips } from '../src/media/concat.js';
-import { run } from '../src/media/exec.js';
+import { CancelledError } from '../src/cancel.js';
+import { buildConcatFilter, canvasFor, concatSources, GAP_FRAMES, layoutClips } from '../src/media/concat.js';
+import { run, runBuffer } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
-import { mergeTranscripts, ORDER_MODEL, orderSegments } from '../src/pipeline/multi.js';
+import { decideOrder, mergeTranscripts, ORDER_MODEL, orderSegments } from '../src/pipeline/multi.js';
 
 const fakeClient = (reply: unknown | (() => unknown)): { client: LlmClient; calls: ChatOptions[] } => {
   const calls: ChatOptions[] = [];
@@ -73,6 +74,26 @@ describe('orderSegments', () => {
   });
 });
 
+describe('decideOrder', () => {
+  it('区分「模型认为不用动」与「降级为上传顺序」', async () => {
+    expect(await decideOrder(fakeClient({ order: [0, 1] }).client, ['a', 'b'])).toEqual({ order: [0, 1], failed: false });
+    expect(await decideOrder(fakeClient({ order: [0, 0] }).client, ['a', 'b'])).toEqual({ order: [0, 1], failed: true });
+    const broken: LlmClient = { chatJson: async () => { throw new Error('网络断了'); } };
+    expect(await decideOrder(broken, ['a', 'b'])).toEqual({ order: [0, 1], failed: true });
+    expect(await decideOrder(fakeClient({}).client, ['a'])).toEqual({ order: [0], failed: false });
+  });
+});
+
+describe('canvasFor', () => {
+  it('固定 9:16 竖屏：宽取各竖屏段的最大宽度，高按 16/9；没有竖屏段用 1080×1920', () => {
+    expect(canvasFor([{ width: 1080, height: 1920 }, { width: 1920, height: 1080 }])).toEqual({ width: 1080, height: 1920 });
+    expect(canvasFor([{ width: 1920, height: 1080 }, { width: 720, height: 1280 }, { width: 1080, height: 1440 }])).toEqual({ width: 1080, height: 1920 });
+    expect(canvasFor([{ width: 540, height: 960 }])).toEqual({ width: 540, height: 960 });
+    expect(canvasFor([{ width: 1920, height: 1080 }, { width: 1280, height: 720 }])).toEqual({ width: 1080, height: 1920 });
+    expect(canvasFor([{ width: 721, height: 1281 }])).toEqual({ width: 720, height: 1280 });
+  });
+});
+
 describe('layoutClips / mergeTranscripts', () => {
   it('每段按 30 帧取整，非末段后接 0.3 秒缓冲，偏移落在帧网格上', () => {
     const l = layoutClips([2, 1.5, 3]);
@@ -100,7 +121,8 @@ describe('buildConcatFilter', () => {
   it('每段统一 30fps、统一画幅、48k 立体声，按帧数精确裁齐，最后 concat', () => {
     const f = buildConcatFilter([69, 90], { width: 540, height: 960 });
     expect(f).toContain('[0:v]fps=30:start_time=0');
-    expect(f).toContain('scale=540:960:force_original_aspect_ratio=decrease,pad=540:960');
+    expect(f).toContain('scale=540:960:force_original_aspect_ratio=increase,crop=540:960');
+    expect(f).not.toContain(',pad=');
     expect(f).toContain('trim=end_frame=69');
     expect(f).toContain('trim=end_frame=90');
     expect(f).toContain('aresample=48000');
@@ -152,5 +174,81 @@ describe('concatSources（真实 ffmpeg）', () => {
     expect(await maxVolume(out, 0.2, 0.5)).toBeGreaterThan(-30);
     expect(await maxVolume(out, gapStart + 0.03, 0.24)).toBeLessThan(-60);
     expect(await maxVolume(out, layout.offsets[1] + 0.1, 0.5)).toBeGreaterThan(-30);
+  }, 60_000);
+});
+
+describe('concatSources 横竖混排与失败（真实 ffmpeg）', () => {
+  it('横屏段与竖屏段拼成 9:16 竖屏：居中裁切铺满，画面边缘与四角都不是黑边', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-concat-mix-'));
+    const portrait = join(dir, 'p.mp4');
+    const landscape = join(dir, 'l.mp4');
+    // 用亮色（亮度远高于黑边）；横屏段排在前面，画幅也不能被它带成横屏
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=yellow:s=320x180:r=30:d=1', '-f', 'lavfi', '-i', 'sine=f=440:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', landscape]);
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=white:s=180x320:r=30:d=1', '-f', 'lavfi', '-i', 'sine=f=440:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', portrait]);
+    const clips = await Promise.all([landscape, portrait].map(async (path) => ({ path, durationSec: (await probe(path, cfg)).durationSec })));
+    const canvas = canvasFor([{ width: 320, height: 180 }, { width: 180, height: 320 }]);
+    expect(canvas).toEqual({ width: 180, height: 320 });
+    const out = join(dir, 'source.mp4');
+    await concatSources({ clips, ...canvas, output: out, cfg });
+    const info = await probe(out, cfg);
+    expect([info.width, info.height]).toEqual([180, 320]);
+
+    const layout = layoutClips(clips.map((c) => c.durationSec));
+    for (const at of [0.5, layout.offsets[1] + 0.5]) {
+      const gray = await runBuffer(cfg.ffmpeg, ['-v', 'error', '-ss', String(at), '-i', out, '-frames:v', '1', '-vf', 'format=gray', '-f', 'rawvideo', '-']);
+      expect(gray.length).toBe(180 * 320);
+      expect(Math.min(...gray)).toBeGreaterThan(100); // 黑边亮度约 16
+    }
+    expect(readdirSync(dir).filter((n) => n.startsWith('.'))).toEqual([]); // 临时文件已清理
+  }, 60_000);
+
+  it('ffmpeg 失败时报中文错误并附原因，不留临时文件与半成品', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-concat-fail-'));
+    const bad = join(dir, 'bad.mp4');
+    writeFileSync(bad, 'not a video');
+    const out = join(dir, 'source.mp4');
+    const err = await concatSources({ clips: [{ path: bad, durationSec: 1 }], width: 180, height: 320, output: out, cfg }).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/^拼接多段口播失败/);
+    expect((err as Error).message.length).toBeGreaterThan('拼接多段口播失败'.length + 10);
+    expect(existsSync(out)).toBe(false);
+    expect(readdirSync(dir).sort()).toEqual(['bad.mp4']);
+  });
+
+  it('已取消的信号：抛 CancelledError，不留临时文件与半成品', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-concat-cancel-'));
+    const clip = join(dir, 'a.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=white:s=180x320:r=30:d=1', '-f', 'lavfi', '-i', 'sine=f=440:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', clip]);
+    const controller = new AbortController();
+    controller.abort();
+    const out = join(dir, 'source.mp4');
+    await expect(concatSources({ clips: [{ path: clip, durationSec: 1 }], width: 180, height: 320, output: out, cfg, signal: controller.signal })).rejects.toBeInstanceOf(CancelledError);
+    expect(existsSync(out)).toBe(false);
+    expect(readdirSync(dir).sort()).toEqual(['a.mp4']);
+  });
+
+  it('编码进行中取消：结束 ffmpeg 并抛 CancelledError，换段时回调进度', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-concat-mid-'));
+    const clip = join(dir, 'a.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=white:s=180x320:r=30:d=20', '-f', 'lavfi', '-i', 'sine=f=440:d=20', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', clip]);
+    const controller = new AbortController();
+    const seen: number[] = [];
+    const out = join(dir, 'source.mp4');
+    await expect(concatSources({
+      clips: [{ path: clip, durationSec: 20 }, { path: clip, durationSec: 20 }], width: 1080, height: 1920, output: out, cfg, signal: controller.signal,
+      onSegment: (i) => { seen.push(i); if (i === 1) controller.abort(); }, // 编码到第二段时取消，此时 ffmpeg 还有一半没编完
+    })).rejects.toBeInstanceOf(CancelledError);
+    expect(seen).toEqual([0, 1]);
+    expect(existsSync(out)).toBe(false);
+    expect(readdirSync(dir).sort()).toEqual(['a.mp4']);
+  }, 60_000);
+
+  it('完整拼接时按段回调进度（0 → 1），每段只报一次', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-concat-prog-'));
+    const clip = join(dir, 'a.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=white:s=180x320:r=30:d=1', '-f', 'lavfi', '-i', 'sine=f=440:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', clip]);
+    const seen: number[] = [];
+    await concatSources({ clips: [{ path: clip, durationSec: 1 }, { path: clip, durationSec: 1 }], width: 180, height: 320, output: join(dir, 'o.mp4'), cfg, onSegment: (i) => seen.push(i) });
+    expect(seen).toEqual([0, 1]);
   }, 60_000);
 });

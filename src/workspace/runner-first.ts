@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Transcript } from '../asr/types.js';
 import { DEFAULT_COVER_STYLE } from '../cover/styles.js';
@@ -7,13 +8,18 @@ import { prepareMultiSource } from '../pipeline/multi.js';
 import { validateArgs, type PipelineArgs } from '../pipeline/run.js';
 import { analyzeStage, backgroundStage, captionsStage, composeStage, cutStage, finalQaStage, qaCardsStage, storyboardStage, type Analysis } from '../pipeline/stages.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
-import { ANALYSIS_FILE, FINAL_FILE, linkBroll, linkFile, writeJsonAtomic, type BaseAnalysis } from './runner-files.js';
+import { ANALYSIS_FILE, FINAL_FILE, LAYER_FILES, MATTE_META, linkBroll, linkFile, writeJsonAtomic, type BaseAnalysis } from './runner-files.js';
 import { makeCover } from './runner-cover.js';
 import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, type Person } from './runner-media.js';
 
 /** 首个版本的初始状态（剪辑参数用默认值，修改都从这里叠加） */
 function initialState(env: VersionEnv): Pick<VersionState, 'settings' | 'coverStyle' | 'bgm' | 'cutOptions' | 'extraCuts' | 'restored'> {
   return { settings: env.space.settings, coverStyle: env.space.settings.coverStyle ?? DEFAULT_COVER_STYLE, bgm: { bgm: 'auto' }, cutOptions: { ...DEFAULT_PLAN_OPTIONS }, extraCuts: [], restored: [] };
+}
+
+/** 合成原片重拼后，依赖旧合成原片的 base/ 产物（整条抠像图层、分析结果）都不能再用 */
+function dropSourceDependents(base: string): void {
+  for (const name of [...LAYER_FILES, MATTE_META, ANALYSIS_FILE]) rmSync(join(base, name), { force: true });
 }
 
 /** 分析写 base/：之后的版本重建剪辑方案与补字幕都读 analysis.json */
@@ -39,7 +45,7 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const args = pipelineArgs(env, input, { ...init, plan: { keep: [], sourceDurationSec: 0, outputDurationSec: 0 }, captions: [], storyboard: { shots: [] } }, { style: init.coverStyle });
   validateArgs(args);
   // 多段口播：先识别、排序、拼成合成原片（input 已指向它），识别结果按偏移拼好直接用
-  const multi = env.space.inputs.length > 1 ? await prepareMultiSource({ inputs: env.space.inputs, output: input, tmpDir: env.base, cfg: env.ctx.cfg, llm: env.llm, media: env.ctx.media, signal: env.ctx.signal, emit: env.emit }) : undefined;
+  const multi = env.space.inputs.length > 1 ? await prepareMultiSource({ inputs: env.space.inputs, output: input, tmpDir: env.base, cfg: env.ctx.cfg, llm: env.llm, media: env.ctx.media, signal: env.ctx.signal, emit: env.emit, beforeRebuild: () => dropSourceDependents(env.base) }) : undefined;
   const a = await analyze(env, args, multi?.transcript);
   const { person, subject } = await makePerson(env, args, a);
   const captions = await captionsStage(args, a, join(env.dir, 'captions.ass'), env.complete);
