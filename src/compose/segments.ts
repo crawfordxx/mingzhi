@@ -3,7 +3,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, ren
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { captionAt, shotAt } from './layout.js';
-import { renderAudioTrack, renderVideoSegment, withBundle } from './render.js';
+import { renderAudioTrack, renderVideoSegment, withBundle, type SegmentRenderOptions } from './render.js';
 import { transformAt } from '../../render/layers/PersonLayer.js';
 import { DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
 import { run } from '../media/exec.js';
@@ -115,8 +115,20 @@ export async function segmentSalt(stamper: Stamper, props: TalkProps, i: number)
 
 // ---- 分段渲染 ----
 
+export interface ConcatOptions { ffmpeg: string; files: string[]; audio: string; listFile: string; output: string; durationSec: number }
+
+/** 打包、分段画面、整条音轨与拼接的实现；缺省为真实的 Remotion + ffmpeg，仅供测试注入假实现 */
+export interface SegmentBackend {
+  withBundle: <T>(workDir: string, fn: (serveUrl: string) => Promise<T>) => Promise<T>;
+  renderVideo: (opts: SegmentRenderOptions & { startFrame: number; endFrame: number }) => Promise<void>;
+  renderAudio: (opts: SegmentRenderOptions) => Promise<void>;
+  concat: (opts: ConcatOptions) => Promise<void>;
+}
+
 export interface SegmentedOptions {
   workDir: string; cacheDir: string; props: TalkProps; output: string; ffmpeg?: string;
+  /** 仅供测试注入 */
+  backend?: SegmentBackend;
   onProgress?: (done: number, total: number, reused: number) => void;
   /** 取消信号：每段开始前检查，正在渲染的那一段也会被终止（抛 CancelledError，不留半截缓存） */
   signal?: AbortSignal;
@@ -131,7 +143,7 @@ const tmpName = (file: string): string => `${file}.${randomUUID().slice(0, 8)}.t
 const cached = (file: string): boolean => existsSync(file) && statSync(file).size > 0;
 
 /** -t 把 aac 编码补出的尾部静音（约 0.05 秒）裁掉，使音轨不长于画面 */
-async function concatWithAudio(opts: { ffmpeg: string; files: string[]; audio: string; listFile: string; output: string; durationSec: number }): Promise<void> {
+async function concatWithAudio(opts: ConcatOptions): Promise<void> {
   writeFileSync(opts.listFile, `${opts.files.map(concatLine).join('\n')}\n`);
   const tmp = tmpName(opts.output);
   try {
@@ -143,19 +155,22 @@ async function concatWithAudio(opts: { ffmpeg: string; files: string[]; audio: s
 }
 
 /** 渲染到临时文件再改名，中途取消不会留下半截缓存 */
-async function renderToCache(serveUrl: string, props: TalkProps, range: FrameRange, file: string, signal?: AbortSignal): Promise<void> {
+async function renderToCache(backend: SegmentBackend, serveUrl: string, props: TalkProps, range: FrameRange, file: string, signal?: AbortSignal): Promise<void> {
   const tmp = tmpName(file);
   try {
-    await renderVideoSegment({ serveUrl, props, output: tmp, startFrame: range.start, endFrame: range.end, signal });
+    await backend.renderVideo({ serveUrl, props, output: tmp, startFrame: range.start, endFrame: range.end, signal });
     renameSync(tmp, file);
   } finally {
     rmSync(tmp, { force: true });
   }
 }
 
+const REAL_BACKEND: SegmentBackend = { withBundle, renderVideo: renderVideoSegment, renderAudio: renderAudioTrack, concat: concatWithAudio };
+
 /** 按镜头分段渲染画面（命中缓存则复用），音轨整条单独渲染，最后无损拼接；一次打包用于所有分段 */
 export async function renderSegmented(opts: SegmentedOptions): Promise<SegmentedResult> {
   const { workDir, cacheDir, props } = opts;
+  const backend = opts.backend ?? REAL_BACKEND;
   throwIfCancelled(opts.signal);
   const { shots, ...rest } = props;
   if (shots.length === 0) throw new Error('分镜为空，无法分段渲染');
@@ -168,15 +183,15 @@ export async function renderSegmented(opts: SegmentedOptions): Promise<Segmented
   const todo = plan.filter((s) => s.range.end > s.range.start);
   const audio = join(workDir, 'audio.m4a');
   let done: { i: number; reused: boolean }[] = [];
-  await withBundle(workDir, async (serveUrl) => {
+  await backend.withBundle(workDir, async (serveUrl) => {
     for (const s of todo) {
       const reused = cached(s.file);
-      if (!reused) await renderToCache(serveUrl, props, s.range, s.file, opts.signal);
+      if (!reused) await renderToCache(backend, serveUrl, props, s.range, s.file, opts.signal);
       done = [...done, { i: s.i, reused }];
       opts.onProgress?.(done.length, todo.length, done.filter((d) => d.reused).length);
     }
-    await renderAudioTrack({ serveUrl, props, output: audio, signal: opts.signal });
+    await backend.renderAudio({ serveUrl, props, output: audio, signal: opts.signal });
   });
-  await concatWithAudio({ ffmpeg: opts.ffmpeg ?? 'ffmpeg', files: todo.map((s) => s.file), audio, listFile: join(workDir, 'segments.txt'), output: opts.output, durationSec: secToFrame(props.durationSec) / CANVAS.fps });
+  await backend.concat({ ffmpeg: opts.ffmpeg ?? 'ffmpeg', files: todo.map((s) => s.file), audio, listFile: join(workDir, 'segments.txt'), output: opts.output, durationSec: secToFrame(props.durationSec) / CANVAS.fps });
   return { rendered: done.filter((d) => !d.reused).map((d) => d.i), reused: done.filter((d) => d.reused).map((d) => d.i) };
 }

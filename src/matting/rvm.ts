@@ -18,8 +18,15 @@ const SAMPLE_FRAMES = 8;
 const BOX_EVERY = 15;
 const DEFAULT_BLUR = 6;
 
-export interface MatteOptions { input: string; output: string; backgroundPath: string; cfg: AppConfig; blurSigma?: number; colorMatch?: boolean; onProgress?: (done: number, total: number) => void; /** 取消信号：逐帧检查，取消时抛 CancelledError 并结束子进程 */ signal?: AbortSignal }
-export interface MatteResult { frames: number; subject: SubjectBox | null; gains: Rgb; fps: number }
+export interface MatteOptions {
+  input: string; output: string; backgroundPath: string; cfg: AppConfig; blurSigma?: number; colorMatch?: boolean; onProgress?: (done: number, total: number) => void;
+  /** 取消信号：逐帧检查，取消时抛 CancelledError 并结束子进程 */
+  signal?: AbortSignal;
+  /** 同时把 alpha 遮罩存成灰度视频（30fps、与 input 同尺寸）；之后换背景只需合成（见 composite-matte.ts），不必重新推理 */
+  matteOutput?: string;
+}
+/** fgMean：人物平均色（与背景无关，换背景时据此重算增益）；抠不出人或关闭调色时为 null */
+export interface MatteResult { frames: number; subject: SubjectBox | null; gains: Rgb; fps: number; fgMean: Rgb | null }
 
 export function rvmReady(modelsDir: string): boolean {
   return existsSync(join(modelsDir, RVM_FILE));
@@ -133,12 +140,23 @@ async function sampleForeground(rvm: RvmSession, opts: MatteOptions, w: number, 
   return [0, 1, 2].map((c) => means.reduce((s, m) => s + m[c], 0) / means.length) as unknown as Rgb;
 }
 
-interface Encoder { proc: ChildProcessWithoutNullStreams; done: Promise<void>; write: (frame: Buffer) => Promise<void> }
+/** tmp：编码进程写入的临时文件，成功后改名为 output */
+interface Encoder { proc: ChildProcessWithoutNullStreams; done: Promise<void>; write: (frame: Buffer) => Promise<void>; broken: () => boolean; tmp: string; output: string }
+
+/** 先写临时文件，成功后再改名：取消或失败时不破坏已有的好文件 */
+const tmpOf = (output: string): string => `${output}.${randomUUID().slice(0, 8)}.tmp.mp4`;
+
+/** 换背景成片的编码参数：rgb24 原始帧 + 输入音轨直接拷贝 */
+const personArgs = (opts: MatteOptions, tmp: string, w: number, h: number): string[] => ['-v', 'error', '-nostdin', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${w}x${h}`, '-r', String(OUT_FPS), '-i', '-',
+  '-i', opts.input, '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', tmp];
+
+/** 灰度遮罩的编码参数：alpha 量化到 0–255 的全范围 gray，crf 10 近无损（实测渐变往返误差 0） */
+const matteArgs = (tmp: string, w: number, h: number): string[] => ['-v', 'error', '-nostdin', '-y', '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${w}x${h}`, '-r', String(OUT_FPS), '-i', '-',
+  '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '10', '-pix_fmt', 'gray', tmp];
 
 /** 启动 x264 编码进程；write 带背压，编码进程退出/出错时立即抛错而不会挂起 */
-function startEncoder(opts: MatteOptions, w: number, h: number): Encoder {
-  const proc = spawn(opts.cfg.ffmpeg, ['-v', 'error', '-nostdin', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${w}x${h}`, '-r', String(OUT_FPS), '-i', '-',
-    '-i', opts.input, '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', opts.output]);
+function startEncoder(cfg: AppConfig, args: string[], tmp: string, output: string): Encoder {
+  const proc = spawn(cfg.ffmpeg, args);
   const done = exited(proc, '编码');
   let broken: Error | null = null;
   proc.stdin.on('error', (e) => { broken ??= e; });
@@ -154,22 +172,24 @@ function startEncoder(opts: MatteOptions, w: number, h: number): Encoder {
       proc.once('close', onDead);
     });
   };
-  return { proc, done, write };
+  return { proc, done, write, broken: () => broken !== null, tmp, output };
 }
 
-/** 失败后取根因：编码进程自己先挂掉时，用它的 stderr 作为原因 */
-async function rootCause(err: unknown, enc: Encoder): Promise<string> {
-  const code = (err as NodeJS.ErrnoException | undefined)?.code;
-  if (code !== 'EPIPE' && code !== 'ERR_STREAM_DESTROYED' && enc.proc.exitCode === null) return reasonOf(err);
-  try {
-    await enc.done;
-  } catch (e) {
-    return reasonOf(e);
+const isDead = (enc: Encoder): boolean => enc.broken() || enc.proc.exitCode !== null || enc.proc.signalCode !== null;
+
+/** 失败后取根因：某个编码进程自己先挂掉（写管道出错或已退出）时，用它的 stderr 作为原因 */
+async function rootCause(err: unknown, encs: Encoder[]): Promise<string> {
+  for (const enc of encs.filter(isDead)) {
+    try {
+      await enc.done;
+    } catch (e) {
+      return reasonOf(e);
+    }
   }
   return reasonOf(err);
 }
 
-/** 整段抠像换背景：解码 → RVM → 合成 → x264 编码（30fps），音轨从输入直接拷贝 */
+/** 整段抠像换背景：解码 → RVM → 合成 → x264 编码（30fps），音轨从输入直接拷贝；给了 matteOutput 时同时输出灰度遮罩视频 */
 export async function matteVideo(opts: MatteOptions): Promise<MatteResult> {
   throwIfCancelled(opts.signal);
   const media = await probe(opts.input, opts.cfg);
@@ -181,19 +201,40 @@ export async function matteVideo(opts: MatteOptions): Promise<MatteResult> {
   }
 }
 
+/** alpha（0–1 浮点）量化成 gray 字节 */
+function alphaBytes(pha: Float32Array, out: Buffer): Buffer {
+  for (let i = 0; i < pha.length; i += 1) out[i] = Math.round(Math.min(1, Math.max(0, pha[i])) * 255);
+  return Buffer.from(out);
+}
+
+/** 打开成片编码器，以及（需要时）遮罩编码器 */
+function openEncoders(opts: MatteOptions, w: number, h: number): Encoder[] {
+  const person = tmpOf(opts.output);
+  const encs = [startEncoder(opts.cfg, personArgs(opts, person, w, h), person, opts.output)];
+  if (!opts.matteOutput) return encs;
+  const matte = tmpOf(opts.matteOutput);
+  return [...encs, startEncoder(opts.cfg, matteArgs(matte, w, h), matte, opts.matteOutput)];
+}
+
+/** 全部编码器收尾并改名（全部成功才改名，避免成片与遮罩不配套） */
+async function closeEncoders(encs: Encoder[]): Promise<void> {
+  for (const enc of encs) enc.proc.stdin.end();
+  await Promise.all(encs.map((enc) => enc.done));
+  for (const enc of encs) renameSync(enc.tmp, enc.output);
+}
+
 async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo): Promise<MatteResult> {
   const { width: w, height: h } = media;
   const bg = await loadBackgroundRgb(opts.backgroundPath, w, h, opts.blurSigma ?? DEFAULT_BLUR, opts.cfg);
   const fgMean = opts.colorMatch === false ? null : await sampleForeground(rvm, opts, w, h, media.durationSec);
   const gains: Rgb = fgMean ? colorMatchGains(fgMean, meanRgb(bg)) : [1, 1, 1];
   const total = Math.round(media.durationSec * OUT_FPS);
-
   const dec = decoder(opts.cfg, opts.input, `fps=${OUT_FPS}`);
   const decDone = exited(dec, '解码');
-  // 先写临时文件，成功后再改名：取消或失败时不破坏已有的好文件
-  const tmpOutput = `${opts.output}.${randomUUID().slice(0, 8)}.tmp.mp4`;
-  const enc = startEncoder({ ...opts, output: tmpOutput }, w, h);
+  const encs = openEncoders(opts, w, h);
+  const [person, matte] = encs;
   const out = Buffer.alloc(w * h * 3);
+  const alpha = Buffer.alloc(w * h);
   const boxes: SubjectBox[] = [];
   let frames = 0;
   try {
@@ -201,28 +242,24 @@ async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo):
       throwIfCancelled(opts.signal);
       const { fgr, pha } = await rvm.infer(frame);
       compositeFrame(fgr, pha, bg, gains, out);
-      await enc.write(Buffer.from(out));
+      await Promise.all([person.write(Buffer.from(out)), ...(matte ? [matte.write(alphaBytes(pha, alpha))] : [])]);
       frames += 1;
-      if (frames % BOX_EVERY === 0) {
-        const box = alphaBox(pha, w, h);
-        if (box) boxes.push(box);
-        opts.onProgress?.(frames, total);
-      }
+      if (frames % BOX_EVERY !== 0) return;
+      const box = alphaBox(pha, w, h);
+      if (box) boxes.push(box);
+      opts.onProgress?.(frames, total);
     });
     await decDone;
-    enc.proc.stdin.end();
-    await enc.done;
-    renameSync(tmpOutput, opts.output);
+    await closeEncoders(encs);
   } catch (e) {
     rethrowIfCancelled(e);
-    const reason = await rootCause(e, enc);
-    throw new Error(`抠像换背景失败（已处理 ${frames} 帧）：${reason}`);
+    throw new Error(`抠像换背景失败（已处理 ${frames} 帧）：${await rootCause(e, encs)}`);
   } finally {
-    killAll(dec, enc.proc);
-    rmSync(tmpOutput, { force: true });
+    killAll(dec, ...encs.map((enc) => enc.proc));
+    for (const enc of encs) rmSync(enc.tmp, { force: true });
   }
   opts.onProgress?.(frames, total);
-  return { frames, subject: medianBox(boxes), gains, fps: OUT_FPS };
+  return { frames, subject: medianBox(boxes), gains, fps: OUT_FPS, fgMean };
 }
 
 /** 单帧抠像裁切时，人物外接框四周留的边距（相对宽高） */

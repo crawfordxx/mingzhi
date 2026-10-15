@@ -109,6 +109,12 @@ describe('qaCards', () => {
     expect(res.storyboard.shots[3]).toEqual(storyboard.shots[3]);
     expect(storyboard.shots[0].card).toEqual(card('原始'));
   });
+  it('only：只检查指定镜头的卡片，其余卡片原样保留', async () => {
+    const { client } = fake([sc(9)]);
+    const res = await qaCards({ client, workDir: dir, storyboard, captions: caps, meter: meter(), ffmpeg: 'ffmpeg', only: [2] });
+    expect(res.report.map((r) => r.shotIndex)).toEqual([2]);
+    expect(res.storyboard).toEqual(storyboard);
+  });
   it('任一维度 <8 即不通过', async () => {
     const { client } = fake([{ ...sc(9), motion: 7 }, sc(9)], []);
     const res = await run(client, meter(), { ...storyboard, shots: [storyboard.shots[0]] });

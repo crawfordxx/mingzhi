@@ -71,6 +71,8 @@ export interface QaCardsOptions {
   reserveYuan?: number;
   /** 取消信号：每张卡片、每次打分前检查，取消时抛 CancelledError */
   signal?: AbortSignal;
+  /** 只检查这些镜头序号的卡片（工作台新版本只检查改动过的卡片）；缺省检查全部分屏卡片 */
+  only?: number[];
   /** msg 是给人看的进度文案；info 带本次打分的结构化数据，供工作台直播 */
   onProgress?: (msg: string, info?: { shotIndex: number; attempt: number; score: CardScore; passed: boolean }) => void;
 }
@@ -146,7 +148,7 @@ export async function qaCards(opts: QaCardsOptions): Promise<{ storyboard: Story
   const images = usedImages(opts.storyboard);
   const cards = new Map<number, CardSpec>();
   const report: CardQaEntry[] = [];
-  const targets = opts.storyboard.shots.flatMap((s, i) => (s.layout === 'split' && s.card ? [i] : []));
+  const targets = opts.storyboard.shots.flatMap((s, i) => (s.layout === 'split' && s.card && (!opts.only || opts.only.includes(i)) ? [i] : []));
   if (targets.length > 0) {
     let checked = false; // 逐张检查已全部跑完（此后 withBundle 再抛错只可能是清理打包目录失败）
     try {

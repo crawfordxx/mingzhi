@@ -50,13 +50,15 @@ export interface QaCardsContext {
   reserveYuan?: number;
   /** 取消信号：转给逐张卡片的检查循环 */
   signal?: AbortSignal;
+  /** 只检查这些镜头序号的卡片；缺省全部 */
+  only?: number[];
 }
 
 /** 卡片自检：不达标的卡片重写；返回（可能被改写的）分镜并落盘。自检本身出错（余额不足除外）只记一条进度，沿用原分镜 */
 export async function runQaCards(ctx: QaCardsContext, storyboard: Storyboard, captions: TimedCaption[], complete: Complete<'qa-cards'>): Promise<{ storyboard: Storyboard; report: CardQaEntry[] }> {
   let res: { storyboard: Storyboard; report: CardQaEntry[] };
   try {
-    res = await (ctx.qaCards ?? realQaCards)({ client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, ffmpeg: ctx.ffmpeg, reserveYuan: ctx.reserveYuan, signal: ctx.signal, onProgress: ctx.onProgress });
+    res = await (ctx.qaCards ?? realQaCards)({ client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, ffmpeg: ctx.ffmpeg, reserveYuan: ctx.reserveYuan, signal: ctx.signal, onProgress: ctx.onProgress, ...(ctx.only ? { only: ctx.only } : {}) });
   } catch (err) {
     rethrowIfBalance(err);
     rethrowIfCancelled(err);
