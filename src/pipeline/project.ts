@@ -7,8 +7,9 @@ import type { EditPlan } from '../cut/plan.js';
 import type { BackgroundSpec } from '../background/resolve.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { MediaInfo } from '../media/probe.js';
+import type { Storyboard } from '../storyboard/schema.js';
 
-export interface ProjectArtifacts { wav?: string; cut?: string; person?: string; ass?: string; output?: string }
+export interface ProjectArtifacts { wav?: string; cut?: string; person?: string; ass?: string; output?: string; final?: string }
 
 /** 工程文件 project.json：每一步完成后增量落盘，尚未完成的步骤对应字段缺省；全部完成时字段齐全 */
 export interface ProjectFile {
@@ -28,6 +29,10 @@ export interface ProjectFile {
   background?: { spec: BackgroundSpec; path: string };
   /** 人物在画面中的范围（中位数，0–1），供 P3 取景；抠不出人时为 null */
   subject?: SubjectBox | null;
+  /** 分镜（P3a）；请求失败时为整片一个全屏镜头 */
+  storyboard?: Storyboard;
+  /** 分镜里被丢弃的不合格镜头数 */
+  storyboardDropped?: number;
   artifacts: ProjectArtifacts;
 }
 

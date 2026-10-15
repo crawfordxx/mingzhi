@@ -1,9 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import type { AppConfig } from '../config.js';
 import type { Transcript } from '../asr/types.js';
 import { transcribeWav } from '../asr/local-asr.js';
-import { burnSubtitles } from '../captions/burn.js';
 import { toAss } from '../captions/ass.js';
 import { keptIndices, timeCaptions, type TimedCaption } from '../captions/lines.js';
 import { polishCaptions, type PolishResult } from '../captions/polish.js';
@@ -14,15 +13,18 @@ import { buildEditPlan, cutsToRanges, type EditPlan } from '../cut/plan.js';
 import { renderCut } from '../cut/render-cut.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
+import { renderTalk } from '../compose/render.js';
 import { matteVideo } from '../matting/rvm.js';
 import { extractWav16k } from '../media/extract-audio.js';
 import { probe, type MediaInfo } from '../media/probe.js';
+import { generateStoryboard } from '../storyboard/generate.js';
+import type { Storyboard } from '../storyboard/schema.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
 
-export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'burn' | 'done';
+export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'compose' | 'done';
 export interface ProgressEvent { step: PipelineStep; message: string }
 export interface PipelineArgs { input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; onProgress?: (e: ProgressEvent) => void }
-export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[] }
+export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard }
 
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
 type Complete = (step: PipelineStep, message: string, patch?: ProjectPatch) => ProjectFile;
@@ -90,8 +92,36 @@ async function replaceBackground(args: PipelineArgs, cut: string, complete: Comp
   return person;
 }
 
-/** 剪切 → 换背景 → 字幕 → 烧录 */
-async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Promise<TimedCaption[]> {
+/** 成片渲染进度节流：至少前进 5% 才转发一次（收尾必发且只发一次）；只回调、不写 project.json */
+export function throttledRenderProgress(emit: (e: ProgressEvent) => void): (ratio: number) => void {
+  const STEP = 5;
+  let last = -STEP;
+  return (ratio) => {
+    const pct = Math.floor(ratio * 100);
+    if (pct - last < STEP && pct < 100) return;
+    if (pct === last) return;
+    last = pct;
+    emit({ step: 'compose', message: `渲染 ${pct}%` });
+  };
+}
+
+/** 生成分镜；请求失败不中断，降级为整片人像全屏一个镜头，并在进度消息里写明原因 */
+async function planStoryboard(llm: LlmClient, captions: TimedCaption[], durationSec: number, complete: Complete): Promise<Storyboard> {
+  try {
+    const res = await generateStoryboard(llm, captions, durationSec, []);
+    const cards = res.storyboard.shots.filter((s) => s.card).length;
+    const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
+    complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}`, { storyboard: res.storyboard, storyboardDropped: res.dropped });
+    return res.storyboard;
+  } catch (err) {
+    const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }] };
+    complete('storyboard', `分镜生成失败，改为全程人像：${err instanceof Error ? err.message : String(err)}`, { storyboard });
+    return storyboard;
+  }
+}
+
+/** 剪切 → 换背景 → 字幕 → 分镜 → Remotion 成片 */
+async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Promise<{ captions: TimedCaption[]; storyboard: Storyboard }> {
   const { input, workDir, output, cfg, llm } = args;
   const cut = join(workDir, 'cut.mp4');
   await renderCut(input, a.plan.keep, cut, cfg);
@@ -100,14 +130,22 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
 
   const polished = await polishCaptions(llm, a.transcript.tokens, keptIndices(a.transcript.tokens.length, a.cuts));
   const captions = timeCaptions(polished.lines, a.transcript.tokens, a.plan.keep);
+  // ASS 仍写出供外部使用，成片里的字幕由 Remotion 绘制，不再烧录
   const ass = join(workDir, 'captions.ass');
   writeFileSync(ass, toAss(captions, a.media));
-  complete('captions', `${captions.length} 行字幕 · ${polishSummary(polished)}`,
+  const project = complete('captions', `${captions.length} 行字幕 · ${polishSummary(polished)}`,
     { captionLines: polished.lines, captionsSource: polished.source, captions, artifacts: { ass } });
 
-  await burnSubtitles(base, ass, output, cfg);
-  complete('burn', '字幕已烧录', { artifacts: { output } });
-  return captions;
+  const person = relative(workDir, base);
+  if (person.startsWith('..')) throw new Error(`人像视频必须在工作目录内：${base}`);
+  const storyboard = await planStoryboard(llm, captions, a.plan.outputDurationSec, complete);
+  const { width, height } = await probe(base, cfg);
+  await renderTalk({
+    workDir, output, onProgress: throttledRenderProgress((e) => args.onProgress?.(e)),
+    props: { person, personWidth: width, personHeight: height, subject: project.subject ?? null, captions, shots: storyboard.shots, durationSec: a.plan.outputDurationSec },
+  });
+  complete('compose', '成片渲染完成', { artifacts: { output, final: output } });
+  return { captions, storyboard };
 }
 
 /** 全流程；每步完成后增量写 project.json 并回调一次，供 P5 剪辑直播使用 */
@@ -123,7 +161,7 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
     return project;
   };
   const analysis = await analyze(args, complete);
-  const captions = await produce(args, analysis, complete);
+  const { captions, storyboard } = await produce(args, analysis, complete);
   complete('done', args.output);
-  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions };
+  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions, storyboard };
 }

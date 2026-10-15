@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   const res = await runPipeline({ input, workDir, output, cfg, llm, background, task, onProgress: (e) => console.log(`[${e.step}] ${e.message}`) });
   const secs = Math.round((Date.now() - started) / 1000);
-  console.log(`\n完成：删除 ${res.cuts.length} 处 · 成片 ${res.plan.outputDurationSec.toFixed(1)} 秒 · 用时 ${secs} 秒\n${res.output}`);
+  console.log(`\n完成：删除 ${res.cuts.length} 处 · 成片 ${res.plan.outputDurationSec.toFixed(1)} 秒 · ${res.storyboard.shots.length} 个镜头 · 用时 ${secs} 秒\n${res.output}`);
 }
 
 main().catch((err: Error) => {
