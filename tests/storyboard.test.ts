@@ -260,6 +260,17 @@ describe('normalizeStoryboard：镜头限长 8 秒', () => {
     expect(shotRows(storyboard.shots)).toEqual([[0, 12, 'full', null], [12, 20, 'full', 'cta']]);
     expect(capped).toBe(1);
   });
+  it('短卡片镜头并入前一个会超过 8 秒时不合并，改为全屏人像（不出现 8.5 秒的卡片）', () => {
+    const raw = { shots: [
+      { start: 0, end: 8, layout: 'split', card: title('A') },
+      { start: 8, end: 8.5, layout: 'split', card: title('B') },
+      { start: 8.5, end: 20, layout: 'full' },
+    ] };
+    const { storyboard, demoted } = normalizeStoryboard(raw, 20, []);
+    expect(shotRows(storyboard.shots)).toEqual([[0, 8, 'split', 'title'], [8, 8.5, 'full', null], [8.5, 20, 'full', null]]);
+    expect(demoted).toBe(1);
+  });
+
   it('长度 8.5 秒：余下不足 1 秒，改为保留 7.5 秒，避免被并回', () => {
     const raw = { shots: [{ start: 0, end: 8.5, layout: 'split', card: title('A') }] };
     const { storyboard, capped } = normalizeStoryboard(raw, 8.5, []);

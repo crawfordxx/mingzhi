@@ -109,6 +109,8 @@ function mergeShort(shots: Shot[]): Shot[] {
     const last = acc[acc.length - 1];
     const isShort = round(s.end - s.start) < MIN_SHOT_SEC;
     if (!last || !isShort || s.card?.template === 'cta') return [...acc, s];
+    // 并入后带卡片的镜头会超过 MAX_SHOT_SEC：不合并，短镜头改为全屏人像
+    if (last.card && round(s.end - last.start) > MAX_SHOT_SEC) return [...acc, plain(s)];
     return [...acc.slice(0, -1), { ...last, end: s.end }];
   }, []);
 }
