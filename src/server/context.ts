@@ -1,0 +1,85 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import type { AppConfig } from '../config.js';
+import { loadPrices, type Price } from '../cost/prices.js';
+import type { LlmClient } from '../llm/kexiang.js';
+import { KexiangClient } from '../llm/kexiang.js';
+import { KexiangTaskClient } from '../llm/kexiang-task.js';
+import { probe, type MediaInfo } from '../media/probe.js';
+import type { CaptionStyleId } from '../captions/styles.js';
+import { validateKey, type KeyStore } from '../workspace/keychain.js';
+import { EventBus } from '../workspace/events.js';
+import { runFirstVersion, runNextVersion, type RunnerCtx } from '../workspace/runner.js';
+import { SpaceStore } from '../workspace/store.js';
+import type { VersionMeta } from '../workspace/store.js';
+import type { EditOp } from '../edit/plan.js';
+import { renderCaptionPreview } from './preview.js';
+import { makeBackgroundThumb } from './thumbs.js';
+import type { RunManager } from './runs.js';
+
+/** 可替换的外部依赖：默认是真实实现，测试注入假的 */
+export interface AppDeps {
+  validateKey: (key: string) => Promise<boolean>;
+  probe: (path: string) => Promise<MediaInfo>;
+  planClient: (key: string) => LlmClient;
+  loadPrices: (key: string) => Promise<Record<string, Price>>;
+  runFirst: (ctx: RunnerCtx, spaceId: string) => Promise<VersionMeta>;
+  runNext: (ctx: RunnerCtx, spaceId: string, parent: number, ops: EditOp[], summary: string) => Promise<VersionMeta>;
+  /** 在默认 RunnerCtx 上叠加（测试注入假媒体处理等） */
+  ctxOverrides?: Partial<RunnerCtx>;
+  makeThumb: (src: string, dest: string) => Promise<void>;
+  renderCaptionPreview: (id: CaptionStyleId, dest: string) => Promise<void>;
+}
+
+export interface AppOptions {
+  cfg: AppConfig;
+  keyStore?: KeyStore;
+  /** 前端构建目录，默认仓库的 web/dist */
+  webDir?: string;
+  /** 导出目录，默认 ~/Downloads/明知AI剪辑 */
+  exportDir?: string;
+  /** 开发时前端 dev server 的端口（vite 代理不改写 Host/Origin），默认读环境变量 MINGZHI_DEV_PORT */
+  devPort?: number;
+  deps?: Partial<AppDeps>;
+}
+
+export interface AppCtx {
+  cfg: AppConfig;
+  store: SpaceStore;
+  bus: EventBus;
+  spacesRoot: string;
+  keyStore: KeyStore;
+  deps: AppDeps;
+  runs: RunManager;
+  webDir: string;
+  exportDir: string;
+  devPort?: number;
+  /** 当前监听端口（listen 之后才有意义） */
+  port: () => number;
+}
+
+export function buildDeps(cfg: AppConfig, over: Partial<AppDeps> = {}): AppDeps {
+  const base: AppDeps = {
+    validateKey: (key) => validateKey(key),
+    probe: (path) => probe(path, cfg),
+    planClient: (key) => new KexiangClient(key),
+    loadPrices: (key) => loadPrices(join(cfg.dataDir, 'prices.json'), fetch, Date.now, key),
+    runFirst: runFirstVersion,
+    runNext: runNextVersion,
+    makeThumb: (src, dest) => makeBackgroundThumb(cfg, src, dest),
+    renderCaptionPreview: (id, dest) => renderCaptionPreview(cfg, id, dest),
+  };
+  return { ...base, ...over };
+}
+
+export const defaultExportDir = (): string => join(homedir(), 'Downloads', '明知AI剪辑');
+
+/** 默认的任务上下文：模型与任务客户端用当前 key 构造，花费记到本版本的计费器 */
+export async function defaultRunnerCtx(app: Pick<AppCtx, 'cfg' | 'store' | 'bus' | 'deps'>, key: string, signal: AbortSignal): Promise<RunnerCtx> {
+  const prices = await app.deps.loadPrices(key).catch(() => ({}));
+  return {
+    store: app.store, bus: app.bus, cfg: { ...app.cfg, kexiangKey: key }, prices, signal,
+    clients: (meter) => ({ llm: new KexiangClient(key, undefined, undefined, meter), task: new KexiangTaskClient(key, undefined, undefined, undefined, meter) }),
+    ...app.deps.ctxOverrides,
+  };
+}

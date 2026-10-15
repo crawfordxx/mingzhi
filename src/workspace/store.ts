@@ -3,10 +3,13 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join } from 'node:path';
 import type { BackgroundSpec } from '../background/resolve.js';
 import type { CaptionStyleId } from '../captions/styles.js';
+import type { CoverStyleId } from '../cover/styles.js';
 
 export interface SpaceSettings {
   background?: BackgroundSpec;
   captionStyle: CaptionStyleId;
+  /** 首个版本的封面风格；缺省 bauhaus */
+  coverStyle?: CoverStyleId;
   budgetYuan: number;
   broll: boolean;
   maxVideos: number;

@@ -10,7 +10,7 @@ import { cutAsPerson, matteInto, pipelineArgs, qaScoreOf, type Person } from './
 
 /** 首个版本的初始状态（剪辑参数用默认值，修改都从这里叠加） */
 function initialState(env: VersionEnv): Pick<VersionState, 'settings' | 'coverStyle' | 'bgm' | 'cutOptions' | 'extraCuts' | 'restored'> {
-  return { settings: env.space.settings, coverStyle: DEFAULT_COVER_STYLE, bgm: { bgm: 'auto' }, cutOptions: { ...DEFAULT_PLAN_OPTIONS }, extraCuts: [], restored: [] };
+  return { settings: env.space.settings, coverStyle: env.space.settings.coverStyle ?? DEFAULT_COVER_STYLE, bgm: { bgm: 'auto' }, cutOptions: { ...DEFAULT_PLAN_OPTIONS }, extraCuts: [], restored: [] };
 }
 
 /** 分析写 base/：之后的版本重建剪辑方案与补字幕都读 analysis.json */

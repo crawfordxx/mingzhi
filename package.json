@@ -14,6 +14,7 @@
     "fetch-assets": "node scripts/fetch-assets.mjs",
     "make-fixture": "bash scripts/make-fixture.sh",
     "mingzhi": "tsx src/cli.ts",
+    "serve": "tsx src/server/index.ts",
     "build:web": "vite build web",
     "dev:web": "vite web"
   },
