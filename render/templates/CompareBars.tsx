@@ -9,12 +9,12 @@ type Item = PropsOf<'compareBars'>['items'][number];
 const PAD_X = 40;
 const BOTTLE_W = 78;
 const COL_W = CONTENT_W - PAD_X * 2 - BOTTLE_W - 34;
-const GREEN = THEME.badge['收益'];
+const GREEN = THEME.green;
 /** 文字/进度条用色 与 小瓶用色 */
-const TONE: Record<Tone, { ink: string; bottle: string }> = {
-  bad: { ink: THEME.red, bottle: THEME.red },
-  warn: { ink: THEME.gold, bottle: '#8D97A2' },
-  good: { ink: GREEN, bottle: GREEN },
+const TONE: Record<Tone, { ink: string; fill: string; bottle: string }> = {
+  bad: { ink: THEME.redText, fill: THEME.red, bottle: THEME.red },
+  warn: { ink: THEME.goldText, fill: THEME.gold, bottle: '#8D97A2' },
+  good: { ink: THEME.greenText, fill: GREEN, bottle: GREEN },
 };
 /** 单行文字：字宽估算失准时以省略号收尾，不溢出卡片 */
 const ONE_LINE: React.CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' };
@@ -60,7 +60,7 @@ const ItemCard: React.FC<{ item: Item; grow: number }> = ({ item, grow }) => {
           {item.annotation ? <span style={{ ...ONE_LINE, flex: 'none', maxWidth: '48%', fontSize: fitFontSize(item.annotation, COL_W * 0.44, 34, 22), fontWeight: 800, color: tone.ink }}>{item.annotation}</span> : null}
         </div>
         {item.note ? <div style={{ ...ONE_LINE, marginTop: 6, fontSize: notePx, fontWeight: 500, color: THEME.sub, whiteSpace: 'nowrap' }}>{item.note}</div> : null}
-        <Bar value={item.value} color={tone.ink} p={grow} />
+        <Bar value={item.value} color={tone.fill} p={grow} />
       </div>
     </CardFrame>
   );

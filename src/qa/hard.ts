@@ -13,7 +13,7 @@ export interface HardCheck {
 
 export interface CaptionLayout {
   captionCenters: number[];
-  /** 字幕容器最大宽度，缺省取 CAPTION_MAX_WIDTH（与 CaptionLayer 的 left/right: 60 一致） */
+  /** 字幕容器最大宽度，缺省取 CAPTION_MAX_WIDTH（与 CaptionLayer 的 left/right 留白共用同一常量） */
   captionMaxWidth?: number;
 }
 
@@ -21,7 +21,8 @@ export const TARGET_LUFS = -14;
 export const LUFS_TOLERANCE = 1;
 export const MAX_TRUE_PEAK_DBTP = -1.0;
 export const MIN_CONTRAST = 4.5;
-/** 平台安全区：顶部 0–160、底部 1600–1920、右侧 960–1080（点赞栏） */
+/** 平台安全区：字幕不进顶部 0–160、底部 1600–1920；右侧 960–1080 点赞栏只在 y 1000–1650 一段，
+ *  但分屏字幕（中心 960，半高 75 → 到 1035）与之相邻，故所有布局统一要求居中右缘 ≤ 960 */
 export const SAFE_AREA = { top: 160, bottom: 1600, right: 960 } as const;
 /** 字幕最多两行，行高 1.25（与 CaptionText 一致），用最大字号估算半高 */
 const CAPTION_LINES = 2;

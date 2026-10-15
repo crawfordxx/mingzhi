@@ -20,8 +20,8 @@ const LABEL_LH = 1.3;
 export const FIRST_POP = 0.15;
 export const STAGGER = 0.12;
 const MARKS: Record<Mark, { bg: string; fg: string }> = {
-  yes: { bg: '#E3F3E8', fg: THEME.badge['收益'] },
-  no: { bg: '#FBE5E4', fg: THEME.red },
+  yes: { bg: THEME.tint.yes, fg: THEME.greenText },
+  no: { bg: THEME.tint.no, fg: THEME.redText },
   maybe: { bg: '#EEEDEA', fg: '#8C877E' },
 };
 

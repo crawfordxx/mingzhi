@@ -24,17 +24,21 @@ function captionPairs(): PalettePair[] {
   });
 }
 
-/** 卡片与舞台上实际出现的文字/底色组合，字幕样式的字/描边（或底框） */
+/** 卡片与舞台上实际出现的文字/底色组合，字幕样式的字/描边（或底框）。
+ *  THEME.faint 只用于「划掉」文字（刻意弱化）和装饰分隔点，不算可读文字，不在表内 */
 export function defaultPalette(): PalettePair[] {
   const badges = Object.entries(THEME.badge).map(([name, color]) => ({ fg: WHITE, bg: color, label: `徽标 ${name} 白字/底色` }));
   return [
     { fg: THEME.ink, bg: THEME.card, label: '卡片正文 ink/card' },
     { fg: THEME.sub, bg: THEME.card, label: '卡片副文 sub/card' },
-    { fg: THEME.faint, bg: THEME.card, label: '划掉/分隔 faint/card' },
     { fg: THEME.ink, bg: THEME.stage, label: '舞台文字 ink/stage' },
     { fg: THEME.sub, bg: THEME.stage, label: '舞台面包屑 sub/stage' },
-    { fg: THEME.red, bg: THEME.card, label: '警示红 red/card' },
-    { fg: THEME.gold, bg: THEME.card, label: '金色 gold/card' },
+    { fg: THEME.redText, bg: THEME.card, label: '警示红字 redText/card' },
+    { fg: THEME.redText, bg: THEME.tint.no, label: '叉号胶囊 redText/tint.no' },
+    { fg: THEME.goldText, bg: THEME.card, label: '金色字 goldText/card' },
+    { fg: THEME.greenText, bg: THEME.card, label: '绿色字 greenText/card' },
+    { fg: THEME.greenText, bg: THEME.tint.yes, label: '对勾胶囊 greenText/tint.yes' },
+    { fg: THEME.greenText, bg: THEME.tint.hot, label: '高亮格子 greenText/tint.hot' },
     { fg: THEME.hookBg, bg: THEME.hookLime, label: 'Hook 标签 hookBg/hookLime' },
     { fg: THEME.hookLime, bg: THEME.hookBg, label: 'Hook 荧光字 hookLime/hookBg' },
     ...badges,

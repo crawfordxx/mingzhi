@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { run } from '../src/media/exec.js';
+import { THEME } from '../render/theme.js';
 import { contrastRatio } from '../src/qa/contrast.js';
 import { defaultPalette } from '../src/qa/palette.js';
 import { checkContrast, checkSafeArea, hardChecks, parseBlackSegments, parseEbur128, type HardCheck } from '../src/qa/hard.js';
@@ -11,7 +12,7 @@ import { checkContrast, checkSafeArea, hardChecks, parseBlackSegments, parseEbur
 const cfg = loadConfig({});
 const byId = (checks: HardCheck[], id: HardCheck['id']): HardCheck => checks.find((c) => c.id === id)!;
 const PALETTE = [{ fg: '#000000', bg: '#FFFFFF', label: '黑白' }];
-const LAYOUT = { captionCenters: [960, 1400], captionMaxWidth: 840 };
+const LAYOUT = { captionCenters: [960, 1400] };
 
 describe('contrastRatio', () => {
   it('黑白为 21，同色为 1，与顺序无关', () => {
@@ -55,11 +56,13 @@ describe('解析', () => {
 });
 
 describe('checkSafeArea', () => {
-  it('宽度 ≤ 840 时通过', () => {
-    expect(checkSafeArea(LAYOUT).ok).toBe(true);
+  it('默认（与 CaptionLayer 共用的 CAPTION_MAX_WIDTH=840）通过', () => {
+    const c = checkSafeArea(LAYOUT);
+    expect(c.ok).toBe(true);
+    expect(c.detail).toContain('840');
   });
-  it('默认宽度 960 时右缘 1020 进入点赞栏，detail 含数字', () => {
-    const c = checkSafeArea({ captionCenters: [960, 1400] });
+  it('宽度 960 时右缘 1020 进入点赞栏，detail 含数字', () => {
+    const c = checkSafeArea({ captionCenters: [960, 1400], captionMaxWidth: 960 });
     expect(c.ok).toBe(false);
     expect(c.detail).toContain('1020');
   });
@@ -74,6 +77,14 @@ describe('checkContrast', () => {
     const c = checkContrast([...PALETTE, { fg: '#777777', bg: '#FFFFFF', label: '灰字' }]);
     expect(c.ok).toBe(false);
     expect(c.detail).toContain('灰字 4.48');
+  });
+  it('默认配色（THEME 文字/底色 + 6 套字幕）全部 ≥ 4.5', () => {
+    const c = checkContrast(defaultPalette());
+    expect(c.detail).toContain('均 ≥ 4.5');
+    expect(c.ok).toBe(true);
+  });
+  it('faint 仅用于划掉文字与装饰点，不进文字配色表', () => {
+    expect(defaultPalette().some((p) => p.fg === THEME.faint)).toBe(false);
   });
   it('6 套字幕样式的字色/描边（或底框）全部达标', () => {
     const captions = defaultPalette().filter((p) => p.label.startsWith('字幕'));

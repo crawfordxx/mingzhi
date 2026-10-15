@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { fontPath, fontsReady, loadFonts } from '../src/assets/catalog.js';
-import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE, fitCaptionSize, splitHighlight, type CaptionStyleId } from '../src/captions/styles.js';
+import { CAPTION_MAX_WIDTH, CAPTION_STYLES, DEFAULT_CAPTION_STYLE, fitCaptionSize, splitHighlight, type CaptionStyleId } from '../src/captions/styles.js';
 import { stageCaptionFont } from '../src/compose/stage-assets.js';
 import { renderCaptionStill } from '../src/compose/render.js';
 import { run } from '../src/media/exec.js';
@@ -46,6 +46,10 @@ describe('splitHighlight', () => {
 });
 
 describe('fitCaptionSize', () => {
+  it('字幕最大宽度 840（左右各留 120），居中后右缘不进入点赞栏 x≥960', () => {
+    expect(CAPTION_MAX_WIDTH).toBe(840);
+    expect((1080 + CAPTION_MAX_WIDTH) / 2).toBeLessThanOrEqual(960);
+  });
   it('14 字整行放得下时用基准字号', () => {
     for (const id of IDS) expect(fitCaptionSize('一二三四五六七八九十一二三四', CAPTION_STYLES[id])).toBe(CAPTION_STYLES[id].size);
   });
@@ -55,7 +59,7 @@ describe('fitCaptionSize', () => {
       const s = CAPTION_STYLES[id];
       const size = fitCaptionSize(text, s);
       expect(size).toBeLessThan(s.size);
-      expect(displayWidth(text) * size + 2 * (s.box?.padX ?? 0)).toBeLessThanOrEqual(960);
+      expect(displayWidth(text) * size + 2 * (s.box?.padX ?? 0)).toBeLessThanOrEqual(CAPTION_MAX_WIDTH);
     }
   });
 });

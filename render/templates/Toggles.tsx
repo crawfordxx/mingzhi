@@ -79,7 +79,7 @@ export const Toggles: React.FC<TemplateProps<'toggles'>> = ({ props, local, dur 
         </div>
         {props.footnote ? (
           <Reveal p={springAt(local, 0.2 + props.rows.length * 0.07, fps)} dy={10}>
-            <div style={{ marginTop: 18, fontSize: fitFontSize(props.footnote, INNER_W, 27, 20, 2), fontWeight: 600, lineHeight: 1.4, color: THEME.red, ...clampLines(2) }}>{props.footnote}</div>
+            <div style={{ marginTop: 18, fontSize: fitFontSize(props.footnote, INNER_W, 27, 20, 2), fontWeight: 600, lineHeight: 1.4, color: THEME.redText, ...clampLines(2) }}>{props.footnote}</div>
           </Reveal>
         ) : null}
       </CardFrame>
