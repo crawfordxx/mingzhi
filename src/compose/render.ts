@@ -66,7 +66,7 @@ export async function renderCardStill(opts: { workDir: string; card: CardSpec; o
 const STRIP_EDGE_SEC = 0.3;
 const CARD_FPS = 30;
 
-/** 自检取样时刻：进场后 0.3 秒、中点、出场前 0.3 秒（镜头不足 0.6 秒时三点收拢到中点附近），换算成帧并夹在合成范围内 */
+/** 自检取样时刻：镜头开头后 0.3 秒、中点、镜头结束前 0.3 秒（镜头不足 0.6 秒时三点收拢到中点附近），换算成帧并夹在合成范围内 */
 export function cardSampleFrames(durationSec: number): number[] {
   const last = Math.max(0, Math.round(durationSec * CARD_FPS) - 1);
   const edge = Math.min(STRIP_EDGE_SEC, durationSec / 2);
@@ -80,7 +80,7 @@ async function renderSamples(serveUrl: string, card: CardSpec, durationSec: numb
   for (const s of stills) await renderStill({ composition, serveUrl, inputProps, output: s.file, frame: s.frame, imageFormat: 'png' });
 }
 
-/** 视觉自检用的三联图：卡片在 0.3 秒、中点、结束前 0.3 秒的静帧，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径（调用方用完自行删除）。传入 serveUrl 时复用已有打包（批量检查时只打一次包），否则自己打包 */
+/** 视觉自检用的三联图：卡片在镜头开头后 0.3 秒、中点、结束前 0.3 秒的静帧，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径（调用方用完自行删除）。传入 serveUrl 时复用已有打包（批量检查时只打一次包），否则自己打包 */
 export async function renderCardFrames(workDir: string, card: CardSpec, durationSec: number, serveUrl?: string): Promise<string> {
   const tmp = mkdtempSync(join(tmpdir(), 'mz-strip-'));
   const outDir = join(workDir, 'qa');

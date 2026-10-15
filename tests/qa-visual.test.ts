@@ -167,6 +167,21 @@ describe('qaCards', () => {
     expect(made.files).toHaveLength(2);
     expect(made.files.some((f) => existsSync(f))).toBe(false);
   });
+  it('打包失败：不抛出，分镜原样返回，每个目标镜头标注并 passed=false', async () => {
+    vi.mocked(withBundle).mockRejectedValueOnce(new Error('webpack 炸了'));
+    const { client, calls } = fake([]);
+    const res = await run(client);
+    expect(res.storyboard).toEqual(storyboard);
+    expect(res.report.map((r) => r.shotIndex)).toEqual([0, 2]);
+    expect(res.report.every((r) => !r.passed && r.revised === 0 && r.skipped === '打包失败：webpack 炸了')).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+  it('打分抛错时三联图仍被删除', async () => {
+    const client: LlmClient = { chatJson: async () => { throw new Error('网络断了'); } };
+    await run(client, meter(), { ...storyboard, shots: [storyboard.shots[0]] });
+    expect(made.files).toHaveLength(1);
+    expect(existsSync(made.files[0])).toBe(false);
+  });
   it('没有分屏卡片时不打包', async () => {
     await run(fake([]).client, meter(), { ...storyboard, shots: [storyboard.shots[1]] });
     expect(withBundle).not.toHaveBeenCalled();

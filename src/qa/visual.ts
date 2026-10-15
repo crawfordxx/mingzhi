@@ -117,25 +117,30 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
   return { entry: { shotIndex: index, scores, revised, passed, ...(skipped ? { skipped } : {}) }, card: best?.card ?? (shot.card as CardSpec) };
 }
 
-/** 逐个检查分屏卡片，返回替换后的分镜与报告；检查或重写出错只标注、不中断，保留原卡片 */
+/** 逐个检查分屏卡片，返回替换后的分镜与报告；打包、检查或重写出错只标注、不中断，保留原卡片 */
 export async function qaCards(opts: QaCardsOptions): Promise<{ storyboard: Storyboard; report: CardQaEntry[] }> {
   const images = usedImages(opts.storyboard);
   const cards = new Map<number, CardSpec>();
   const report: CardQaEntry[] = [];
   const targets = opts.storyboard.shots.flatMap((s, i) => (s.layout === 'split' && s.card ? [i] : []));
   if (targets.length > 0) {
-    // 全部卡片共用一次打包
-    await withBundle(opts.workDir, async (serveUrl) => {
-      for (const index of targets) {
-        if (!opts.meter.canSpend(STEP_BUDGET_YUAN)) {
-          report.push({ shotIndex: index, scores: [], revised: 0, passed: false, skipped: '预算不足，未检查' });
-          continue;
+    try {
+      // 全部卡片共用一次打包
+      await withBundle(opts.workDir, async (serveUrl) => {
+        for (const index of targets) {
+          if (!opts.meter.canSpend(STEP_BUDGET_YUAN)) {
+            report.push({ shotIndex: index, scores: [], revised: 0, passed: false, skipped: '预算不足，未检查' });
+            continue;
+          }
+          const { entry, card } = await checkOne(opts, serveUrl, index, images);
+          report.push(entry);
+          cards.set(index, card);
         }
-        const { entry, card } = await checkOne(opts, serveUrl, index, images);
-        report.push(entry);
-        cards.set(index, card);
-      }
-    });
+      });
+    } catch (err) {
+      const skipped = `打包失败：${err instanceof Error ? err.message : String(err)}`;
+      return { storyboard: opts.storyboard, report: targets.map((shotIndex) => ({ shotIndex, scores: [], revised: 0, passed: false, skipped })) };
+    }
   }
   const shots = opts.storyboard.shots.map((s, i): Shot => (cards.has(i) ? { ...s, card: cards.get(i) } : s));
   return { storyboard: { ...opts.storyboard, shots }, report };
