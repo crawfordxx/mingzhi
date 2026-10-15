@@ -229,11 +229,13 @@ describe('validateKey', () => {
   const res = (status: number) => new Response('{}', { status });
   const asFetch = (fn: unknown) => fn as typeof fetch;
 
-  it('200 返回 true，请求 GET /api/v1/models 且带 Bearer sk- 前缀', async () => {
-    const fetchImpl = vi.fn(async () => res(200));
+  it('空请求体 POST 对话接口：400（参数缺失）即 key 有效，带 Bearer sk- 前缀', async () => {
+    const fetchImpl = vi.fn(async () => res(400));
     expect(await validateKey('abc', asFetch(fetchImpl))).toBe(true);
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://kexiangai.com/api/v1/models');
+    expect(url).toBe('https://kexiangai.com/api/v1/chat/completions');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe('{}');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-abc');
   });
 
@@ -257,7 +259,7 @@ describe('validateKey', () => {
 
   it('网络错误、429、404、5xx 都抛中文错误，区别于 key 无效', async () => {
     await expect(validateKey('x', asFetch(async () => { throw new Error('boom'); }))).rejects.toThrow('无法校验 key');
-    for (const status of [429, 404, 408, 400, 500, 502]) {
+    for (const status of [429, 404, 408, 500, 502]) {
       await expect(validateKey('x', asFetch(async () => res(status)))).rejects.toThrow(`无法校验 key：可想 AI 返回 HTTP ${status}`);
     }
   });

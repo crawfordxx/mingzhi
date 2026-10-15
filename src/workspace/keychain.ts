@@ -12,7 +12,11 @@ export interface KeyStore {
 /** 执行外部命令：不经过 shell；需要保密的内容通过 input 走 stdin，不进入参数 */
 export type Exec = (cmd: string, args: string[], opts?: { input?: string }) => Promise<{ stdout: string; code: number }>;
 
-export const KEXIANG_MODELS_URL = 'https://kexiangai.com/api/v1/models';
+/**
+ * 校验用的接口：可想的模型列表对任何 key 都返回 200，不能用来校验；
+ * 对话接口发空请求体时，key 无效返回 401，key 有效返回 400（参数缺失），不产生花费（2026-10-15 实测）
+ */
+export const KEXIANG_VALIDATE_URL = 'https://kexiangai.com/api/v1/chat/completions';
 const SERVICE = 'mingzhi';
 const ACCOUNT = 'kexiang';
 const VALIDATE_TIMEOUT_MS = 15_000;
@@ -168,16 +172,18 @@ export async function validateKey(key: string, fetchImpl: typeof fetch = fetch):
   if (!trimmed) return false;
   let res: Response;
   try {
-    res = await fetchImpl(KEXIANG_MODELS_URL, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${trimmed.startsWith('sk-') ? trimmed : `sk-${trimmed}`}` },
+    res = await fetchImpl(KEXIANG_VALIDATE_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${trimmed.startsWith('sk-') ? trimmed : `sk-${trimmed}`}`, 'content-type': 'application/json' },
+      body: '{}',
       signal: AbortSignal.timeout(VALIDATE_TIMEOUT_MS),
     });
   } catch (err) {
     throw new Error(`无法校验 key：${networkReason(err)}`);
   }
   void res.body?.cancel().catch(() => undefined); // 只看状态码，释放连接
-  if (res.ok) return true;
+  // 空请求体：key 有效时可想返回 400（参数校验失败），无效时 401
+  if (res.ok || res.status === 400) return true;
   if (res.status === 401 || res.status === 403) return false;
   throw new Error(`无法校验 key：可想 AI 返回 HTTP ${res.status}，请稍后重试`);
 }
