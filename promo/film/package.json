@@ -1,0 +1,15 @@
+{
+  "name": "mingzhi-launch-film",
+  "private": true,
+  "type": "module",
+  "description": "明知AI剪辑发布片（Remotion 4.0.531）。remotion / react / @remotion/bundler / @remotion/renderer / motion 复用仓库根目录已装的同版本依赖，这里只额外装 three.js 相关三件。",
+  "scripts": {
+    "render": "node tools/render.mjs",
+    "audio": "python3 -I tools/audio.py"
+  },
+  "dependencies": {
+    "@react-three/fiber": "8.17.10",
+    "@remotion/three": "4.0.531",
+    "three": "0.169.0"
+  }
+}
