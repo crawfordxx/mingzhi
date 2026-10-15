@@ -85,6 +85,20 @@ describe('scoreCard', () => {
     expect(calls[0].system).not.toContain('下半屏');
     expect(calls[0].system).not.toContain('出场');
   });
+  it('提示词：第一帧是进场中途（遮罩滑入、半透明是正常的），版式、层级只按后两帧的定稿状态评；三帧看不到卡片整体进场，静态内容第一帧已就位不扣动效分', async () => {
+    const { client, calls } = fake([sc(9)]);
+    await scoreCard(client, PNG, card('x'));
+    expect(calls[0].system).toContain('进场中途');
+    expect(calls[0].system).toContain('不算截断或乱码');
+    expect(calls[0].system).toContain('按第二、三帧');
+    expect(calls[0].system).toContain('不因第一帧已完整扣分');
+    expect(calls[0].system).toContain('读不完要扣分');
+  });
+  it('打分请求带上镜头时长', async () => {
+    const { client, calls } = fake([sc(9)]);
+    await scoreCard(client, PNG, card('x'), 2.04);
+    expect(calls[0].user).toContain('镜头时长：2.0 秒');
+  });
   it('KexiangClient 把图片放进 image_url（多模态请求体）', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(sc(9)) } }] }), { status: 200 }));
     await scoreCard(new KexiangClient('abc', fetchMock as unknown as typeof fetch, async () => {}), PNG, card('x'));

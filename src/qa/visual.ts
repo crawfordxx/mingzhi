@@ -31,11 +31,15 @@ const ScoreSchema = z.object({ layout: dimension, hierarchy: dimension, motion: 
 
 const SCORE_SYSTEM = `你是短视频信息卡片的视觉评审。图片只含这张卡片本身，是同一张卡片的三个时刻，从左到右依次是：镜头开头后 0.3 秒、镜头中点、镜头结束前 0.3 秒。
 
+先理解三帧：第一帧通常还在进场中途——文字从遮罩下方滑上来时下半截被遮住、元素半透明或还在位移，这是正常的进场动画，不算截断或乱码，也不算重叠。第二、三帧是定稿状态。
+
 从四个维度各打 1-10 分的整数（1 很差，5 勉强能用，8 达到发布水准，10 无可挑剔）：
-- layout 版式：对齐、留白是否得当，文字有没有溢出卡片、被截断或互相遮挡。
-- hierarchy 层级：主次是否清楚，一眼能不能读到重点。
-- motion 动效节奏：只看三帧里看得到的东西——卡片内部元素的展开进度应当从第一帧到第二帧明显推进（如文字逐步出现、数字滚动、条形增长），到第三帧已经完整且稳定；第一帧就全部就位（没有推进）、第三帧仍未展开完或内容不稳定都要扣分。
-- brand 品牌一致性：是否符合本套视觉语言——普通卡片是米色底、白色卡片；开场 hook 卡是黑底配荧光黄绿强调，终端卡是深灰底，这两种深色属于正常设计，不因底色扣分；另看标签色、字体是否统一。
+- layout 版式：按第二、三帧评——对齐、留白是否得当，文字有没有溢出卡片、被截断或互相遮挡。
+- hierarchy 层级：按第二、三帧评——主次是否清楚，一眼能不能读到重点；字数要和镜头时长相称（按每秒读 5 个字估算，镜头里读不完要扣分）。
+- motion 动效节奏：只看三帧里看得到的东西。成片里整张卡片还有统一的进场（从下方弹入，约 0.5 秒），这三帧里看不到它。
+  有逐条展开内容的卡片（清单逐行出现、数字滚动、条形增长、开关切换等）：展开进度应当从第一帧到第二帧明显推进、第三帧已完整稳定，没有推进或第三帧仍未展开完要扣分。
+  内容本来就是静态的卡片（只有标题、一张图配一行字）：不因第一帧已完整扣分，三帧稳定、不跳变就算合格，只在第三帧仍未就位、内容抖动或跳变时扣分。
+- brand 品牌一致性：是否符合本套视觉语言——普通卡片是米色底、白色卡片；开场 hook 卡是黑底（或压暗的配图）配荧光黄绿强调，终端卡是深灰底，这些深色属于正常设计，不因底色扣分；另看标签色、字体是否统一。
 
 请挑剔一些：默认不超过 7 分，只有确实无可挑剔才给 8 及以上。
 notes 用一两句中文写出最主要的问题和修改方向；都没问题就写“无”。
@@ -51,11 +55,12 @@ const better = (a: Version, b: Version): Version => {
   return scoreSum(a.score) >= scoreSum(b.score) ? a : b;
 };
 
-/** 让视觉模型给三联图打分；返回不合格式时抛错 */
-export async function scoreCard(client: LlmClient, stripPng: string, card: CardSpec): Promise<CardScore> {
+/** 让视觉模型给三联图打分（带上镜头时长，供评估字数是否读得完）；返回不合格式时抛错 */
+export async function scoreCard(client: LlmClient, stripPng: string, card: CardSpec, durationSec?: number): Promise<CardScore> {
   const image = `data:image/png;base64,${readFileSync(stripPng).toString('base64')}`;
+  const duration = durationSec === undefined ? '' : `镜头时长：${durationSec.toFixed(1)} 秒\n`;
   const raw = await client.chatJson({
-    model: QA_MODEL, system: SCORE_SYSTEM, user: `卡片数据：${JSON.stringify(card)}`,
+    model: QA_MODEL, system: SCORE_SYSTEM, user: `${duration}卡片数据：${JSON.stringify(card)}`,
     images: [image], reasoningEffort: 'low', label: '卡片视觉自检',
   });
   const parsed = ScoreSchema.safeParse(raw);
@@ -92,7 +97,7 @@ const captionsIn = (captions: TimedCaption[], shot: Shot): TimedCaption[] => cap
 async function evaluate(opts: QaCardsOptions, serveUrl: string, shot: Shot, card: CardSpec): Promise<Version> {
   const strip = await renderCardFrames(opts.workDir, card, shot.end - shot.start, opts.ffmpeg, serveUrl);
   try {
-    return { card, score: await scoreCard(opts.client, strip, card) };
+    return { card, score: await scoreCard(opts.client, strip, card, shot.end - shot.start) };
   } finally {
     rmSync(strip, { force: true });
   }
