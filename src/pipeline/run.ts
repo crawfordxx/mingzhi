@@ -29,11 +29,13 @@ import { prepareAudio, validateAudio, type AudioOptions } from './audio-step.js'
 import { runCover, runLoudness, validateStyles, type CoverDeps, type CoverOptions } from './finish-step.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
-import type { CardQaEntry } from '../qa/visual.js';
+import type { CardQaEntry, CardScore } from '../qa/visual.js';
+import { cardScoreDetail, costDetail, detailOfStep, progressDetail, type ProgressDetail } from './detail.js';
 import { runQaCards, runQaFinal, type PipelineQa, type QaDeps } from './qa-step.js';
 
 export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'qa-cards' | 'compose' | 'loudness' | 'qa-final' | 'cover' | 'done';
-export interface ProgressEvent { step: PipelineStep; message: string }
+/** detail 是给工作台「剪辑直播」用的结构化数据（可选，旧调用方可以忽略；message 文本不变） */
+export interface ProgressEvent { step: PipelineStep; message: string; detail?: ProgressDetail }
 export interface PipelineArgs {
   input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; broll?: BrollOptions; brollDeps?: BrollDeps;
   /** 配乐选择；缺省 { bgm: 'auto' } */
@@ -50,6 +52,8 @@ export interface PipelineArgs {
   qa?: boolean;
   /** 仅供测试注入的自检实现 */
   qaDeps?: QaDeps;
+  /** 取消信号：每一步完成后检查，已取消则抛「已取消」（正在跑的这一步会先跑完） */
+  signal?: AbortSignal;
   onProgress?: (e: ProgressEvent) => void;
 }
 export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard; qa: PipelineQa }
@@ -65,6 +69,17 @@ const fmtSec = (s: number): string => {
   const total = Math.round(s);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
+
+/** 已取消则抛错；流程在步骤之间调用 */
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error('已取消');
+}
+
+/** 花费变化事件：只带 cost 明细（CLI 不打印它，工作台用它刷新「已花 / 上限」） */
+function costEvent(step: PipelineStep, meter: CostMeter): ProgressEvent {
+  const budget = Number.isFinite(meter.budget) ? meter.budget : null;
+  return { step, message: `已花费 ¥${meter.total.toFixed(2)}${budget === null ? '' : `（上限 ¥${budget.toFixed(2)}）`}`, detail: costDetail(meter.total, budget) };
+}
 
 /** 给封面预留的花费：封面开启才预留，B-roll 与卡片自检的预算检查都要扣掉它 */
 const coverReserve = (args: PipelineArgs): number => (args.cover === false ? 0 : COVER_YUAN);
@@ -106,7 +121,7 @@ export function throttledMatteProgress(emit: (e: ProgressEvent) => void): (done:
     const ratio = total > 0 ? done / total : 1;
     if (ratio - last < STEP && done < total) return;
     last = ratio;
-    emit({ step: 'matte', message: `抠像 ${done}/${total} 帧` });
+    emit({ step: 'matte', message: `抠像 ${done}/${total} 帧`, detail: progressDetail('matte', Math.floor(ratio * 100), { done, total }) });
   };
 }
 
@@ -135,7 +150,7 @@ export function throttledRenderProgress(emit: (e: ProgressEvent) => void): (rati
     if (pct - last < STEP && pct < 100) return;
     if (pct === last) return;
     last = pct;
-    emit({ step: 'compose', message: `渲染 ${pct}%` });
+    emit({ step: 'compose', message: `渲染 ${pct}%`, detail: progressDetail('compose', pct) });
   };
 }
 
@@ -207,6 +222,7 @@ async function compose(args: PipelineArgs, a: Analysis, p: Produced, complete: C
  * 重跑同一工作目录会重新付费：只有 B-roll 素材与封面底图有磁盘缓存，其余 AI 步骤每次都重新调用。
  */
 export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
+  throwIfCancelled(args.signal);
   if (args.background) validateBackground(args.background, args.cfg, args.task);
   validateBroll(args.broll, args.brollDeps, args.task);
   validateAudio(args.audio);
@@ -216,9 +232,13 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   const projectPath = join(args.workDir, 'project.json');
   const record = projectRecorder(projectPath, args.input);
   const meter = args.meter ?? new CostMeter({}, Number.POSITIVE_INFINITY);
+  let lastCost: number | null = null;
   const complete: Complete = (step, message, patch = {}) => {
     const project = record({ ...patch, costs: costsOf(meter) });
-    args.onProgress?.({ step, message });
+    const detail = detailOfStep(step, patch, project);
+    args.onProgress?.({ step, message, ...(detail ? { detail } : {}) });
+    if (meter.total !== lastCost) { lastCost = meter.total; args.onProgress?.(costEvent(step, meter)); }
+    throwIfCancelled(args.signal); // 步骤之间检查；这一步的结果已经落盘，取消不丢数据
     return project;
   };
   try {
@@ -232,7 +252,7 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
 /** 卡片自检（可跳过）：返回改写后的制作结果与报告 */
 async function qaCardsStep(args: PipelineArgs, meter: CostMeter, p: Produced, complete: Complete): Promise<{ produced: Produced; cards: CardQaEntry[] }> {
   if (args.qa === false) return { produced: p, cards: [] };
-  const ctx = { llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), qaCards: args.qaDeps?.qaCards, onProgress: (message: string) => args.onProgress?.({ step: 'qa-cards', message }) };
+  const ctx = { llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), qaCards: args.qaDeps?.qaCards, onProgress: (message: string, info?: { shotIndex: number; score: CardScore; passed: boolean }) => args.onProgress?.({ step: 'qa-cards', message, ...(info ? { detail: cardScoreDetail(info.shotIndex, info.score, info.passed) } : {}) }) };
   const res = await runQaCards(ctx, p.storyboard, p.captions, complete);
   return { produced: { ...p, storyboard: res.storyboard }, cards: res.report };
 }

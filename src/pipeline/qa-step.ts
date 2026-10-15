@@ -6,7 +6,7 @@ import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { hardChecks as realHardChecks, type HardCheck } from '../qa/hard.js';
 import { defaultPalette } from '../qa/palette.js';
-import { qaCards as realQaCards, type CardQaEntry } from '../qa/visual.js';
+import { qaCards as realQaCards, type CardQaEntry, type QaCardsOptions } from '../qa/visual.js';
 import { CANVAS, type Storyboard } from '../storyboard/schema.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
 
@@ -44,7 +44,7 @@ export function captionCentersOf(storyboard: Storyboard): number[] {
 }
 
 export interface QaCardsContext {
-  llm: LlmClient; workDir: string; meter: CostMeter; ffmpeg: string; qaCards?: typeof realQaCards; onProgress?: (msg: string) => void;
+  llm: LlmClient; workDir: string; meter: CostMeter; ffmpeg: string; qaCards?: typeof realQaCards; onProgress?: QaCardsOptions['onProgress'];
   /** 给封面预留的花费（元），封面开启时传 COVER_YUAN，关闭传 0 */
   reserveYuan?: number;
 }

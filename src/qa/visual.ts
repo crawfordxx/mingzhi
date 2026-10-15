@@ -68,7 +68,8 @@ export interface QaCardsOptions {
   ffmpeg: string;
   /** 给后续步骤（封面）预留的花费（元），每次预算检查一并扣除，缺省 0 */
   reserveYuan?: number;
-  onProgress?: (msg: string) => void;
+  /** msg 是给人看的进度文案；info 带本次打分的结构化数据，供工作台直播 */
+  onProgress?: (msg: string, info?: { shotIndex: number; score: CardScore; passed: boolean }) => void;
 }
 
 /** 再花一次视觉调用（并为封面留出预留）是否仍在预算内 */
@@ -111,7 +112,7 @@ async function checkOne(opts: QaCardsOptions, serveUrl: string, index: number, i
       const version = await evaluate(opts, serveUrl, shot, card);
       versions.push(version);
       scores.push(version.score);
-      opts.onProgress?.(`第 ${index + 1} 镜卡片自检：版式 ${version.score.layout} 层级 ${version.score.hierarchy} 动效 ${version.score.motion} 品牌 ${version.score.brand}`);
+      opts.onProgress?.(`第 ${index + 1} 镜卡片自检：版式 ${version.score.layout} 层级 ${version.score.hierarchy} 动效 ${version.score.motion} 品牌 ${version.score.brand}`, { shotIndex: index, score: version.score, passed: isPass(version.score) });
       if (isPass(version.score) || revised >= MAX_REVISIONS) break;
       if (!canAffordStep(opts)) { skipped = `预算不足，停止重写${reserveNote(opts)}`; break; }
       const base = versions.reduce(better);
