@@ -1,5 +1,5 @@
 """发布片音频：代码作曲的 53 秒 8-bit 芯片曲（方波 / 三角波 / 噪声，120 BPM，镜头分界都落在拍点上）
-+ 两条音效轨（自合成 8-bit 游戏音效、现代 UI 音效）。输出三条分轨 wav，混音与响度在 tools/mix.sh 里做。
++ 两条音效轨（自合成 8-bit 游戏音效；现代 UI 音效来自 Kenney CC0 与代码合成）。输出三条分轨 wav，混音与响度在 tools/mix.sh 里做。
 全部确定性（固定种子），版权自有。
 
 用法：python3 -I tools/audio.py   → build/audio/{bgm,sfx8,sfxui}.wav
@@ -271,11 +271,113 @@ def load(path):
     x = np.frombuffer(raw, np.float32).astype(np.float64)
     return x / (np.max(np.abs(x)) + 1e-9)
 
-HS = HERE / 'sfx' / 'huashu'; KN = HERE / 'sfx' / 'kenney'
-LIB = {p.stem: load(p) for p in list(HS.glob('*.mp3')) + list(KN.glob('*.wav'))}
+KN = HERE / 'sfx' / 'kenney'
+LIB = {p.stem: load(p) for p in list(KN.rglob('*.wav')) + list(KN.rglob('*.ogg'))}
+
+
+def _noise_sweep(d, f0, f1, seed, attack=0.35):
+    """滤波噪声扫频（风声 / whoosh）：一阶低通截止频率随时间从 f0 扫到 f1，再乘起落包络"""
+    n = int(SR * d)
+    x = np.random.default_rng(seed).standard_normal(n)
+    cut = f0 * (f1 / f0) ** (np.arange(n) / n)
+    a = np.exp(-2 * np.pi * cut / SR)
+    y = np.empty(n); acc = 0.0
+    for i in range(n):
+        acc = (1 - a[i]) * x[i] + a[i] * acc
+        y[i] = acc
+    t = np.arange(n) / n
+    e = np.where(t < attack, (t / attack) ** 1.5, ((1 - t) / (1 - attack)) ** 2)
+    return y * e
+
+
+def _pings(notes, step, d=0.35, seed=0, decay=9.0):
+    """高音正弦叮叮（闪光 / 魔法尾音）"""
+    out = np.zeros(int(SR * (step * len(notes) + d)))
+    for i, nm in enumerate(notes):
+        t = np.arange(int(SR * d)) / SR
+        put(out, np.sin(2 * np.pi * note_hz(nm) * t) * np.exp(-t * decay), i * step)
+    return out
+
+
+def _stack():
+    out = np.zeros(int(SR * 0.7))
+    for i, k in enumerate(['drop_003', 'drop_002', 'drop_003']):
+        put(out, LIB[k], i * 0.07, 0.8 - 0.15 * i)
+    return out
+
+
+def _ai_process(d=1.1):
+    t = np.arange(int(SR * d)) / SR
+    am = 0.5 + 0.5 * np.sin(2 * np.pi * 9 * t)
+    x = (np.sin(2 * np.pi * (620 + 40 * np.sin(2 * np.pi * 3 * t)) * t) + 0.6 * np.sin(2 * np.pi * 930 * t)) * am
+    return x * np.clip(t / 0.08, 0, 1) * np.clip((d - t) / 0.25, 0, 1)
+
+
+def _logo():
+    t = np.arange(int(SR * 1.4)) / SR
+    boom = np.sin(2 * np.pi * (70 * np.exp(-t * 1.5) + 45) * t) * np.exp(-t * 3.2)
+    out = boom * 0.9
+    put(out, LIB['impactBell_heavy_001'], 0.0, 0.55)
+    put(out, _pings(['C7', 'G7', 'E7', 'C8'], 0.08, d=0.5, decay=6), 0.05, 0.25)
+    return out
+
+
+def _key(seed):
+    """机械键盘单键：Kenney ui-audio 的 click1–5 轮换"""
+    return LIB[f'click{1 + seed % 5}']
+
+
+# 现代 UI 音效：全部是 Kenney CC0 或代码合成（原 huashu-design 库许可不明，已整体替换）
+SYN = {
+    'ui_click': LIB['click_003'],
+    'ui_click-soft': LIB['click2'],
+    'container_card-snap': LIB['drop_002'],
+    'container_card-flip': LIB['switch_003'],
+    'container_modal-open': LIB['open_002'],
+    'container_stack-collapse': _stack(),
+    'feedback_notification-pop': LIB['pluck_001'],
+    'feedback_success-chime': LIB['confirmation_003'],
+    'progress_complete-done': LIB['confirmation_001'],
+    'progress_loading-tick': LIB['tick_001'],
+    'keyboard_delete-key': LIB['back_002'],
+    'keyboard_enter': LIB['select_001'],
+    'magic_ai-process': _ai_process(),
+    'magic_sparkle': _pings(['E6', 'B6', 'G6', 'E7', 'B7', 'G7'], 0.05, decay=11),
+    'magic_transform': _noise_sweep(1.0, 300, 7000, 11, attack=0.7) + 0.35 * np.pad(_pings(['C6', 'E6', 'G6', 'C7', 'E7'], 0.07), (int(0.45 * SR), 0))[: int(SR * 1.0)],
+    'transition_dissolve': _noise_sweep(0.75, 2500, 9000, 13, attack=0.5),
+    'transition_slide-in': _noise_sweep(0.5, 600, 5000, 17, attack=0.6),
+    'transition_whoosh-fast': _noise_sweep(0.45, 400, 8000, 19, attack=0.55),
+    'impact_logo-reveal-v2': _logo(),
+}
+# 原库各音效「有声段」的 RMS（峰值归一后测得）：替换件按它对齐响度，保持同类型、同响度
+RMS_REF = {
+    'container_card-flip': 0.131, 'container_card-snap': 0.258, 'container_modal-open': 0.116, 'container_stack-collapse': 0.034,
+    'feedback_notification-pop': 0.111, 'feedback_success-chime': 0.175, 'impact_logo-reveal-v2': 0.189, 'keyboard_delete-key': 0.060,
+    'keyboard_enter': 0.103, 'keyboard_type': 0.056, 'magic_ai-process': 0.347, 'magic_sparkle': 0.067, 'magic_transform': 0.114,
+    'progress_complete-done': 0.222, 'progress_loading-tick': 0.075, 'transition_dissolve': 0.102, 'transition_slide-in': 0.095,
+    'transition_whoosh-fast': 0.131, 'ui_click-soft': 0.167, 'ui_click': 0.121,
+}
+
+
+def _match(x, ref):
+    x = x / (np.max(np.abs(x)) + 1e-9)
+    a = np.abs(x) > 0.01
+    act = x[np.argmax(a): len(x) - np.argmax(a[::-1])]
+    k = ref / (np.sqrt(np.mean(act ** 2)) + 1e-9)
+    return x * min(k, 1.0 / (np.max(np.abs(x)) + 1e-9))
+
+
+for k, x in list(SYN.items()):
+    SYN[k] = _match(x, RMS_REF[k])
 sfxui = np.zeros(N)
+_type_i = [0]
+
+
 def cu(name, f, gain_db=-6, maxdur=None):
-    x = LIB[name]
+    if name == 'keyboard_type':
+        x = _match(_key(_type_i[0]), RMS_REF['keyboard_type']); _type_i[0] += 1
+    else:
+        x = SYN.get(name, LIB.get(name))
     if maxdur:
         n = int(maxdur * SR)
         x = x[:n] * np.clip((n - np.arange(min(n, len(x)))) / (0.02 * SR), 0, 1)
