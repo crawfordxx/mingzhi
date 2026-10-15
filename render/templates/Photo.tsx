@@ -1,6 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, Easing, Img, interpolate, staticFile, useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
+import { toRgba } from '../../src/qa/contrast.js';
 import { ShotVideo } from './ShotVideo.js';
 import { CONTENT_W, Reveal, SAFE, clampLines, fitFontSize, springAt, type TemplateProps } from './parts.js';
 
@@ -29,11 +30,11 @@ export const Photo: React.FC<TemplateProps<'photo'>> = ({ props, local }) => {
   return (
     <div style={{ position: 'absolute', left: SAFE.side, bottom: LABEL_BOTTOM, maxWidth: CONTENT_W, fontFamily: THEME.font, color: THEME.ink }}>
       <Reveal p={springAt(local, 0.15, fps)} dy={22}>
-        <div style={{ padding: `22px ${LABEL_PAD_X}px 24px`, borderRadius: 24, background: 'rgba(255, 255, 255, 0.86)', backdropFilter: 'blur(14px)',
+        <div style={{ padding: `22px ${LABEL_PAD_X}px 24px`, borderRadius: 24, background: toRgba(THEME.glass.bg, THEME.glass.alpha), backdropFilter: 'blur(14px)',
           boxShadow: '0 14px 36px rgba(0, 0, 0, 0.18)' }}>
           {props.label ? <div style={{ fontSize: fitFontSize(props.label, LABEL_TEXT_W, 40, 28), fontWeight: 800, lineHeight: 1.3, whiteSpace: 'nowrap' }}>{props.label}</div> : null}
           {props.sublabel ? (
-            <div style={{ marginTop: props.label ? 8 : 0, fontSize: fitFontSize(props.sublabel, LABEL_TEXT_W, 27, 21, 2), fontWeight: 500, lineHeight: 1.4, color: THEME.sub, ...clampLines(2) }}>{props.sublabel}</div>
+            <div style={{ marginTop: props.label ? 8 : 0, fontSize: fitFontSize(props.sublabel, LABEL_TEXT_W, 27, 21, 2), fontWeight: 500, lineHeight: 1.4, color: THEME.subOnGlass, ...clampLines(2) }}>{props.sublabel}</div>
           ) : null}
         </div>
       </Reveal>

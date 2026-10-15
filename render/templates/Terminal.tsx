@@ -24,7 +24,6 @@ const PROMPT_GAP_EM = 1;
 const MAX_PX = 32;
 const MIN_PX = 22;
 const PROMPT = '> ';
-const TITLE_ORANGE = '#D97757';
 const DOTS = ['#FF5F57', '#FEBC2E', '#28C840'];
 const MONO_CJK = `${THEME.mono}, ${THEME.font}`;
 
@@ -68,7 +67,7 @@ const Caret: React.FC<{ typing: boolean; local: number }> = ({ typing, local }) 
 const Header: React.FC<{ title: string }> = ({ title }) => (
   <div style={{ height: HEADER_H, display: 'flex', alignItems: 'center', gap: 34, padding: `0 ${PAD_X}px` }}>
     <div style={{ display: 'flex', gap: 12 }}>{DOTS.map((c) => <span key={c} style={{ width: 18, height: 18, borderRadius: 9, background: c }} />)}</div>
-    <div style={{ fontFamily: MONO_CJK, fontSize: 30, fontWeight: 700, color: TITLE_ORANGE, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>✻ {title}</div>
+    <div style={{ fontFamily: MONO_CJK, fontSize: 30, fontWeight: 700, color: THEME.termInk.title, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>✻ {title}</div>
   </div>
 );
 
@@ -84,10 +83,10 @@ export const Terminal: React.FC<TemplateProps<'terminal'>> = ({ props, local, du
       <Reveal p={springAt(local, 0, fps)} dy={20}>
         <div style={{ height: WIN_H, background: THEME.terminal, borderRadius: 22, boxShadow: '0 28px 64px rgba(20, 16, 12, 0.30)', overflow: 'hidden' }}>
           <Header title={props.title ?? 'Claude Code'} />
-          <div style={{ padding: `4px ${PAD_X}px`, fontFamily: MONO_CJK, fontSize: px, lineHeight: LINE_HEIGHT, color: '#E6E6E6', wordBreak: 'break-all' }}>
+          <div style={{ padding: `4px ${PAD_X}px`, fontFamily: MONO_CJK, fontSize: px, lineHeight: LINE_HEIGHT, wordBreak: 'break-all' }}>
             {props.lines.map((line, i) => (i > 0 && typed[i] === 0 ? null : (
-              <div key={i} style={{ marginTop: i === 0 ? 0 : `${i === 1 ? PROMPT_GAP_EM : LINE_GAP_EM}em`, fontWeight: i === 0 ? 700 : 500, color: i === 0 ? '#FFFFFF' : '#D6D6D6' }}>
-                {i === 0 ? <span style={{ color: '#9C9C9C' }}>{PROMPT}</span> : null}
+              <div key={i} style={{ marginTop: i === 0 ? 0 : `${i === 1 ? PROMPT_GAP_EM : LINE_GAP_EM}em`, fontWeight: i === 0 ? 700 : 500, color: i === 0 ? THEME.termInk.head : THEME.termInk.body }}>
+                {i === 0 ? <span style={{ color: THEME.termInk.prompt }}>{PROMPT}</span> : null}
                 {chars(line).slice(0, typed[i]).join('')}
                 {i === caretAt ? <Caret typing={typing} local={local} /> : null}
               </div>

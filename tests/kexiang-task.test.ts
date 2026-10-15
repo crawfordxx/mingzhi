@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
+import { CostMeter } from '../src/cost/meter.js';
+import { EST_TASK_YUAN } from '../src/cost/constants.js';
 import { downloadTo, KexiangTaskClient, KEXIANG_TASK_BASE } from '../src/llm/kexiang-task.js';
 
 type Reply = { status?: number; body: unknown };
@@ -44,6 +47,27 @@ describe('KexiangTaskClient', () => {
     expect('cost' in (await new KexiangTaskClient('k', b.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' }))).toBe(false);
   });
 
+  it('成功但没返回 cost 时按预估价记账（生图 0.2、视频 2.4），返回给调用方的结果不变', async () => {
+    const meter = new CostMeter({}, 10);
+    const img = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', service_output: { imgUrl: 'u' } } }]);
+    const res = await new KexiangTaskClient('k', img.impl, noSleep, 1, meter).run({ modelName: 'M', modelType: 't' }, { kind: 'image', label: '背景' });
+    expect('cost' in res).toBe(false);
+    expect(meter.total).toBeCloseTo(0.2);
+    expect(meter.entries[0].label).toContain('按预估');
+    const vid = fakeFetch([{ body: { id: 2 } }, { body: { task_status: 'success', service_output: { videoUrl: 'v' } } }]);
+    await new KexiangTaskClient('k', vid.impl, noSleep, 1, meter).run({ modelName: 'V', modelType: 't' }, { kind: 'video' });
+    expect(meter.total).toBeCloseTo(0.2 + 2.4);
+    expect(EST_TASK_YUAN).toEqual({ image: 0.2, video: 2.4 });
+  });
+
+  it('返回了 cost 时按实际记账，不用预估价', async () => {
+    const meter = new CostMeter({}, 10);
+    const { impl } = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', cost: '0.6', service_output: { imgUrl: 'u' } } }]);
+    await new KexiangTaskClient('k', impl, noSleep, 1, meter).run({ modelName: 'M', modelType: 't' }, { kind: 'image' });
+    expect(meter.total).toBeCloseTo(0.6);
+    expect(meter.entries[0].label).not.toContain('按预估');
+  });
+
   it('视频任务取 videoUrl', async () => {
     const { impl } = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', service_output: { videoUrl: 'https://x/v.mp4' } } }]);
     const res = await new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'V', modelType: 'text2video' }, { kind: 'video' });
@@ -60,6 +84,65 @@ describe('KexiangTaskClient', () => {
     await expect(new KexiangTaskClient('k', a.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('余额不足');
     const b = fakeFetch([{ body: { msg: '任务超过套餐限制' } }]);
     await expect(new KexiangTaskClient('k', b.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('任务超过套餐限制');
+  });
+
+  it('提交返回 400 且 msg 含「余额不足」时抛 InsufficientBalanceError', async () => {
+    const { impl } = fakeFetch([{ status: 400, body: { msg: '余额不足' } }]);
+    const err = await new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InsufficientBalanceError);
+  });
+
+  it('轮询时返回余额不足也直接抛 InsufficientBalanceError，不当作普通查询失败', async () => {
+    const { impl } = fakeFetch([{ body: { id: 1 } }, { status: 400, body: { msg: '余额不足' } }]);
+    const err = await new KexiangTaskClient('k', impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InsufficientBalanceError);
+  });
+
+  it('缺 cost 时优先按调用方给的 estimateYuan 记账', async () => {
+    const meter = new CostMeter({}, 10);
+    const { impl } = fakeFetch([{ body: { id: 1 } }, { body: { task_status: 'success', service_output: { imgUrl: 'u' } } }]);
+    await new KexiangTaskClient('k', impl, noSleep, 1, meter).run({ modelName: 'M', modelType: 't' }, { kind: 'image', estimateYuan: 0.6 });
+    expect(meter.total).toBeCloseTo(0.6);
+  });
+
+  describe('提交时的网络错误', () => {
+    const netErr = (code: string): TypeError => new TypeError('fetch failed', { cause: Object.assign(new Error(code), { code }) });
+    /** 前 fails 次提交抛 err，之后正常返回任务并成功 */
+    function flaky(fails: number, err: Error) {
+      let submits = 0;
+      const impl = (async (url: string) => {
+        if (url.endsWith('asyncCreateWithCost')) {
+          submits += 1;
+          if (submits <= fails) throw err;
+          return new Response(JSON.stringify({ id: 9 }));
+        }
+        return new Response(JSON.stringify({ task_status: 'success', service_output: { imgUrl: 'u' } }));
+      }) as unknown as typeof fetch;
+      return { impl, submits: () => submits };
+    }
+
+    it('确定没送达（ECONNREFUSED / ENOTFOUND / EAI_AGAIN）时按 2s/5s/10s 退避重试', async () => {
+      for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']) {
+        const f = flaky(3, netErr(code));
+        const sleeps: number[] = [];
+        const res = await new KexiangTaskClient('k', f.impl, async (ms) => { sleeps.push(ms); }, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' });
+        expect(res.taskId).toBe('9');
+        expect(f.submits()).toBe(4);
+        expect(sleeps.filter((ms) => ms > 1)).toEqual([2000, 5000, 10000]);
+      }
+    });
+
+    it('其他网络错误（可能已提交，重试会重复扣费）不重试，直接报错并带原因', async () => {
+      const f = flaky(1, netErr('ECONNRESET'));
+      await expect(new KexiangTaskClient('k', f.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('网络错误 fetch failed（ECONNRESET）');
+      expect(f.submits()).toBe(1);
+    });
+
+    it('没送达的错误一直持续时，重试 3 次后报错', async () => {
+      const f = flaky(99, netErr('ECONNREFUSED'));
+      await expect(new KexiangTaskClient('k', f.impl, noSleep, 1).run({ modelName: 'M', modelType: 't' }, { kind: 'image' })).rejects.toThrow('可想任务请求失败');
+      expect(f.submits()).toBe(4);
+    });
   });
 
   it('提交返回 id 为 null 时视为提交失败', async () => {

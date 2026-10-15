@@ -5,14 +5,19 @@ import { join } from 'node:path';
 import { burnSubtitles } from '../src/captions/burn.js';
 import { toAss } from '../src/captions/ass.js';
 import { loadConfig } from '../src/config.js';
+import { CostMeter } from '../src/cost/meter.js';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
 import type { LlmClient } from '../src/llm/kexiang.js';
 import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import type { ProjectFile, ProjectPatch } from '../src/pipeline/project.js';
 import type { BrollDeps } from '../src/broll/fulfill.js';
-import { brollSummary, makeTaskClient, parseBrollArgs, runBroll } from '../src/pipeline/broll-step.js';
+import { brollSummary, makeTaskClient, parseBrollArgs, parseBudgetArg, runBroll } from '../src/pipeline/broll-step.js';
 import { visualKey } from '../src/broll/fulfill.js';
 import { runPipeline, type ProgressEvent } from '../src/pipeline/run.js';
+import type { QaDeps } from '../src/pipeline/qa-step.js';
+import type { CardQaEntry } from '../src/qa/visual.js';
+import type { HardCheck } from '../src/qa/hard.js';
 import { hasModels, hasRvm } from './helpers/models.js';
 
 describe('burnSubtitles', () => {
@@ -33,6 +38,12 @@ describe('burnSubtitles', () => {
 });
 
 const FAKE_STORYBOARD = { shots: [{ start: 0, end: 2, layout: 'split', card: { template: 'title', props: { title: '测试' } } }], bgm: 'tech', coverTitle: { title: '高性价比', subtitle: '测试封面' } };
+
+/** 假卡片自检：不跑 Remotion 打包，原样返回分镜与一份报告；记录收到的参数 */
+const fakeQa = (report: CardQaEntry[] = []): { deps: QaDeps; seen: { meter?: unknown; storyboard?: unknown }[] } => {
+  const seen: { meter?: unknown; storyboard?: unknown }[] = [];
+  return { seen, deps: { qaCards: async (o) => { seen.push({ meter: o.meter, storyboard: o.storyboard }); return { storyboard: o.storyboard, report }; } } };
+};
 
 describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -63,12 +74,12 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
       if (e.step === 'plan') snapshots.plan = JSON.parse(readFileSync(join(work, 'project.json'), 'utf8')) as ProjectFile;
     };
     const input = join(import.meta.dirname, 'fixtures', 'talk.mp4');
-    const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, onProgress });
+    const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, qaDeps: fakeQa().deps, onProgress });
     const src = await probe(input, cfg);
     const out = await probe(res.output, cfg);
     expect(out.durationSec).toBeLessThan(src.durationSec - 1.0);
     // 渲染进度事件（compose）会连续出现多次，按相邻去重后比较
-    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1])).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'storyboard', 'compose', 'loudness', 'cover', 'done']);
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1])).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
     // 兜底分行按字数换行，「高性价比」可能被拆到相邻两行，所以拼接所有字幕行再断言
     const assText = readFileSync(join(work, 'captions.ass'), 'utf8').split('\n')
       .filter((l) => l.startsWith('Dialogue:')).map((l) => l.split(',').slice(9).join(',')).join('');
@@ -91,6 +102,11 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(Math.abs((project.loudness?.after ?? 0) + 14)).toBeLessThan(1.5);
     expect(existsSync(join(work, 'final.raw.mp4'))).toBe(false);
     expect(events.find((e) => e.step === 'cover')?.message).toContain('封面生成失败');
+    // 成片硬检查用真实实现（只跑 ffmpeg）：7 项，结果落盘，未通过也不影响出片
+    expect(project.qa?.hard.map((c) => c.id)).toEqual(['resolution', 'fps', 'loudness', 'truePeak', 'blackFrames', 'safeArea', 'contrast']);
+    expect(project.qa?.cards).toEqual([]);
+    expect(events.find((e) => e.step === 'qa-final')?.message).toMatch(/^成片检查/);
+    expect(res.qa).toEqual(project.qa);
     expect(project.storyboardDropped).toBe(0);
     expect(project.storyboardDemoted).toBe(0);
     expect(project.storyboardCapped).toBe(0);
@@ -112,30 +128,32 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     const workDir = mkdtempSync(join(tmpdir(), 'mz-fin-'));
     const output = join(workDir, 'out.mp4');
     const llm: LlmClient = { chatJson: async (o) => (o.system.includes('分镜') ? FAKE_STORYBOARD : o.system.includes('剪辑师') ? { cuts: [] } : { lines: [] }) };
-    const covers: { title: string; subtitle?: string; personVideo: string }[] = [];
-    const coverDeps = { makeCovers: async (o: { title: string; subtitle?: string; personVideo: string }) => {
+    const covers: { title: string; subtitle?: string; personVideo: string; meter?: unknown }[] = [];
+    const coverDeps = { makeCovers: async (o: { title: string; subtitle?: string; personVideo: string; meter?: unknown }) => {
       covers.push(o);
       return { cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png'), attempts: 2, costYuan: 1.2, unverified: [], person: true, reused: [] };
     } };
     const events: ProgressEvent[] = [];
     let rawSeen = false;
-    const res = await runPipeline({ input: CLIP, workDir, output, cfg, llm, coverDeps: coverDeps as never, onProgress: (e) => {
+    const res = await runPipeline({ input: CLIP, workDir, output, cfg, llm, coverDeps: coverDeps as never, qaDeps: fakeQa().deps, onProgress: (e) => {
       events.push(e);
       // 响度统一之前最终成片还不存在，渲染结果在 final.raw.mp4
       if (e.step === 'compose' && e.message === '成片渲染完成') rawSeen = existsSync(join(workDir, 'final.raw.mp4')) && !existsSync(output);
     } });
     expect(rawSeen).toBe(true);
     expect(existsSync(join(workDir, 'final.raw.mp4'))).toBe(false);
-    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-4)).toEqual(['compose', 'loudness', 'cover', 'done']);
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-5)).toEqual(['compose', 'loudness', 'qa-final', 'cover', 'done']);
     const notes = events.filter((e) => e.message.includes('pnpm fetch-assets'));
     expect(notes).toHaveLength(2);
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
     expect(project.audio).toMatchObject({ track: null, mood: 'tech' });
     expect(project.loudness?.after).toBeDefined();
     expect(project.captionStyle).toBe('blade');
+    expect(project.costs).toEqual({ total: 0, budget: null, entries: [] }); // 未传 meter：不限预算、无账目
     expect(project.cover).toEqual({ style: 'bauhaus', costYuan: 1.2, unverified: [], reused: [] });
     expect(project.artifacts).toMatchObject({ output, final: output, cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png') });
     expect(covers).toEqual([expect.objectContaining({ title: '高性价比', subtitle: '测试封面', personVideo: join(workDir, 'cut.mp4') })]);
+    expect(covers[0].meter).toBeInstanceOf(CostMeter); // 未传 meter 时封面也用流程内的本地 meter
     expect((await probe(output, cfg)).hasAudio).toBe(true);
   }, 240_000);
 });
@@ -148,13 +166,13 @@ describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR �
     const llm: LlmClient = { chatJson: async (o) => (o.system.includes('分镜') ? FAKE_STORYBOARD : o.system.includes('字幕') ? { lines: ['我平时经常在 GitHub 上面'] } : { cuts: [] }) };
     const steps: string[] = [];
     const events: ProgressEvent[] = [];
-    await runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output, cfg, llm, background: { kind: 'preset', id: 'study' }, onProgress: (e: ProgressEvent) => { if (steps[steps.length - 1] !== e.step) steps.push(e.step); events.push(e); } });
+    await runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output, cfg, llm, background: { kind: 'preset', id: 'study' }, qaDeps: fakeQa().deps, onProgress: (e: ProgressEvent) => { if (steps[steps.length - 1] !== e.step) steps.push(e.step); events.push(e); } });
     // 抠像期间的节流进度（不落盘）也算 matte 步骤，必须出现在 matte 完成消息之前
     const matteMessages = events.filter((e) => e.step === 'matte').map((e) => e.message);
     expect(matteMessages.length).toBeGreaterThan(1);
     expect(matteMessages[0]).toMatch(/抠像 \d+\/\d+ 帧/);
     expect(matteMessages[matteMessages.length - 1]).toContain('抠像换背景完成');
-    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'compose', 'loudness', 'cover', 'done']);
+    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
     const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
     expect(project.background?.spec).toEqual({ kind: 'preset', id: 'study' });
     expect(project.artifacts.person).toBe(join(workDir, 'person.mp4'));
@@ -176,13 +194,68 @@ describe.skipIf(!hasModels())('runPipeline 分镜降级（需要本地模型）'
       },
     };
     const events: ProgressEvent[] = [];
-    const res = await runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output: join(workDir, 'out.mp4'), cfg, llm, onProgress: (e) => events.push(e) });
+    const res = await runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output: join(workDir, 'out.mp4'), cfg, llm, qaDeps: fakeQa().deps, onProgress: (e) => events.push(e) });
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
     expect(project.storyboard?.shots).toEqual([{ start: 0, end: res.plan.outputDurationSec, layout: 'full' }]);
     expect(events.find((e) => e.step === 'storyboard')?.message).toContain('分镜生成失败');
     expect(events.find((e) => e.step === 'storyboard')?.message).toContain('额度不足');
     expect(existsSync(res.output)).toBe(true);
   }, 120_000);
+});
+
+describe.skipIf(!hasModels())('runPipeline 自检步骤（需要本地模型）', () => {
+  const llm: LlmClient = { chatJson: async (o) => (o.system.includes('分镜') ? FAKE_STORYBOARD : o.system.includes('剪辑师') ? { cuts: [] } : { lines: [] }) };
+  const cfg = { ...loadConfig({}), dataDir: mkdtempSync(join(tmpdir(), 'mz-empty-')) };
+  const failing: HardCheck = { id: 'loudness', ok: false, detail: '积分响度 -20.0 LUFS（要求 -14 ± 1）' };
+
+  it('自检改写的分镜用于成片并写进 project.json；未传 meter 时用不限预算的账；硬检查未通过只报告不报错', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-qa-'));
+    const revisedCard = { template: 'title' as const, props: { title: '重写后' } };
+    const report: CardQaEntry[] = [{ shotIndex: 0, scores: [], revised: 1, passed: true }];
+    const rendered: unknown[] = [];
+    const { deps, seen } = fakeQa(report);
+    const qaDeps: QaDeps = {
+      qaCards: async (o) => { await deps.qaCards!(o); return { storyboard: { ...o.storyboard, shots: o.storyboard.shots.map((s) => ({ ...s, card: revisedCard })) }, report }; },
+      hardChecks: async (video) => { rendered.push(existsSync(video)); return [failing, { id: 'fps', ok: true, detail: '30 fps' }]; },
+    };
+    const events: ProgressEvent[] = [];
+    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm, cover: false, qaDeps, onProgress: (e) => events.push(e) });
+    expect(res.storyboard.shots[0].card).toEqual(revisedCard);
+    const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
+    expect(project.storyboard?.shots[0].card).toEqual(revisedCard);
+    expect(project.qa).toEqual({ cards: report, hard: [failing, { id: 'fps', ok: true, detail: '30 fps' }] });
+    expect(res.qa).toEqual(project.qa);
+    expect(seen[0].meter).toMatchObject({ total: 0, budget: Number.POSITIVE_INFINITY });
+    expect(rendered).toEqual([true]);
+    expect(events.find((e) => e.step === 'qa-cards')?.message).toBe('卡片自检 1 张：通过 1、重写 1 次、跳过 0');
+    expect(events.find((e) => e.step === 'qa-final')?.message).toBe('成片检查 1/2 通过，未通过：loudness（积分响度 -20.0 LUFS（要求 -14 ± 1））');
+    expect(events.at(-1)?.step).toBe('done');
+  }, 240_000);
+
+  it('传了 meter 就把同一个 meter 交给卡片自检；硬检查自己出错只报进度，流程照常走完', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-qa-'));
+    const meter = new CostMeter({}, 7);
+    const { deps, seen } = fakeQa();
+    const events: ProgressEvent[] = [];
+    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm, cover: false, meter,
+      qaDeps: { ...deps, hardChecks: async () => { throw new Error('ffmpeg 崩了'); } }, onProgress: (e) => events.push(e) });
+    expect(seen[0].meter).toBe(meter);
+    expect(events.find((e) => e.step === 'qa-final')?.message).toBe('成片检查失败，已跳过（成片不受影响）：ffmpeg 崩了');
+    expect(res.qa.hard).toEqual([]);
+    expect(existsSync(res.output)).toBe(true);
+  }, 240_000);
+
+  it('qa: false 跳过两个自检步骤，project.json 没有 qa', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-qa-'));
+    const qaDeps: QaDeps = { qaCards: async () => { throw new Error('不应自检卡片'); }, hardChecks: async () => { throw new Error('不应检查成片'); } };
+    const events: ProgressEvent[] = [];
+    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm, cover: false, qa: false, qaDeps, onProgress: (e) => events.push(e) });
+    expect(events.map((e) => e.step)).not.toContain('qa-cards');
+    expect(events.map((e) => e.step)).not.toContain('qa-final');
+    const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
+    expect(project.qa).toBeUndefined();
+    expect(res.qa).toEqual({ cards: [], hard: [] });
+  }, 240_000);
 });
 
 describe('runPipeline 背景提前校验', () => {
@@ -206,6 +279,34 @@ describe('runPipeline 背景提前校验', () => {
       input, workDir, output: join(workDir, 'out.mp4'), cfg: loadConfig({}), llm, background: { kind: 'prompt', prompt: '海边' },
     })).rejects.toThrow('MINGZHI_KX_KEY');
     expect(existsSync(join(workDir, 'project.json'))).toBe(false);
+  });
+});
+
+describe('runPipeline 失败时保留花费', () => {
+  it('步骤抛错（输入没有音轨）时 finally 仍把已花费写进 project.json，并保留原错误', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-fail-'));
+    const input = join(workDir, 'silent.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=270x480:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input]);
+    const meter = new CostMeter({}, 10);
+    meter.addTask('M', 0.6, '前序生图');
+    const llm: LlmClient = { chatJson: async () => { throw new Error('不应调用模型'); } };
+    await expect(runPipeline({ input, workDir, output: join(workDir, 'out.mp4'), cfg, llm, meter })).rejects.toThrow('没有音轨');
+    const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
+    expect(project.costs).toMatchObject({ total: 0.6, budget: 10 });
+    expect(project.costs?.entries).toHaveLength(1);
+  });
+});
+
+describe('runPipeline finally 不掩盖原错误', () => {
+  it('收尾写 project.json 失败（路径被目录占用）时，仍抛出步骤里的原始错误', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-fail2-'));
+    mkdirSync(join(workDir, 'project.json')); // 让 finally 里的写盘必然失败
+    const input = join(workDir, 'silent.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=270x480:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input]);
+    const llm: LlmClient = { chatJson: async () => { throw new Error('不应调用模型'); } };
+    await expect(runPipeline({ input, workDir, output: join(workDir, 'out.mp4'), cfg, llm })).rejects.toThrow('没有音轨');
   });
 });
 
@@ -236,9 +337,9 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     const workDir = mkdtempSync(join(tmpdir(), 'mz-br-'));
     const { deps, calls } = fakeBrollDeps(cfg.ffmpeg);
     const events: ProgressEvent[] = [];
-    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps,
+    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps, qaDeps: fakeQa().deps,
       broll: { enabled: true, maxVideos: 1, budgetYuan: 10 }, onProgress: (e) => events.push(e) });
-    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-5)).toEqual(['broll', 'compose', 'loudness', 'cover', 'done']);
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-7)).toEqual(['broll', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
     const brollEvents = events.filter((e) => e.step === 'broll').map((e) => e.message);
     expect(brollEvents[0]).toBe('素材 1/2：生成视频中…');
     expect(brollEvents.at(-1)).toBe('素材 2 个（截图 0 / 生图 1 / 视频 1）· 花费 ¥2.60 · 失败 0 个');
@@ -259,12 +360,41 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     expect(existsSync(res.output)).toBe(true);
   }, 240_000);
 
+  it('B-roll 阶段余额不足：不降级、不逐项重试，runPipeline 拒绝，project.json 仍保留已花费', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-br-'));
+    const meter = new CostMeter({}, 10);
+    meter.addTask('M', 0.6, '前序花费');
+    let attempts = 0;
+    const deps: BrollDeps = { ...fakeBrollDeps(cfg.ffmpeg).deps, video: async () => { attempts += 1; throw new InsufficientBalanceError(); }, image: async () => { attempts += 1; throw new InsufficientBalanceError(); } };
+    await expect(runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps, qaDeps: fakeQa().deps, meter,
+      broll: { enabled: true, maxVideos: 1, budgetYuan: 10 } })).rejects.toBeInstanceOf(InsufficientBalanceError);
+    expect(attempts).toBe(1);
+    const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
+    expect(project.costs).toMatchObject({ total: 0.6, budget: 10 });
+  }, 240_000);
+
+  it('封面预留接线：封面开启时 B-roll 预算检查扣掉 COVER_YUAN，--no-cover 时不扣', async () => {
+    const cfg = loadConfig({});
+    /** 跑到卡片自检就用余额不足错误中止（只关心 B-roll 取了几张图），返回生图次数 */
+    const imagesFetched = async (cover: false | undefined): Promise<number> => {
+      const workDir = mkdtempSync(join(tmpdir(), 'mz-br-'));
+      const { deps, calls } = fakeBrollDeps(cfg.ffmpeg);
+      const stop: QaDeps = { qaCards: async () => { throw new InsufficientBalanceError('测试中止'); } };
+      await expect(runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps, qaDeps: stop, ...(cover === false ? { cover } : {}),
+        meter: new CostMeter({}, 1.4), broll: { enabled: true, maxVideos: 0, budgetYuan: 1.4 } })).rejects.toThrow('测试中止');
+      return calls.image.length;
+    };
+    expect(await imagesFetched(undefined)).toBe(0); // 0.2 + 封面预留 1.25 > 1.4
+    expect(await imagesFetched(false)).toBe(2);
+  }, 240_000);
+
   it('关闭：不调用素材依赖，只靠 visual 的 photo 被去掉并补成全屏，project.json 无 broll', async () => {
     const cfg = loadConfig({});
     const workDir = mkdtempSync(join(tmpdir(), 'mz-br-'));
     const { deps, calls } = fakeBrollDeps(cfg.ffmpeg);
     const events: ProgressEvent[] = [];
-    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps,
+    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps, qaDeps: fakeQa().deps,
       broll: { enabled: false, maxVideos: 1, budgetYuan: 10 }, onProgress: (e) => events.push(e) });
     expect(calls).toEqual({ image: [], video: [] });
     expect(events.find((e) => e.step === 'broll')?.message).toContain('已去掉待取素材的需求');
@@ -288,6 +418,9 @@ describe('B-roll 选项', () => {
   it('parseBrollArgs：默认开启、1 个视频、预算 10 元；支持 --no-broll、--max-videos、--budget 与图库 key；非法值报错', () => {
     expect(parseBrollArgs({})).toEqual({ enabled: true, maxVideos: 1, budgetYuan: 10 });
     expect(parseBrollArgs({ 'no-broll': true, 'max-videos': '0', budget: '3.5' }, 'pk')).toEqual({ enabled: false, maxVideos: 0, budgetYuan: 3.5, pexelsKey: 'pk' });
+    expect(parseBudgetArg(undefined)).toBe(10);
+    expect(parseBudgetArg('3.5')).toBe(3.5);
+    expect(() => parseBudgetArg('-1')).toThrow('--budget');
     for (const bad of ['1.5', '-1', '1e1', '0x10', '', ' 2', 'abc']) expect(() => parseBrollArgs({ 'max-videos': bad })).toThrow('--max-videos');
     for (const bad of ['-1', '1e1', '0x10', '', '.5', '5.', 'abc', 'Infinity']) expect(() => parseBrollArgs({ budget: bad })).toThrow('--budget');
   });

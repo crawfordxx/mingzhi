@@ -10,7 +10,7 @@ const CELL_W = (CONTENT_W - GAP * (COLS - 1)) / COLS;
 const CELL_H = 68;
 const SIDE_GAP = 36;
 const SIDE_MIN_PX = 24;
-const GREEN = THEME.badge['收益'];
+const GREEN = THEME.green;
 /** 数字滚动的开始时间与时长（秒）；音效触发点（src/audio/plan.ts）与之对拍 */
 export const COUNT_START = 0.05;
 export const COUNT_SEC = 0.6;
@@ -49,8 +49,8 @@ const Header: React.FC<{ value: string; unit?: string; label: string; p: number 
 const Cell: React.FC<{ text: string; hot: boolean; p: number }> = ({ text, hot, p }) => (
   <Reveal p={p} dy={16} from={0.94}>
     <div style={{ height: CELL_H, borderRadius: 16, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 8px',
-      background: hot ? '#F2FAF4' : THEME.card, border: hot ? `2.5px solid ${GREEN}` : '2.5px solid transparent', boxShadow: hot ? 'none' : '0 3px 10px rgba(40, 30, 20, 0.05)',
-      color: hot ? GREEN : THEME.ink, fontSize: fitFontSize(text, CELL_W - 22, 25, 17, 2), fontWeight: hot ? 700 : 500, lineHeight: 1.2 }}>
+      background: hot ? THEME.tint.hot : THEME.card, border: hot ? `2.5px solid ${GREEN}` : '2.5px solid transparent', boxShadow: hot ? 'none' : '0 3px 10px rgba(40, 30, 20, 0.05)',
+      color: hot ? THEME.greenText : THEME.ink, fontSize: fitFontSize(text, CELL_W - 22, 25, 17, 2), fontWeight: hot ? 700 : 500, lineHeight: 1.2 }}>
       <span style={clampLines(2)}>{text}</span>
     </div>
   </Reveal>

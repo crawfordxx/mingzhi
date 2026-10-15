@@ -1,4 +1,5 @@
 import { displayWidth } from './lines.js';
+import { CANVAS } from '../storyboard/schema.js';
 
 export interface CaptionStyle {
   name: string;
@@ -15,8 +16,12 @@ export interface CaptionStyle {
   highlight?: string;
 }
 
-/** 字幕可用宽度：1080 画布两侧各留 60 */
-export const CAPTION_MAX_WIDTH = 960;
+/** 字幕左右留白：右侧 960–1080 是平台点赞栏，字幕居中后右缘须 ≤ 960，两侧对称各留 120 */
+export const CAPTION_SIDE_MARGIN = 120;
+/** 字幕可用宽度：1080 画布两侧各留 CAPTION_SIDE_MARGIN（= 840），CaptionLayer 与 qa 安全区检查共用 */
+export const CAPTION_MAX_WIDTH = CANVAS.width - 2 * CAPTION_SIDE_MARGIN;
+/** 全屏镜头的字幕中心 y；分屏镜头的字幕中心压在分界线 CANVAS.seam 上 */
+export const FULL_CAPTION_Y = 1400;
 
 const DEFS = {
   blade: { name: '刀锋', font: 'noto-sans-sc', family: 'Noto Sans SC', size: 58, weight: 900, color: '#FFFFFF', stroke: { width: 10, color: '#000000' } },

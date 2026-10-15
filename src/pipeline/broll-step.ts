@@ -1,5 +1,7 @@
 import type { AppConfig } from '../config.js';
+import type { CostMeter } from '../cost/meter.js';
 import { fulfillVisuals, makeDeps, type BrollAsset, type BrollDeps, type FulfillOptions } from '../broll/fulfill.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import { KexiangTaskClient, type TaskClient } from '../llm/kexiang-task.js';
 import { normalizeStoryboard } from '../storyboard/normalize.js';
 import type { Shot, Storyboard } from '../storyboard/schema.js';
@@ -16,6 +18,10 @@ export interface BrollContext {
   /** 仅供测试注入；缺省时用可想 task 与可想 key 构造真实依赖 */
   brollDeps?: BrollDeps;
   task?: TaskClient;
+  /** 统一记账；缺省时按 broll.budgetYuan 在本步内累计检查 */
+  meter?: CostMeter;
+  /** 给后续步骤（封面）预留的花费，预算检查时一并扣除，缺省 0 */
+  reserveYuan?: number;
   onProgress?: (e: ProgressEvent) => void;
 }
 type Complete = (step: 'broll', message: string, patch?: ProjectPatch) => ProjectFile;
@@ -35,21 +41,26 @@ function parseNonNegative(raw: string | undefined, fallback: number, flag: strin
   return Number(raw);
 }
 
+/** --budget 解析：每条视频的花费上限（元），缺省 10；预算属于整条流程，不归 B-roll */
+export function parseBudgetArg(raw: string | undefined): number {
+  return parseNonNegative(raw, DEFAULT_BUDGET_YUAN, '--budget', false);
+}
+
 /** CLI 参数 → B-roll 选项：默认开启，最多 1 个视频，预算 10 元；pexelsKey 来自配置（MINGZHI_PEXELS_KEY） */
 export function parseBrollArgs(values: { 'no-broll'?: boolean; 'max-videos'?: string; budget?: string }, pexelsKey?: string): BrollOptions {
   return {
     enabled: !values['no-broll'],
     maxVideos: parseNonNegative(values['max-videos'], DEFAULT_MAX_VIDEOS, '--max-videos', true),
-    budgetYuan: parseNonNegative(values.budget, DEFAULT_BUDGET_YUAN, '--budget', false),
+    budgetYuan: parseBudgetArg(values.budget), // 仅在没有 meter 时 B-roll 自己用它检查
     ...(pexelsKey ? { pexelsKey } : {}),
   };
 }
 
 /** 需要可想任务（取素材或一句话生成背景）时构造任务客户端；没配 key 时先给出可操作的提示，而不是构造时才抛通用错误 */
-export function makeTaskClient(cfg: AppConfig, wanted: { background: boolean; broll: BrollOptions }): KexiangTaskClient | undefined {
+export function makeTaskClient(cfg: AppConfig, wanted: { background: boolean; broll: BrollOptions; meter?: CostMeter }): KexiangTaskClient | undefined {
   if (!wanted.background && !wanted.broll.enabled) return undefined;
   if (!cfg.kexiangKey) throw new Error(wanted.broll.enabled ? NEED_TASK : NEED_TASK_BG);
-  return new KexiangTaskClient(cfg.kexiangKey);
+  return new KexiangTaskClient(cfg.kexiangKey, undefined, undefined, undefined, wanted.meter);
 }
 
 /** 开启素材获取却没有任何可用的依赖时，提前报错（避免跑完剪辑才发现） */
@@ -87,7 +98,7 @@ function assetMessage(done: number, total: number, a: BrollAsset | { key: string
 function resolveDeps(ctx: BrollContext, broll: BrollOptions): BrollDeps {
   if (ctx.brollDeps) return ctx.brollDeps;
   if (!ctx.task) throw new Error(NEED_TASK);
-  return makeDeps({ apiKey: ctx.cfg.kexiangKey ?? '', task: ctx.task, cfg: ctx.cfg, pexelsKey: broll.pexelsKey });
+  return makeDeps({ apiKey: ctx.cfg.kexiangKey ?? '', task: ctx.task, cfg: ctx.cfg, pexelsKey: broll.pexelsKey, meter: ctx.meter });
 }
 
 /** 进度回调：onStart / onStatus / onAsset 共用一个计数；视频状态只在变化时才转发 */
@@ -106,13 +117,14 @@ function progressHooks(ctx: BrollContext, total: number): Pick<FulfillOptions, '
 async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: Storyboard, durationSec: number, complete: Complete): Promise<Storyboard> {
   try {
     const res = await fulfillVisuals(storyboard, resolveDeps(ctx, broll), {
-      workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan,
+      workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter, reserveYuan: ctx.reserveYuan,
       ...progressHooks(ctx, visualsOf(storyboard).length),
     });
     complete('broll', brollSummary(res.assets, res.failures.length, res.costYuan),
       { storyboard: res.storyboard, broll: { assets: res.assets, failures: res.failures, costYuan: res.costYuan } });
     return res.storyboard;
   } catch (err) {
+    rethrowIfBalance(err);
     const fallback = withoutBroll(storyboard, durationSec);
     complete('broll', `素材获取失败，已去掉待取素材的需求（图片卡改为全屏人像）：${err instanceof Error ? err.message : String(err)}`, { storyboard: fallback });
     return fallback;

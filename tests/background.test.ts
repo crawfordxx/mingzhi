@@ -7,6 +7,7 @@ import { BG_IMAGE_MODEL, parseBackgroundArgs, resolveBackground, validateBackgro
 import { loadBackgroundRgb } from '../src/background/prepare.js';
 import type { TaskClient, TaskInput } from '../src/llm/kexiang-task.js';
 import { loadConfig } from '../src/config.js';
+import { CostMeter } from '../src/cost/meter.js';
 import { RVM_FILE } from '../src/matting/rvm.js';
 
 describe('presets', () => {
@@ -51,6 +52,18 @@ describe('resolveBackground', () => {
     expect(inputs[0]).toMatchObject({ modelName: BG_IMAGE_MODEL, modelType: 'text2img', size: '2:3', resolution: '1k', quality: 'medium', output_format: 'jpeg' });
     expect(String(inputs[0].prompt)).toContain('海边日落');
     expect(String(inputs[0].prompt)).toContain('no people');
+  });
+  it('一句话生成前检查预算：不足 0.2 时报中文错误，不发起生图', async () => {
+    const calls: TaskInput[] = [];
+    const task: TaskClient = { run: async (input) => { calls.push(input); return { taskId: '1', url: 'u' }; } };
+    const meter = new CostMeter({}, 0.19);
+    await expect(resolveBackground({ kind: 'prompt', prompt: '海边日落' }, dir, task, async () => {}, meter)).rejects.toThrow('预算不足');
+    expect(calls).toEqual([]);
+  });
+  it('一句话生成：预算恰好够 0.2 时照常生图', async () => {
+    const task: TaskClient = { run: async () => ({ taskId: '1', url: 'u' }) };
+    const res = await resolveBackground({ kind: 'prompt', prompt: '海边日落' }, dir, task, async (_u, dest) => writeFileSync(dest, 'img'), new CostMeter({}, 0.2));
+    expect(res.path).toBe(join(dir, 'background.jpg'));
   });
   it('一句话生成但没有任务客户端时报错', async () => {
     await expect(resolveBackground({ kind: 'prompt', prompt: 'x' }, dir)).rejects.toThrow('MINGZHI_KX_KEY');

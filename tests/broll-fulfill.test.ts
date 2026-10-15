@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fulfillVisuals, makeDeps, visualKey, type BrollAsset, type BrollDeps } from '../src/broll/fulfill.js';
 import { loadConfig } from '../src/config.js';
+import { COVER_YUAN } from '../src/cost/estimate.js';
+import { CostMeter } from '../src/cost/meter.js';
+import { FALLBACK_PRICES } from '../src/cost/prices.js';
 import type { Shot, Storyboard, Visual } from '../src/storyboard/schema.js';
 
 const DURATION = 60;
@@ -293,6 +296,90 @@ describe('fulfillVisuals 视频与预算', () => {
     expect(r.costYuan).toBeCloseTo(r.assets.reduce((s, a) => s + (a.cost ?? 0), 0));
     expect(events).toHaveLength(3);
     expect(events.filter((e) => 'failed' in e)).toHaveLength(1);
+  });
+});
+
+describe('fulfillVisuals 统一记账', () => {
+  /** 假依赖像真实任务客户端那样把花费记进 meter（返回的 cost 仅用于展示） */
+  const metered = (meter: CostMeter, videoCost = 2.4) => {
+    const calls = { video: [] as string[], image: [] as string[] };
+    const { deps } = fakeDeps({
+      video: async (p, out) => { calls.video.push(p); touch(out); meter.addTask('video', videoCost, '视频'); return { cost: videoCost }; },
+      image: async (p, out) => { calls.image.push(p); touch(out); meter.addTask('image', 0.2, '生图'); return { cost: 0.2 }; },
+    });
+    return { deps, calls };
+  };
+
+  it('预算以 meter 为准：meter 里前面步骤已花的钱也算，不够时视频退到生图', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 3);
+    meter.addChat('openai/gpt-5.6-sol', { prompt_tokens: 10000, completion_tokens: 5000 }, '前序步骤'); // 0.28 + 0.7 = 0.98
+    const { deps, calls } = metered(meter);
+    const sb = board(hook(0, vid('first video prompt here')), hook(4, vid('second video prompt here')));
+    const r = await fulfillVisuals(sb, deps, opts(workDir(), { meter, budgetYuan: 100 }));
+    expect(calls.video).toEqual([]); // 0.98 + 2.4 > 3，不发起视频
+    expect(calls.image).toHaveLength(2); // 退到生图 0.2 × 2
+    expect(meter.total).toBeCloseTo(1.38);
+    expect(r.failures).toEqual([]);
+  });
+
+  it('meter 剩余预算用尽后不再发起付费请求', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 2.5);
+    const { deps, calls } = metered(meter);
+    const sb = board(hook(0, vid('first video prompt here')), hook(4, vid('second video prompt here')));
+    const r = await fulfillVisuals(sb, deps, opts(workDir(), { meter, budgetYuan: 100 }));
+    expect(calls.video).toHaveLength(1);
+    expect(calls.image).toEqual([]); // 2.4 + 0.2 > 2.5
+    expect(r.failures).toEqual([{ shotIndex: 1, reason: '超出预算' }]);
+  });
+
+  it('costYuan 只用于展示，不会再叠加进 meter（不重复记账）', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 10);
+    const { deps } = metered(meter);
+    const r = await fulfillVisuals(board(photo(0, gen('a jar of coins on a table'))), deps, opts(workDir(), { meter }));
+    expect(r.costYuan).toBeCloseTo(0.2);
+    expect(meter.total).toBeCloseTo(0.2);
+  });
+});
+
+describe('fulfillVisuals 搜索与封面预留', () => {
+  const shotQuery = (): Storyboard => board(browser(0, { source: 'screenshot', query: 'central bank rate decision' }));
+
+  it('联网搜索前检查预算：剩余不足 0.05 时不调用 search，按超出预算跳过', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 1);
+    meter.addChat('openai/gpt-5.6-sol', { prompt_tokens: 10000, completion_tokens: 5000 }, '前序步骤'); // 0.98，剩 0.02
+    const { deps, calls } = fakeDeps();
+    const r = await fulfillVisuals(shotQuery(), deps, opts(workDir(), { meter }));
+    expect(calls.search).toEqual([]);
+    expect(r.failures).toEqual([{ shotIndex: 0, reason: '超出预算' }]);
+  });
+
+  it('预算够搜索时照常搜索并截图', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 1);
+    const { deps, calls } = fakeDeps();
+    const r = await fulfillVisuals(shotQuery(), deps, opts(workDir(), { meter }));
+    expect(calls.search).toEqual(['central bank rate decision']);
+    expect(r.failures).toEqual([]);
+  });
+
+  it('reserveYuan：预算 = 图价 + 预留 − 0.01 时不生图，恰好够时生图', async () => {
+    const sb = board(photo(0, gen('a jar of coins on a table')));
+    const short = fakeDeps();
+    const r1 = await fulfillVisuals(sb, short.deps, opts(workDir(), { meter: new CostMeter(FALLBACK_PRICES, 0.2 + COVER_YUAN - 0.01), reserveYuan: COVER_YUAN }));
+    expect(short.calls.image).toEqual([]);
+    expect(r1.failures).toEqual([{ shotIndex: 0, reason: '超出预算' }]);
+    const enough = fakeDeps();
+    await fulfillVisuals(sb, enough.deps, opts(workDir(), { meter: new CostMeter(FALLBACK_PRICES, 0.2 + COVER_YUAN), reserveYuan: COVER_YUAN }));
+    expect(enough.calls.image).toHaveLength(1);
+  });
+
+  it('没有 meter 时 reserveYuan 同样参与本步预算检查；缺省不预留', async () => {
+    const sb = board(photo(0, gen('a jar of coins on a table')));
+    const a = fakeDeps();
+    await fulfillVisuals(sb, a.deps, opts(workDir(), { budgetYuan: 0.2 + COVER_YUAN - 0.01, reserveYuan: COVER_YUAN }));
+    expect(a.calls.image).toEqual([]);
+    const b = fakeDeps();
+    await fulfillVisuals(sb, b.deps, opts(workDir(), { budgetYuan: 0.2 }));
+    expect(b.calls.image).toHaveLength(1);
   });
 });
 

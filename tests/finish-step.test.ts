@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { downloadedTracks, fontsReady, loadTracks, musicReady, trackPath } from '../src/assets/catalog.js';
 import { loadConfig } from '../src/config.js';
+import { CostMeter } from '../src/cost/meter.js';
+import { FALLBACK_PRICES } from '../src/cost/prices.js';
 import { prepareAudio, validateAudio } from '../src/pipeline/audio-step.js';
 import { parseFinishArgs, runCover, runLoudness, validateStyles } from '../src/pipeline/finish-step.js';
 import type { ProjectFile, ProjectPatch } from '../src/pipeline/project.js';
@@ -129,6 +131,28 @@ describe('runCover', () => {
     expect(events[0].message).toContain('封面生成失败');
     expect(events[0].message).toContain('MINGZHI_KX_KEY');
     expect(events[0].patch).toBeUndefined();
+  });
+
+  it('预算不够封面（剩余 < ¥1.25）：不调用封面实现，降级为一条「预算不足」提示', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 2);
+    meter.addTask('image', 1, '前序');
+    const makeCovers = vi.fn();
+    const { events, complete } = record();
+    await runCover({ ...ctx, meter, coverDeps: { makeCovers: makeCovers as never } }, undefined, sb, caps, 'x', complete);
+    expect(makeCovers).not.toHaveBeenCalled();
+    expect(events).toHaveLength(1);
+    expect(events[0].message).toContain('预算不足，已跳过封面');
+    expect(events[0].message).toContain('剩余 ¥1.00');
+  });
+
+  it('预算刚好够封面（¥1.25）时照常生成', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 1.25);
+    const makeCovers = vi.fn(async () => ({ cover34: 'a', cover43: 'b', attempts: 2, costYuan: 1.2, unverified: [], person: true, reused: [] }));
+    const { events, complete } = record();
+    await runCover({ ...ctx, meter, coverDeps: { makeCovers: makeCovers as never } }, undefined, sb, caps, 'x', complete);
+    expect(makeCovers).toHaveBeenCalledTimes(1);
+    expect(makeCovers).toHaveBeenCalledWith(expect.objectContaining({ meter })); // 生图前逐次查预算要用它
+    expect(events.at(-1)?.message).toContain('封面已生成');
   });
 
   it('生成失败：降级并写明原因；成功：用分镜给的标题，记录两张封面路径', async () => {

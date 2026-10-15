@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { COVER_YUAN } from '../cost/estimate.js';
+import { CostMeter } from '../cost/meter.js';
 import type { Transcript } from '../asr/types.js';
 import { transcribeWav } from '../asr/local-asr.js';
 import { toAss } from '../captions/ass.js';
@@ -11,6 +13,7 @@ import { resolveBackground, validateBackground, type BackgroundSpec } from '../b
 import { detectCuts, type Cut } from '../cut/llm-cuts.js';
 import { buildEditPlan, cutsToRanges, type EditPlan } from '../cut/plan.js';
 import { renderCut } from '../cut/render-cut.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
 import { renderTalk } from '../compose/render.js';
@@ -26,8 +29,10 @@ import { prepareAudio, validateAudio, type AudioOptions } from './audio-step.js'
 import { runCover, runLoudness, validateStyles, type CoverDeps, type CoverOptions } from './finish-step.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
+import type { CardQaEntry } from '../qa/visual.js';
+import { runQaCards, runQaFinal, type PipelineQa, type QaDeps } from './qa-step.js';
 
-export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose' | 'loudness' | 'cover' | 'done';
+export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'qa-cards' | 'compose' | 'loudness' | 'qa-final' | 'cover' | 'done';
 export interface ProgressEvent { step: PipelineStep; message: string }
 export interface PipelineArgs {
   input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; broll?: BrollOptions; brollDeps?: BrollDeps;
@@ -39,9 +44,15 @@ export interface PipelineArgs {
   cover?: CoverOptions;
   /** 仅供测试注入的封面实现 */
   coverDeps?: CoverDeps;
+  /** 统一记账（预算以它为准）；缺省时不限预算，B-roll 仍按 broll.budgetYuan 在本步内检查 */
+  meter?: CostMeter;
+  /** 卡片视觉自检与成片硬检查；缺省 true，false 跳过两个自检步骤 */
+  qa?: boolean;
+  /** 仅供测试注入的自检实现 */
+  qaDeps?: QaDeps;
   onProgress?: (e: ProgressEvent) => void;
 }
-export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard }
+export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard; qa: PipelineQa }
 
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
 type Complete = (step: PipelineStep, message: string, patch?: ProjectPatch) => ProjectFile;
@@ -54,6 +65,12 @@ const fmtSec = (s: number): string => {
   const total = Math.round(s);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
+
+/** 给封面预留的花费：封面开启才预留，B-roll 与卡片自检的预算检查都要扣掉它 */
+const coverReserve = (args: PipelineArgs): number => (args.cover === false ? 0 : COVER_YUAN);
+
+/** 当前账目快照写进 project.json；预算不限时 budget 为 null（JSON 里没有 Infinity） */
+const costsOf = (meter: CostMeter): NonNullable<ProjectFile['costs']> => ({ total: meter.total, budget: Number.isFinite(meter.budget) ? meter.budget : null, entries: [...meter.entries] });
 
 /** 探测 → 抽音频 → 识别 → 剪口误 → 剪辑方案 */
 async function analyze(args: PipelineArgs, complete: Complete): Promise<Analysis> {
@@ -96,7 +113,7 @@ export function throttledMatteProgress(emit: (e: ProgressEvent) => void): (done:
 /** 换背景：落地背景图 → 抠像合成到 person.mp4；返回之后要烧字幕的视频 */
 async function replaceBackground(args: PipelineArgs, cut: string, complete: Complete): Promise<string> {
   if (!args.background) return cut;
-  const bg = await resolveBackground(args.background, args.workDir, args.task);
+  const bg = await resolveBackground(args.background, args.workDir, args.task, undefined, args.meter);
   complete('background', `背景：${describeBackground(bg.spec)}`, { background: { spec: bg.spec, path: bg.path } });
   const person = join(args.workDir, 'person.mp4');
   const started = Date.now();
@@ -128,6 +145,7 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   try {
     res = await generateStoryboard(llm, captions, durationSec, []);
   } catch (err) {
+    rethrowIfBalance(err); // 余额不足降级也没用：后面的付费步骤同样会失败
     const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }], bgm: DEFAULT_MOOD };
     complete('storyboard', `分镜生成失败，改为全程人像：${err instanceof Error ? err.message : String(err)}`, { storyboard });
     return storyboard;
@@ -159,7 +177,7 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
 
   if (relative(workDir, base).startsWith('..')) throw new Error(`人像视频必须在工作目录内：${base}`);
   const planned = await planStoryboard(llm, captions, a.plan.outputDurationSec, complete);
-  const storyboard = await runBroll(args, planned, a.plan.outputDurationSec, complete);
+  const storyboard = await runBroll({ ...args, reserveYuan: coverReserve(args) }, planned, a.plan.outputDurationSec, complete);
   return { captions, storyboard, base, subject: project.subject ?? null };
 }
 
@@ -183,7 +201,11 @@ async function compose(args: PipelineArgs, a: Analysis, p: Produced, complete: C
   await runLoudness(cfg, raw, args.output, complete);
 }
 
-/** 全流程；每步完成后增量写 project.json 并回调一次，供 P5 剪辑直播使用 */
+/**
+ * 全流程；每步完成后增量写 project.json 并回调一次，供 P5 剪辑直播使用。
+ * 注意：剪口误、字幕校对、分镜这三步有意不查预算（没有它们出不了片，且花费很小），预估里会单独提示它们是否已超上限。
+ * 重跑同一工作目录会重新付费：只有 B-roll 素材与封面底图有磁盘缓存，其余 AI 步骤每次都重新调用。
+ */
 export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   if (args.background) validateBackground(args.background, args.cfg, args.task);
   validateBroll(args.broll, args.brollDeps, args.task);
@@ -193,15 +215,35 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   mkdirSync(dirname(args.output), { recursive: true });
   const projectPath = join(args.workDir, 'project.json');
   const record = projectRecorder(projectPath, args.input);
+  const meter = args.meter ?? new CostMeter({}, Number.POSITIVE_INFINITY);
   const complete: Complete = (step, message, patch = {}) => {
-    const project = record(patch);
+    const project = record({ ...patch, costs: costsOf(meter) });
     args.onProgress?.({ step, message });
     return project;
   };
+  try {
+    return await runSteps(args, projectPath, complete, meter);
+  } finally {
+    // 无论成败都把最新账目落盘：失败时钱已经花了；写盘失败不能盖掉原错误
+    try { record({ costs: costsOf(meter) }); } catch { /* 忽略：保留 try 块里的原始错误 */ }
+  }
+}
+
+/** 卡片自检（可跳过）：返回改写后的制作结果与报告 */
+async function qaCardsStep(args: PipelineArgs, meter: CostMeter, p: Produced, complete: Complete): Promise<{ produced: Produced; cards: CardQaEntry[] }> {
+  if (args.qa === false) return { produced: p, cards: [] };
+  const ctx = { llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), qaCards: args.qaDeps?.qaCards, onProgress: (message: string) => args.onProgress?.({ step: 'qa-cards', message }) };
+  const res = await runQaCards(ctx, p.storyboard, p.captions, complete);
+  return { produced: { ...p, storyboard: res.storyboard }, cards: res.report };
+}
+
+/** 分析 → 制作 → 卡片自检 → 成片 → 成片检查 → 封面 */
+async function runSteps(args: PipelineArgs, projectPath: string, complete: Complete, meter: CostMeter): Promise<PipelineResult> {
   const analysis = await analyze(args, complete);
-  const produced = await produce(args, analysis, complete);
+  const { produced, cards } = await qaCardsStep(args, meter, await produce(args, analysis, complete), complete);
   await compose(args, analysis, produced, complete);
-  await runCover({ workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
+  const hard = args.qa === false ? [] : await runQaFinal({ cfg: args.cfg, hardChecks: args.qaDeps?.hardChecks }, args.output, produced.storyboard, cards, complete);
+  await runCover({ workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
   complete('done', args.output);
-  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: produced.captions, storyboard: produced.storyboard };
+  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: produced.captions, storyboard: produced.storyboard, qa: { cards, hard } };
 }

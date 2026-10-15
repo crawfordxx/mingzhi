@@ -1,5 +1,6 @@
 import React from 'react';
 import { Img, interpolate, staticFile, useVideoConfig } from 'remotion';
+import { THEME } from '../theme.js';
 import { CONTENT_W, CardFrame, Reveal, SafeArea, clampLines, easeAt, fitFontSize, springAt, type TemplateProps } from './parts.js';
 
 const WIN_H = 640;
@@ -26,9 +27,9 @@ const LockIcon: React.FC = () => (
 /** 地址栏胶囊 + 下方蓝色进度条（progress 0→1，done 后淡出） */
 const AddressBar: React.FC<{ url: string; progress: number; fade: number }> = ({ url, progress, fade }) => (
   <div style={{ padding: `24px ${PAD_X}px 0` }}>
-    <div style={{ height: URL_H, borderRadius: URL_H / 2, background: '#EEF1F0', display: 'flex', alignItems: 'center', gap: 14, padding: '0 28px' }}>
+    <div style={{ height: URL_H, borderRadius: URL_H / 2, background: THEME.url.bg, display: 'flex', alignItems: 'center', gap: 14, padding: '0 28px' }}>
       <LockIcon />
-      <div style={{ fontSize: fitFontSize(url, BAR_W - 100, 29, 20), fontWeight: 500, color: '#2E3330', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{url}</div>
+      <div style={{ fontSize: fitFontSize(url, BAR_W - 100, 29, 20), fontWeight: 500, color: THEME.url.fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{url}</div>
     </div>
     <div style={{ marginTop: 16, height: 6, borderRadius: 3, background: BLUE_TRACK, opacity: 1 - fade, overflow: 'hidden' }}>
       <div style={{ width: `${progress * 100}%`, height: '100%', borderRadius: 3, background: BLUE }} />
@@ -47,7 +48,7 @@ const Loading: React.FC<{ title?: string; local: number }> = ({ title, local }) 
       <circle cx={26} cy={26} r={21} fill="none" stroke={BLUE} strokeWidth={4.5} strokeLinecap="round" strokeDasharray="92 200" />
     </svg>
     {title ? <div style={{ maxWidth: BAR_W - 80, textAlign: 'center', fontSize: fitFontSize(title, BAR_W - 80, 36, 26, 2), fontWeight: 700, lineHeight: 1.35, ...clampLines(2) }}>{title}</div> : null}
-    <div style={{ fontSize: 28, fontWeight: 500, color: '#8A8C8A', letterSpacing: '0.04em' }}>正在加载…</div>
+    <div style={{ fontSize: 28, fontWeight: 500, color: THEME.hint, letterSpacing: '0.04em' }}>正在加载…</div>
   </div>
 );
 

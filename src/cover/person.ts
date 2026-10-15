@@ -1,4 +1,5 @@
 import type { AppConfig } from '../config.js';
+import { rethrowIfBalance } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { runBuffer } from '../media/exec.js';
 import { probe } from '../media/probe.js';
@@ -35,10 +36,11 @@ export async function pickPersonFrame(video: string, cfg: AppConfig, client: Llm
   const user = `这张图是同一段口播视频按时间顺序均匀抽取的 ${times.length} 帧，按从左到右、从上到下排列，编号 1–${times.length}。`
     + '请选出最适合做封面人物的一帧：眼睛睁开、表情自然、口型不夸张、没有动作模糊。只输出 JSON：{"index": 编号}';
   try {
-    const res = await client.chatJson({ model: FRAME_PICK_MODEL, system: SYSTEM, user, images: [grid], reasoningEffort: 'low' });
+    const res = await client.chatJson({ model: FRAME_PICK_MODEL, system: SYSTEM, user, images: [grid], reasoningEffort: 'low', label: '封面选帧' });
     const index = Number((res as { index?: unknown } | null)?.index);
     if (Number.isInteger(index) && index >= 1 && index <= times.length) return times[index - 1];
-  } catch {
+  } catch (err) {
+    rethrowIfBalance(err);
     // 选帧只是锦上添花：模型不可用时用兜底帧，不中断出封面
   }
   return durationSec / 3;

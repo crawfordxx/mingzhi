@@ -1,6 +1,8 @@
 import { existsSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { BG_PROMPT_YUAN } from '../cost/estimate.js';
+import type { CostMeter } from '../cost/meter.js';
 import { downloadTo, type TaskClient } from '../llm/kexiang-task.js';
 import { RVM_FILE, rvmReady } from '../matting/rvm.js';
 import { isPresetId, presetPath, PRESETS } from './presets.js';
@@ -45,16 +47,17 @@ export function validateBackground(spec: BackgroundSpec, cfg: AppConfig, task?: 
 }
 
 /** 背景规格 → 本地图片路径；一句话生成的图下载到 workDir/background.jpg */
-export async function resolveBackground(spec: BackgroundSpec, workDir: string, task?: TaskClient, download: Download = downloadTo): Promise<ResolvedBackground> {
+export async function resolveBackground(spec: BackgroundSpec, workDir: string, task?: TaskClient, download: Download = downloadTo, meter?: CostMeter): Promise<ResolvedBackground> {
   if (spec.kind === 'preset') return { spec, path: presetPath(spec.id) };
   if (spec.kind === 'file') {
     if (!existsSync(spec.path)) throw new Error(`背景图片不存在：${spec.path}`);
     return { spec, path: spec.path };
   }
   if (!task) throw new Error(NEED_KEY_MESSAGE);
+  if (meter && !meter.canSpend(BG_PROMPT_YUAN)) throw new Error(`预算不足，无法生成背景（剩余 ¥${meter.remaining().toFixed(2)}，约需 ¥${BG_PROMPT_YUAN.toFixed(2)}）；请调高 --budget，或改用 --bg 预设/图片`);
   const result = await task.run(
     { modelName: BG_IMAGE_MODEL, modelType: 'text2img', prompt: `${spec.prompt}${BG_SUFFIX}`, size: '2:3', resolution: '1k', quality: 'medium', output_format: 'jpeg' },
-    { kind: 'image' },
+    { kind: 'image', label: '背景生图' },
   );
   const path = join(workDir, 'background.jpg');
   await download(result.url, path);
