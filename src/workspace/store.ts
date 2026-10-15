@@ -44,9 +44,9 @@ export class SpaceStore {
       id: randomUUID().slice(0, 8),
       title,
       createdAt: new Date().toISOString(),
-      inputs: [...inputs],
+      inputs: structuredClone(inputs),
       versions: [],
-      settings: { ...settings },
+      settings: structuredClone(settings),
     };
     mkdirSync(this.baseDir(space.id), { recursive: true });
     this.save(space);
@@ -57,7 +57,7 @@ export class SpaceStore {
     if (!existsSync(this.root)) return [];
     return readdirSync(this.root, { withFileTypes: true })
       .filter((d) => d.isDirectory() && ID_PATTERN.test(d.name) && existsSync(join(this.root, d.name, SPACE_FILE)))
-      .map((d) => this.get(d.name))
+      .flatMap((d) => this.tryGet(d.name))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
@@ -71,18 +71,29 @@ export class SpaceStore {
     }
   }
 
+  /** 列表里遇到损坏的项目只跳过并告警，不让一个坏文件拖垮整个侧栏 */
+  private tryGet(id: string): Space[] {
+    try {
+      return [this.get(id)];
+    } catch (err) {
+      console.warn(`跳过无法读取的项目 ${id}：${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
+  }
+
   baseDir(id: string): string {
     return join(this.projectDir(id), 'base');
   }
 
   versionDir(id: string, n: number): string {
+    if (!Number.isInteger(n) || n < 1) throw new Error(`版本号不合法：${String(n)}`);
     return join(this.projectDir(id), `v${n}`);
   }
 
   addVersion(id: string, meta: Omit<VersionMeta, 'n' | 'createdAt'>): VersionMeta {
     const space = this.get(id);
     const n = space.versions.reduce((max, v) => Math.max(max, v.n), 0) + 1;
-    const version: VersionMeta = { ...meta, n, createdAt: new Date().toISOString() };
+    const version: VersionMeta = { ...structuredClone(meta), n, createdAt: new Date().toISOString() };
     mkdirSync(this.versionDir(id, n), { recursive: true });
     this.save({ ...space, versions: [...space.versions, version] });
     return version;
@@ -92,7 +103,7 @@ export class SpaceStore {
     const space = this.get(id);
     const current = space.versions.find((v) => v.n === n);
     if (!current) throw new Error(`版本不存在：v${n}`);
-    const updated: VersionMeta = { ...current, ...patch, n: current.n, createdAt: current.createdAt };
+    const updated: VersionMeta = { ...current, ...structuredClone(patch), n: current.n, createdAt: current.createdAt };
     this.save({ ...space, versions: space.versions.map((v) => (v.n === n ? updated : v)) });
     return updated;
   }

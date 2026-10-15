@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SpaceStore, type SpaceSettings } from '../src/workspace/store.js';
 
 const SETTINGS: SpaceSettings = { captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 3, background: { kind: 'preset', id: 'warm' } };
@@ -27,11 +27,32 @@ describe('SpaceStore 项目', () => {
   });
 
   it('list 返回全部项目，最新创建的在前，忽略没有 space.json 的目录', () => {
-    const a = store.create('甲', [], SETTINGS);
-    const b = store.create('乙', [], SETTINGS);
-    writeFileSync(join(root, 'stray.txt'), 'x');
-    expect(store.list().map((s) => s.id).sort()).toEqual([a.id, b.id].sort());
-    expect(new SpaceStore(join(root, 'nope')).list()).toEqual([]);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const a = store.create('甲', [], SETTINGS);
+      vi.setSystemTime(new Date('2026-01-02T00:00:00Z'));
+      const b = store.create('乙', [], SETTINGS);
+      writeFileSync(join(root, 'stray.txt'), 'x');
+      expect(store.list().map((s) => s.id)).toEqual([b.id, a.id]);
+      expect(new SpaceStore(join(root, 'nope')).list()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('list 跳过损坏的 space.json 并告警，其他项目照常返回', () => {
+    const good = store.create('好的', [], SETTINGS);
+    const bad = store.create('坏的', [], SETTINGS);
+    writeFileSync(join(root, bad.id, 'space.json'), '{broken');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(store.list().map((s) => s.id)).toEqual([good.id]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain(bad.id);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('get 不存在的项目抛中文错误', () => {
@@ -42,11 +63,14 @@ describe('SpaceStore 项目', () => {
     expect(() => store.get('../etc')).toThrow('项目 id 不合法');
   });
 
-  it('create 不改动传入的 inputs 与 settings', () => {
+  it('create 返回的对象不与调用方传入的 inputs、settings 共享引用', () => {
     const inputs = ['/a.mp4'];
-    const space = store.create('t', inputs, SETTINGS);
+    const settings: SpaceSettings = { ...SETTINGS, background: { kind: 'preset', id: 'warm' } };
+    const space = store.create('t', inputs, settings);
     inputs.push('/z.mp4');
+    (settings.background as { id: string }).id = 'changed';
     expect(space.inputs).toEqual(['/a.mp4']);
+    expect(space.settings.background).toEqual({ kind: 'preset', id: 'warm' });
   });
 
   it('rename 只改标题，其余字段保留', () => {
@@ -108,10 +132,17 @@ describe('SpaceStore 版本', () => {
     expect(store.versionDir(id, 2)).toBe(join(root, id, 'v2'));
     expect(store.versionDir(id, 1)).not.toBe(store.versionDir(id, 2));
   });
+
+  it('versionDir 拒绝非正整数与路径穿越的版本号', () => {
+    const { id } = store.create('t', [], SETTINGS);
+    for (const bad of [0, -1, 1.5, Number.NaN, '../../x' as unknown as number]) {
+      expect(() => store.versionDir(id, bad)).toThrow('版本号不合法');
+    }
+  });
 });
 
-describe('SpaceStore 原子写', () => {
-  it('写完后目录里没有残留临时文件，内容是合法 JSON', () => {
+describe('SpaceStore 写入', () => {
+  it('多次写入后目录里没有残留临时文件，内容是合法 JSON', () => {
     const { id } = store.create('t', [], SETTINGS);
     for (let i = 0; i < 5; i += 1) store.addVersion(id, NEW_VERSION);
     expect(readdirSync(join(root, id)).filter((f) => f.includes('.tmp'))).toEqual([]);
