@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CardSpecSchema, TEMPLATE_IDS } from '../src/storyboard/schema.js';
 import { normalizeStoryboard as normalizeRaw } from '../src/storyboard/normalize.js';
+import { visualsOf } from '../src/storyboard/visuals.js';
 
 /** 时间轴不变量：从 0 开始、首尾相接、无零长镜头、结束于片长 */
 function expectTimeline(shots: { start: number; end: number }[], durationSec: number): void {
@@ -297,5 +298,58 @@ describe('normalizeStoryboard：镜头限长 8 秒', () => {
     const { storyboard, capped } = normalizeStoryboard(raw, 30, []);
     expect(shotRows(storyboard.shots)).toEqual([[0, 8, 'split', 'title'], [8, 30, 'full', null]]);
     expect(capped).toBe(0);
+  });
+});
+
+describe('素材需求 visual', () => {
+  it('photo 可以只带 visual 不带 image；hook 只允许 generate/video；browser 只允许 screenshot', () => {
+    expect(CardSpecSchema.safeParse({ template: 'photo', props: { visual: { source: 'generate', prompt: 'a jar of coins on a wooden table, warm light' } } }).success).toBe(true);
+    expect(CardSpecSchema.safeParse({ template: 'hook', props: { index: 1, total: 1, headline: '钩子', highlight: [], visual: { source: 'screenshot', query: 'x y' } } }).success).toBe(false);
+    expect(CardSpecSchema.safeParse({ template: 'browser', props: { url: 'github.com', visual: { source: 'generate', prompt: 'a browser window mockup' } } }).success).toBe(false);
+    expect(CardSpecSchema.safeParse({ template: 'browser', props: { url: 'github.com', visual: { source: 'screenshot' } } }).success).toBe(false);
+  });
+  it('visual 字段限制：prompt 至少 8 字，截图只收 http(s) 网址，query 2-60 字', () => {
+    const photo = (visual: unknown) => CardSpecSchema.safeParse({ template: 'photo', props: { visual } }).success;
+    expect(photo({ source: 'generate', prompt: 'too short' })).toBe(true);
+    expect(photo({ source: 'generate', prompt: 'short' })).toBe(false);
+    expect(photo({ source: 'screenshot', url: 'file:///etc/passwd' })).toBe(false);
+    expect(photo({ source: 'screenshot', url: 'https://github.com/x' })).toBe(true);
+    expect(photo({ source: 'screenshot', query: 'a' })).toBe(false);
+    expect(photo({ source: 'video', prompt: 'slow push-in on a glass of cola' })).toBe(false);
+  });
+  it('photo 没有可用图片但有 visual 时保留；两者都没有时丢弃', () => {
+    const raw = { shots: [
+      { start: 0, end: 3, layout: 'split', card: { template: 'photo', props: { visual: { source: 'generate', prompt: 'a jar of coins on a wooden table' } } } },
+      { start: 3, end: 6, layout: 'split', card: { template: 'photo', props: { label: '无图' } } },
+    ] };
+    const { storyboard, dropped } = normalizeStoryboard(raw, 6, []);
+    expect(dropped).toBe(1);
+    expect(storyboard.shots[0].card?.template).toBe('photo');
+  });
+  it('photo 的 image/video 不可用但有 visual 时去掉不可用字段保留；video 可用时无 image 也保留', () => {
+    const visual = { source: 'generate', prompt: 'a jar of coins on a wooden table' };
+    const raw = { shots: [
+      { start: 0, end: 3, layout: 'split', card: { template: 'photo', props: { image: 'broll/x.jpg', video: 'broll/x.mp4', visual } } },
+      { start: 3, end: 6, layout: 'split', card: { template: 'photo', props: { video: 'broll/v.mp4' } } },
+      { start: 6, end: 9, layout: 'split', card: { template: 'photo', props: { image: 'broll/x.jpg' } } },
+    ] };
+    const { storyboard, dropped } = normalizeStoryboard(raw, 9, ['broll/v.mp4']);
+    expect(dropped).toBe(1);
+    expect(storyboard.shots[0].card).toEqual({ template: 'photo', props: { visual } });
+    expect(storyboard.shots[1].card).toEqual({ template: 'photo', props: { video: 'broll/v.mp4' } });
+  });
+  it('hook 的 image/video 不可用时去掉，保留 visual', () => {
+    const visual = { source: 'video', prompt: 'slow push-in on a glass of cola with ice' };
+    const raw = { shots: [{ start: 0, end: 4, layout: 'split', card: { template: 'hook', props: { index: 1, total: 1, headline: '钩子', highlight: [], image: 'a.jpg', video: 'a.mp4', visual } } }] };
+    const { storyboard } = normalizeStoryboard(raw, 4, []);
+    expect(storyboard.shots[0].card).toEqual({ template: 'hook', props: { index: 1, total: 1, headline: '钩子', highlight: [], visual } });
+  });
+  it('visualsOf 列出全部素材需求及其镜头下标', () => {
+    const sb = { shots: [
+      { start: 0, end: 3, layout: 'split' as const, card: { template: 'hook' as const, props: { index: 1, total: 1, headline: '钩子', highlight: [], visual: { source: 'video' as const, prompt: 'slow push-in on a glass of cola with ice' } } } },
+      { start: 3, end: 6, layout: 'full' as const },
+      { start: 6, end: 9, layout: 'split' as const, card: { template: 'browser' as const, props: { url: 'github.com/x', visual: { source: 'screenshot' as const, url: 'https://github.com/x' } } } },
+    ] };
+    expect(visualsOf(sb).map((v) => [v.shotIndex, v.template, v.visual.source])).toEqual([[0, 'hook', 'video'], [2, 'browser', 'screenshot']]);
   });
 });

@@ -7,7 +7,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   {
     id: 'hook',
     use: '开头钩子大字卡，一张对应一句最抓人的话',
-    props: 'index（第几张，从 1 起）、total（共几张，1-3）、headline（主标题 ≤60 字）、highlight（高亮词数组，最多 3 个，每个 ≤12 字，必须是 headline 的子串）、kicker（可选，小标题 ≤60 字）、stat（可选，{value ≤24 字, label ≤24 字}）、image（可选，可用图片文件名）',
+    props: 'index（第几张，从 1 起）、total（共几张，1-3）、headline（主标题 ≤60 字）、highlight（高亮词数组，最多 3 个，每个 ≤12 字，必须是 headline 的子串）、kicker（可选，小标题 ≤60 字）、stat（可选，{value ≤24 字, label ≤24 字}）、image（可选，可用图片文件名）、video（可选，可用视频文件名）、visual（可选，需要新素材时写：{source:"generate", prompt}（生图）或 {source:"video", prompt}（生视频），prompt 用英文 8-400 字符；不要写 screenshot）',
   },
   {
     id: 'title',
@@ -52,12 +52,12 @@ export const CATALOG: readonly CatalogEntry[] = [
   {
     id: 'browser',
     use: '展示一个网站或网页，浏览器窗口样式',
-    props: 'url（网址 ≤80 字）、title（可选，≤60 字）、image（可选，网页截图，只能用可用图片文件名）',
+    props: 'url（网址 ≤80 字）、title（可选，≤60 字）、image（可选，网页截图，只能用可用图片文件名）、visual（可选，需要新截图时写：{source:"screenshot", url 或 query}，url 须为 http(s) 网址，query 为搜索词 2-60 字符，二者至少写一个；只能用 screenshot）',
   },
   {
     id: 'photo',
-    use: '展示一张配图（实物、截图、场景）；可用图片为无时禁止使用',
-    props: 'image（必填，只能用可用图片文件名）、label（可选，≤24 字）、sublabel（可选，≤60 字）',
+    use: '展示一张配图（实物、截图、场景）；image、video、visual 至少写一个；可用图片为无时必须写 visual',
+    props: 'image（可选，只能用可用图片文件名）、video（可选，只能用可用视频文件名）、visual（可选，需要新素材时写：{source:"screenshot", url 或 query}（截图，url 须为 http(s) 网址，query 2-60 字符，二者至少写一个）或 {source:"generate", prompt}（生图，prompt 用英文 8-400 字符）；不要写 video）、label（可选，≤24 字）、sublabel（可选，≤60 字）',
   },
   {
     id: 'cta',

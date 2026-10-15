@@ -16,7 +16,7 @@ export const PhotoBackdrop: React.FC<TemplateProps<'photo'>> = ({ props, local }
   const zoom = interpolate(local, [0, ZOOM_SEC], [0, ZOOM], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.inOut(Easing.sin) });
   return (
     <AbsoluteFill style={{ background: '#111111' }}>
-      <Img src={staticFile(props.image)} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', transform: `scale(${1 + zoom})` }} />
+      {props.image ? <Img src={staticFile(props.image)} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', transform: `scale(${1 + zoom})` }} /> : null}
     </AbsoluteFill>
   );
 };

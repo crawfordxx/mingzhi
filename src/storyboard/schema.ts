@@ -17,10 +17,24 @@ const short = z.string().trim().min(1).max(24);
 /** 徽章、标签、选项等短词，最长 12 字 */
 const chip = z.string().trim().min(1).max(12);
 
+/** 素材需求：分镜只写“要什么”，由后续步骤去截图、生图或生视频 */
+const screenshotNeed = z.object({ source: z.literal('screenshot'), url: z.string().trim().url().regex(/^https?:\/\//).optional(), query: z.string().trim().min(2).max(60).optional() });
+const generateNeed = z.object({ source: z.literal('generate'), prompt: z.string().trim().min(8).max(400) });
+const videoNeed = z.object({ source: z.literal('video'), prompt: z.string().trim().min(8).max(400) });
+/** 截图要有网址或搜索词之一（discriminatedUnion 成员不能带 refine，所以放在外层检查） */
+const hasTarget = (v: { source: string; url?: string; query?: string }): boolean => v.source !== 'screenshot' || Boolean(v.url || v.query);
+const TARGET_MSG = '截图需求要有 url 或 query';
+export const VisualSchema = z.discriminatedUnion('source', [screenshotNeed, generateNeed, videoNeed]).refine(hasTarget, TARGET_MSG);
+export type Visual = z.infer<typeof VisualSchema>;
+/** 各模板允许的来源：hook 生图/视频，photo 截图/生图，browser 只截图 */
+const HookVisual = z.discriminatedUnion('source', [generateNeed, videoNeed]);
+const PhotoVisual = z.discriminatedUnion('source', [screenshotNeed, generateNeed]).refine(hasTarget, TARGET_MSG);
+const BrowserVisual = screenshotNeed.refine(hasTarget, TARGET_MSG);
+
 const card = <T extends TemplateId, P extends z.ZodTypeAny>(template: T, props: P) => z.object({ template: z.literal(template), props });
 
 export const CardSpecSchema = z.discriminatedUnion('template', [
-  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(chip).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional() })),
+  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(chip).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional(), video: z.string().optional(), visual: HookVisual.optional() })),
   card('title', z.object({ title: text, subtitle: text.optional(), crumb: short.optional() })),
   card('bigNumber', z.object({ value: z.string().trim().min(1).max(10), unit: short.optional(), label: text, chips: z.array(chip).max(18).optional(), highlight: z.array(chip).max(6).optional() })),
   card('chips', z.object({ groups: z.array(z.object({ label: chip, items: z.array(z.object({ text: chip, mark: z.enum(['yes', 'no', 'maybe']) })).min(1).max(5) })).min(1).max(2) })),
@@ -29,8 +43,8 @@ export const CardSpecSchema = z.discriminatedUnion('template', [
   card('terminal', z.object({ title: short.optional(), lines: z.array(z.string().trim().min(1).max(40)).min(1).max(6) })),
   card('toggles', z.object({ title: short.optional(), rows: z.array(z.object({ label: chip, on: z.boolean() })).min(1).max(4), footnote: text.optional() })),
   card('strikeList', z.object({ title: short.optional(), items: z.array(chip).min(1).max(5) })),
-  card('browser', z.object({ url: z.string().trim().min(1).max(80), title: text.optional(), image: z.string().optional() })),
-  card('photo', z.object({ image: z.string().min(1), label: short.optional(), sublabel: text.optional() })),
+  card('browser', z.object({ url: z.string().trim().min(1).max(80), title: text.optional(), image: z.string().optional(), visual: BrowserVisual.optional() })),
+  card('photo', z.object({ image: z.string().min(1).optional(), video: z.string().min(1).optional(), visual: PhotoVisual.optional(), label: short.optional(), sublabel: text.optional() })),
   card('cta', z.object({ actions: z.array(z.string().trim().min(1).max(6)).min(1).max(3) })),
 ]);
 export type CardSpec = z.infer<typeof CardSpecSchema>;

@@ -2,7 +2,7 @@ import { CANVAS, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, ShotSchema, type C
 
 export interface NormalizeResult {
   storyboard: Storyboard;
-  /** 不可用的镜头：结构不合法、photo 缺图，或被裁切后整体覆盖/超出片长而跳过 */
+  /** 不可用的镜头：结构不合法、photo 既无可用素材也无 visual，或被裁切后整体覆盖/超出片长而跳过 */
   dropped: number;
   /** 因版式规则（hook 超窗或超量、cta 非末尾）或短镜头并入相邻镜头而失去卡片的镜头 */
   demoted: number;
@@ -23,19 +23,30 @@ function omitKey<P extends object, K extends keyof P>(obj: P, key: K): Omit<P, K
   return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key)) as Omit<P, K>;
 }
 
-const imageOk = (image: string | undefined, images: Set<string>): boolean => image === undefined || images.has(image);
+const fileOk = (file: string | undefined, files: Set<string>): boolean => file === undefined || files.has(file);
+/** 去掉不在可用列表里的 image / video */
+const stripUnavailable = <P extends { image?: string; video?: string }>(props: P, files: Set<string>): P => (
+  Object.fromEntries(Object.entries(props).filter(([k, v]) => (k !== 'image' && k !== 'video') || files.has(v as string))) as P
+);
 
-/** 卡片字段清理：图片不可用则去掉（photo 除外，由调用方丢弃镜头）；去掉无效的高亮项 */
-function sanitizeCard(card: CardSpec, images: Set<string>): CardSpec | null {
+/** photo：image/video 有可用的 → 保留；否则有 visual（等待素材）→ 去掉不可用的文件后保留；否则丢弃 */
+function sanitizePhoto(card: Extract<CardSpec, { template: 'photo' }>, files: Set<string>): CardSpec | null {
+  const { image, video, visual } = card.props;
+  const usable = (image !== undefined && files.has(image)) || (video !== undefined && files.has(video));
+  if (!usable && !visual) return null;
+  return { template: 'photo', props: stripUnavailable(card.props, files) };
+}
+
+/** 卡片字段清理：图片/视频不可用则去掉（photo 见 sanitizePhoto，什么都没有则丢弃镜头）；去掉无效的高亮项 */
+function sanitizeCard(card: CardSpec, files: Set<string>): CardSpec | null {
   switch (card.template) {
     case 'photo':
-      return images.has(card.props.image) ? card : null;
+      return sanitizePhoto(card, files);
     case 'browser':
-      return { template: 'browser', props: imageOk(card.props.image, images) ? card.props : omitKey(card.props, 'image') };
+      return { template: 'browser', props: fileOk(card.props.image, files) ? card.props : omitKey(card.props, 'image') };
     case 'hook': {
-      const { headline, highlight, image } = card.props;
-      const kept = { ...card.props, highlight: highlight.filter((h) => headline.includes(h)) };
-      return { template: 'hook', props: imageOk(image, images) ? kept : omitKey(kept, 'image') };
+      const { headline, highlight } = card.props;
+      return { template: 'hook', props: stripUnavailable({ ...card.props, highlight: highlight.filter((h) => headline.includes(h)) }, files) };
     }
     case 'evidenceList': {
       const { highlight, rows } = card.props;
@@ -47,9 +58,9 @@ function sanitizeCard(card: CardSpec, images: Set<string>): CardSpec | null {
 }
 
 /** 无卡片的 split 镜头变为全屏；卡片不可用则返回 null（镜头整体丢弃） */
-function sanitizeShot(shot: Shot, images: Set<string>): Shot | null {
+function sanitizeShot(shot: Shot, files: Set<string>): Shot | null {
   if (!shot.card) return { ...shot, layout: 'full' };
-  const card = sanitizeCard(shot.card, images);
+  const card = sanitizeCard(shot.card, files);
   return card ? { ...shot, card } : null;
 }
 
