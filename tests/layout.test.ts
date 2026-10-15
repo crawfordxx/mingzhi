@@ -17,6 +17,26 @@ describe('personTransform', () => {
     const wide = personTransform('split', { top: 0.9, bottom: 1, left: 0, right: 1 }, 1080, 1350);
     expect(wide.y).toBe(570);
   });
+  it('横屏原片全屏：按高铺满（cover），水平方向以人物中心对齐且不露边', () => {
+    // 1280×720 → scale = 1920/720；人物居中 → x 让人物中心落在画布中线
+    const t = personTransform('full', { top: 0.1, bottom: 1, left: 0.4, right: 0.6 }, 1280, 720);
+    expect(t.scale).toBeCloseTo(1920 / 720);
+    expect(t.y).toBe(0);
+    const w = 1280 * t.scale;
+    expect(t.x).toBe(Math.round(540 - 0.5 * w));
+    // 人物在画面最左：x 夹到 0，不露出右侧底色
+    expect(personTransform('full', { top: 0.1, bottom: 1, left: 0, right: 0.1 }, 1280, 720).x).toBe(0);
+    expect(personTransform('full', { top: 0.1, bottom: 1, left: 0.9, right: 1 }, 1280, 720).x).toBe(Math.round(1080 - w));
+  });
+  it('横屏原片分屏：下半屏（960 高）铺满，不留空', () => {
+    const t = personTransform('split', { top: 0.15, bottom: 1, left: 0.3, right: 0.7 }, 1280, 720);
+    const h = 720 * t.scale;
+    expect(h).toBeGreaterThanOrEqual(960);
+    expect(t.y).toBeLessThanOrEqual(960);
+    expect(t.y + h).toBeGreaterThanOrEqual(1920);
+    expect(t.x).toBeLessThanOrEqual(0);
+    expect(t.x + 1280 * t.scale).toBeGreaterThanOrEqual(1080);
+  });
   it('没有取景框时按头顶在 12% 处估计', () => {
     expect(personTransform('split', null, 1080, 1920).y).toBe(960 + 60 - 0.12 * 1920);
   });
