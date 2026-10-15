@@ -2,6 +2,8 @@ import { copyFile, rm } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { normalizeLoudness } from '../audio/loudness.js';
+import { COVER_YUAN } from '../cost/estimate.js';
+import type { CostMeter } from '../cost/meter.js';
 import type { TimedCaption } from '../captions/lines.js';
 import { CAPTION_STYLES, type CaptionStyleId } from '../captions/styles.js';
 import { COVER_STYLES, DEFAULT_COVER_STYLE, type CoverStyleId } from '../cover/styles.js';
@@ -22,6 +24,8 @@ export interface CoverContext {
   /** 最终成片路径；在工作目录之外时，封面会再复制一份到成片旁边 */
   output?: string;
   cfg: AppConfig; llm: LlmClient; task?: TaskClient; coverDeps?: CoverDeps;
+  /** 统一记账；剩余预算不够生成封面时降级跳过 */
+  meter?: CostMeter;
 }
 type Complete = (step: 'loudness' | 'cover', message: string, patch?: ProjectPatch) => ProjectFile;
 
@@ -77,6 +81,10 @@ async function copyBesideOutput(workDir: string, output: string | undefined, res
 /** 封面步骤：任何失败（无 key、生图失败、抠像失败）都只降级为一条进度消息，绝不让成片失败 */
 export async function runCover(ctx: CoverContext, cover: CoverOptions | undefined, storyboard: Storyboard, captions: TimedCaption[], personVideo: string, complete: Complete): Promise<void> {
   if (cover === false) return;
+  if (ctx.meter && !ctx.meter.canSpend(COVER_YUAN)) {
+    complete('cover', `预算不足，已跳过封面（剩余 ¥${ctx.meter.remaining().toFixed(2)}，封面约需 ¥${COVER_YUAN.toFixed(2)}）`);
+    return;
+  }
   try {
     const { make, task } = resolveCover(ctx);
     const { title, subtitle } = storyboard.coverTitle ?? coverTitle(storyboard, captions);

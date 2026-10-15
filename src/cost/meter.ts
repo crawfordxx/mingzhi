@@ -59,6 +59,11 @@ export class CostMeter {
     return this.total + yuan <= this.budgetYuan + EPSILON;
   }
 
+  /** 预算上限（元）；不限时为 Infinity */
+  get budget(): number {
+    return this.budgetYuan;
+  }
+
   remaining(): number {
     return Math.max(0, this.budgetYuan - this.total);
   }

@@ -133,6 +133,7 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     expect(project.audio).toMatchObject({ track: null, mood: 'tech' });
     expect(project.loudness?.after).toBeDefined();
     expect(project.captionStyle).toBe('blade');
+    expect(project.costs).toEqual({ total: 0, budget: null, entries: [] }); // 未传 meter：不限预算、无账目
     expect(project.cover).toEqual({ style: 'bauhaus', costYuan: 1.2, unverified: [], reused: [] });
     expect(project.artifacts).toMatchObject({ output, final: output, cover34: join(workDir, 'cover-3x4.png'), cover43: join(workDir, 'cover-4x3.png') });
     expect(covers).toEqual([expect.objectContaining({ title: '高性价比', subtitle: '测试封面', personVideo: join(workDir, 'cut.mp4') })]);

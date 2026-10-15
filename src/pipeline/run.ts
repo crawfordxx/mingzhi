@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { CostMeter } from '../cost/meter.js';
 import type { Transcript } from '../asr/types.js';
 import { transcribeWav } from '../asr/local-asr.js';
 import { toAss } from '../captions/ass.js';
@@ -39,6 +40,8 @@ export interface PipelineArgs {
   cover?: CoverOptions;
   /** 仅供测试注入的封面实现 */
   coverDeps?: CoverDeps;
+  /** 统一记账（预算以它为准）；缺省时不限预算，B-roll 仍按 broll.budgetYuan 在本步内检查 */
+  meter?: CostMeter;
   onProgress?: (e: ProgressEvent) => void;
 }
 export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard }
@@ -54,6 +57,9 @@ const fmtSec = (s: number): string => {
   const total = Math.round(s);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
+
+/** 当前账目快照写进 project.json；预算不限时 budget 为 null（JSON 里没有 Infinity） */
+const costsOf = (meter: CostMeter): NonNullable<ProjectFile['costs']> => ({ total: meter.total, budget: Number.isFinite(meter.budget) ? meter.budget : null, entries: [...meter.entries] });
 
 /** 探测 → 抽音频 → 识别 → 剪口误 → 剪辑方案 */
 async function analyze(args: PipelineArgs, complete: Complete): Promise<Analysis> {
@@ -193,15 +199,16 @@ export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   mkdirSync(dirname(args.output), { recursive: true });
   const projectPath = join(args.workDir, 'project.json');
   const record = projectRecorder(projectPath, args.input);
+  const meter = args.meter ?? new CostMeter({}, Number.POSITIVE_INFINITY);
   const complete: Complete = (step, message, patch = {}) => {
-    const project = record(patch);
+    const project = record({ ...patch, costs: costsOf(meter) });
     args.onProgress?.({ step, message });
     return project;
   };
   const analysis = await analyze(args, complete);
   const produced = await produce(args, analysis, complete);
   await compose(args, analysis, produced, complete);
-  await runCover({ workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
+  await runCover({ workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter: args.meter }, args.cover, produced.storyboard, produced.captions, produced.base, complete);
   complete('done', args.output);
   return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: produced.captions, storyboard: produced.storyboard };
 }

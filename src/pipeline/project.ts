@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs';
+import type { CostEntry } from '../cost/meter.js';
 import type { BrollAsset } from '../broll/fulfill.js';
 import type { Transcript } from '../asr/types.js';
 import type { CaptionLine, TimedCaption } from '../captions/lines.js';
@@ -52,6 +53,8 @@ export interface ProjectFile {
   cover?: { style: CoverStyleId; costYuan: number; unverified: CoverAspect[]; reused: CoverAspect[] };
   /** 响度统一（P3c）：处理前后的综合响度（LUFS）；音轨静音无法归一时缺省 */
   loudness?: { before: number; after: number };
+  /** 本次出片的实际花费（P4）：累计、预算上限（不限时为 null）与逐条账目 */
+  costs?: { total: number; budget: number | null; entries: CostEntry[] };
   artifacts: ProjectArtifacts;
 }
 
