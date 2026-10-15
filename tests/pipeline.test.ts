@@ -10,7 +10,7 @@ import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import type { ProjectFile } from '../src/pipeline/project.js';
 import { runPipeline, type ProgressEvent } from '../src/pipeline/run.js';
-import { hasModels } from './helpers/models.js';
+import { hasModels, hasRvm } from './helpers/models.js';
 
 describe('burnSubtitles', () => {
   it('工作目录名含 \' , [ ] = ; 等特殊字符时也能烧录', async () => {
@@ -81,4 +81,23 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(events.find((e) => e.step === 'cuts')?.message).toContain('丢弃 1 条');
     expect(warn).not.toHaveBeenCalled();
   }, 120_000);
+});
+
+describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR 与 RVM 模型）', () => {
+  it('剪切后抠像换背景再烧录字幕；project.json 记录背景、取景框与 person 中间文件；进度含 background、matte', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-p2-'));
+    const output = join(workDir, 'out.mp4');
+    const llm: LlmClient = { chatJson: async (o) => (o.system.includes('字幕') ? { lines: ['我平时经常在 GitHub 上面'] } : { cuts: [] }) };
+    const steps: string[] = [];
+    await runPipeline({ input: 'tests/fixtures/talk.mp4', workDir, output, cfg, llm, background: { kind: 'preset', id: 'study' }, onProgress: (e: ProgressEvent) => steps.push(e.step) });
+    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'burn', 'done']);
+    const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
+    expect(project.background?.spec).toEqual({ kind: 'preset', id: 'study' });
+    expect(project.artifacts.person).toBe(join(workDir, 'person.mp4'));
+    expect(existsSync(join(workDir, 'person.mp4'))).toBe(true);
+    expect('subject' in project).toBe(true);
+    const info = await probe(output, cfg);
+    expect(info.hasAudio).toBe(true);
+  });
 });

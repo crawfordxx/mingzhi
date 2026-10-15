@@ -7,17 +7,21 @@ import { burnSubtitles } from '../captions/burn.js';
 import { toAss } from '../captions/ass.js';
 import { keptIndices, timeCaptions, type TimedCaption } from '../captions/lines.js';
 import { polishCaptions, type PolishResult } from '../captions/polish.js';
+import { PRESETS } from '../background/presets.js';
+import { resolveBackground, type BackgroundSpec } from '../background/resolve.js';
 import { detectCuts, type Cut } from '../cut/llm-cuts.js';
 import { buildEditPlan, cutsToRanges, type EditPlan } from '../cut/plan.js';
 import { renderCut } from '../cut/render-cut.js';
 import type { LlmClient } from '../llm/kexiang.js';
+import type { TaskClient } from '../llm/kexiang-task.js';
+import { matteVideo } from '../matting/rvm.js';
 import { extractWav16k } from '../media/extract-audio.js';
 import { probe, type MediaInfo } from '../media/probe.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
 
-export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'captions' | 'burn' | 'done';
+export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'burn' | 'done';
 export interface ProgressEvent { step: PipelineStep; message: string }
-export interface PipelineArgs { input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; onProgress?: (e: ProgressEvent) => void }
+export interface PipelineArgs { input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; onProgress?: (e: ProgressEvent) => void }
 export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[] }
 
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
@@ -54,12 +58,30 @@ async function analyze(args: PipelineArgs, complete: Complete): Promise<Analysis
   return { media, transcript, cuts, plan };
 }
 
-/** 剪切 → 字幕 → 烧录 */
+/** 背景来源的一句话说明 */
+const describeBackground = (spec: BackgroundSpec): string =>
+  spec.kind === 'preset' ? (PRESETS.find((p) => p.id === spec.id)?.name ?? spec.id) : spec.kind === 'file' ? spec.path : `生成「${spec.prompt}」`;
+
+/** 换背景：落地背景图 → 抠像合成到 person.mp4；返回之后要烧字幕的视频 */
+async function replaceBackground(args: PipelineArgs, cut: string, complete: Complete): Promise<string> {
+  if (!args.background) return cut;
+  const bg = await resolveBackground(args.background, args.workDir, args.task);
+  complete('background', `背景：${describeBackground(bg.spec)}`, { background: { spec: bg.spec, path: bg.path } });
+  const person = join(args.workDir, 'person.mp4');
+  const started = Date.now();
+  const res = await matteVideo({ input: cut, output: person, backgroundPath: bg.path, cfg: args.cfg });
+  const secs = Math.max((Date.now() - started) / 1000, 0.001);
+  complete('matte', `抠像换背景完成 · ${res.frames} 帧 · ${(res.frames / secs).toFixed(1)} 帧/秒`, { subject: res.subject, artifacts: { person } });
+  return person;
+}
+
+/** 剪切 → 换背景 → 字幕 → 烧录 */
 async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Promise<TimedCaption[]> {
   const { input, workDir, output, cfg, llm } = args;
   const cut = join(workDir, 'cut.mp4');
   await renderCut(input, a.plan.keep, cut, cfg);
   complete('render', '剪切完成', { artifacts: { cut } });
+  const base = await replaceBackground(args, cut, complete);
 
   const polished = await polishCaptions(llm, a.transcript.tokens, keptIndices(a.transcript.tokens.length, a.cuts));
   const captions = timeCaptions(polished.lines, a.transcript.tokens, a.plan.keep);
@@ -68,7 +90,7 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
   complete('captions', `${captions.length} 行字幕 · ${polishSummary(polished)}`,
     { captionLines: polished.lines, captionsSource: polished.source, captions, artifacts: { ass } });
 
-  await burnSubtitles(cut, ass, output, cfg);
+  await burnSubtitles(base, ass, output, cfg);
   complete('burn', '字幕已烧录', { artifacts: { output } });
   return captions;
 }
