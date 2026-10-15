@@ -8,6 +8,8 @@ import type { VersionState } from '../src/edit/apply.js';
 import type { ProjectFile } from '../src/pipeline/project.js';
 import { FINAL_FILE, runFirstVersion, runNextVersion } from '../src/workspace/runner.js';
 import { makeFixture, TOKENS, type Fixture } from './helpers/runner-fakes.js';
+import { sameBackground } from '../src/workspace/runner-media.js';
+import type { BackgroundSpec } from '../src/background/resolve.js';
 
 const readJson = <T>(file: string): T => JSON.parse(readFileSync(file, 'utf8')) as T;
 const stateOf = (f: Fixture, n: number): VersionState => readJson(join(f.store.versionDir(f.spaceId, n), 'state.json'));
@@ -41,7 +43,7 @@ describe('runFirstVersion', () => {
     const base = f.store.baseDir(f.spaceId);
     const v1 = f.store.versionDir(f.spaceId, 1);
     expect(meta).toMatchObject({ n: 1, status: 'done', summary: '首个版本' });
-    for (const name of ['analysis.json', 'audio16k.wav', 'cut.mp4', 'matte.mp4', 'matte.json']) expect(existsSync(join(base, name)), name).toBe(true);
+    for (const name of ['analysis.json', 'audio16k.wav', 'cut.mp4', 'fgr.mp4', 'matte.mp4', 'matte.json']) expect(existsSync(join(base, name)), name).toBe(true);
     for (const name of ['state.json', 'project.json', FINAL_FILE, 'person.mp4', 'cover-3x4.png', 'cover-4x3.png', 'events.jsonl']) expect(existsSync(join(v1, name)), name).toBe(true);
     expect(existsSync(join(base, 'segments'))).toBe(true);
     const state = stateOf(f, 1);
@@ -49,9 +51,12 @@ describe('runFirstVersion', () => {
     expect(state.storyboard.shots.length).toBeGreaterThan(1);
     // 首个版本：每个镜头都是新渲染的
     expect(meta.changedShots).toEqual(state.storyboard.shots.map((_, i) => i));
-    expect(f.calls.matte).toEqual([join(base, 'cut.mp4')]);
+    // 抠像对整条原片（不是剪切结果），只出前景与遮罩；人像由合成得到，取帧方案就是 v1 的剪辑方案
+    expect(f.calls.matte).toEqual([f.store.get(f.spaceId).inputs[0]]);
+    expect(f.calls.composite).toEqual([expect.objectContaining({ keep: state.plan.keep, cut: join(v1, 'cut.mp4'), fgr: join(base, 'fgr.mp4'), matte: join(base, 'matte.mp4') })]);
+    expect(readJson<{ of: { keep: unknown }; keep: unknown }>(join(v1, 'person.mp4')).of.keep).toEqual(state.plan.keep);
     expect(f.calls.qaOnly).toEqual([undefined]);
-    expect(f.calls.covers).toEqual(['bauhaus']);
+    expect(f.calls.covers).toEqual([{ style: 'bauhaus', workDir: join(base, 'covers', 'bauhaus') }]);
     expect(f.calls.hard).toEqual([join(v1, FINAL_FILE)]);
     expect(f.calls.llm).toEqual(expect.arrayContaining(['剪口误', '分镜']));
     expect(meta.costYuan).toBeCloseTo(f.calls.llm.length * 0.01 + 1.2); // 每次模型调用 ¥0.01 + 封面
@@ -79,7 +84,7 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     const v2 = f.store.versionDir(f.spaceId, 2);
     expect(meta).toMatchObject({ n: 2, parent: 1, status: 'done', summary: '换字幕样式' });
     expect(f.calls).toMatchObject({ llm: [], renderCut: [], matte: [], composite: [], covers: [], qaOnly: [] });
-    for (const name of ['cut.mp4', 'matte.mp4', 'matte.json', 'person.mp4', 'cover-3x4.png']) expect(inode(join(v2, name)), name).toBe(inode(join(v1, name)));
+    for (const name of ['cut.mp4', 'person.mp4', 'cover-3x4.png']) expect(inode(join(v2, name)), name).toBe(inode(join(v1, name)));
     // 字幕样式影响每一帧：全部镜头重渲
     expect(meta.changedShots).toEqual(stateOf(f, 2).storyboard.shots.map((_, i) => i));
     expect(stateOf(f, 2).settings.captionStyle).toBe('wenkai');
@@ -100,38 +105,42 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     expect(stateOf(f, 2).storyboard.shots[k].card).toEqual({ template: 'title', props: { title: '换过的标题' } });
   });
 
-  it('setBackground 不调用抠像推理：复用遮罩只做合成', async () => {
+  it('setBackground 不调用抠像推理：用 base 的整条图层只做合成', async () => {
     const f = await afterV1();
     const meta = await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'setBackground', spec: { kind: 'preset', id: 'cafe' } } as EditOp], '换背景');
     expect(f.calls.matte).toEqual([]);
     expect(f.calls.composite).toHaveLength(1);
-    expect(f.calls.composite[0]).toMatch(/cafe/);
+    expect(f.calls.composite[0].bg).toMatch(/cafe/);
+    expect(f.calls.composite[0].matte).toBe(join(f.store.baseDir(f.spaceId), 'matte.mp4'));
     expect(f.calls.renderCut).toEqual([]);
     const v2 = f.store.versionDir(f.spaceId, 2);
-    expect(inode(join(v2, 'matte.mp4'))).toBe(inode(join(f.store.baseDir(f.spaceId), 'matte.mp4')));
     expect(readJson<{ bg: string }>(join(v2, 'person.mp4')).bg).toMatch(/cafe/);
     expect(meta.changedShots.length).toBe(stateOf(f, 2).storyboard.shots.length);
     expect(projectOf(f, 2).subject).toEqual({ top: 0.2, bottom: 1, left: 0.2, right: 0.8 });
   });
 
-  it('v1 没有背景时 setBackground 才跑一次抠像推理，并存下遮罩供以后只合成', async () => {
+  it('v1 没有背景时 setBackground 才对整条原片跑一次抠像推理，图层存 base/ 供以后只合成', async () => {
     const f = await afterV1({ background: undefined });
     await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'setBackground', spec: { kind: 'preset', id: 'cafe' } } as EditOp], '加背景');
     expect(f.calls.matte).toHaveLength(1);
-    expect(existsSync(join(f.store.versionDir(f.spaceId, 2), 'matte.mp4'))).toBe(true);
+    expect(existsSync(join(f.store.baseDir(f.spaceId), 'fgr.mp4'))).toBe(true);
     f.reset();
     await runNextVersion(f.ctx, f.spaceId, 2, [{ type: 'setBackground', spec: { kind: 'preset', id: 'study' } } as EditOp], '再换');
     expect(f.calls.matte).toEqual([]);
     expect(f.calls.composite).toHaveLength(1);
   });
 
-  it('removeSpan 重跑剪切到成片：重剪、重新抠像，字幕与分镜平移（不调模型）', async () => {
+  it('removeSpan 重跑剪切到成片：重剪、按新方案从整条图层合成人像（不再跑抠像推理），字幕与分镜平移（不调模型）', async () => {
     const f = await afterV1();
     const before = stateOf(f, 1);
     const meta = await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'removeSpan', fromSec: 1, toSec: 3 }], '删一段');
     const after = stateOf(f, 2);
     expect(f.calls.renderCut).toHaveLength(1);
-    expect(f.calls.matte).toEqual([join(f.store.versionDir(f.spaceId, 2), 'cut.mp4')]);
+    expect(f.calls.matte).toEqual([]);
+    expect(f.calls.composite).toEqual([expect.objectContaining({ keep: after.plan.keep, cut: join(f.store.versionDir(f.spaceId, 2), 'cut.mp4') })]);
+    // 人像的取帧方案与本版剪切是同一个
+    const person = readJson<{ of: { keep: unknown }; keep: unknown }>(join(f.store.versionDir(f.spaceId, 2), 'person.mp4'));
+    expect(person.keep).toEqual(person.of.keep);
     expect(f.calls.llm).toEqual([]);
     expect(after.plan.outputDurationSec).toBeLessThan(before.plan.outputDurationSec - 1.5);
     expect(after.extraCuts.length).toBe(1);
@@ -163,7 +172,7 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     const meta = await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'setCoverStyle', id: 'swiss' } as EditOp], '换封面');
     const v1 = f.store.versionDir(f.spaceId, 1);
     const v2 = f.store.versionDir(f.spaceId, 2);
-    expect(f.calls.covers).toEqual(['swiss']);
+    expect(f.calls.covers.map((c) => c.style)).toEqual(['swiss']);
     expect(f.calls.segments).toEqual([]);
     expect(meta.changedShots).toEqual([]);
     expect(inode(join(v2, FINAL_FILE))).toBe(inode(join(v1, FINAL_FILE)));
@@ -220,6 +229,63 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     expect(f.calls).toMatchObject({ segments: [], covers: [], matte: [], composite: [] });
     expect(stateOf(f, 2)).toEqual(stateOf(f, 1));
     expect(meta.qaScore).toBeCloseTo(8.5);
+  });
+});
+
+describe('修复轮 1 补充', () => {
+  it('回退后再换背景：以 v1 为父时用 v1 的剪切与剪辑方案合成，不用较新版本的', async () => {
+    const f = await afterV1();
+    await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'removeSpan', fromSec: 1, toSec: 3 }], '删一段');
+    f.reset();
+    await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'setBackground', spec: { kind: 'preset', id: 'cafe' } } as EditOp], '回到 v1 换背景');
+    const v1 = f.store.versionDir(f.spaceId, 1);
+    const v3 = f.store.versionDir(f.spaceId, 3);
+    expect(f.calls.matte).toEqual([]);
+    expect(f.calls.composite).toEqual([expect.objectContaining({ keep: stateOf(f, 1).plan.keep, cut: join(v3, 'cut.mp4') })]);
+    expect(inode(join(v3, 'cut.mp4'))).toBe(inode(join(v1, 'cut.mp4')));
+    const person = readJson<{ of: { keep: unknown }; keep: unknown }>(join(v3, 'person.mp4'));
+    expect(person.of.keep).toEqual(stateOf(f, 1).plan.keep);
+    expect(person.keep).toEqual(person.of.keep);
+  });
+
+  it('已有出片版本时不能再跑首个版本（不覆盖共享的分析结果）；父版本未置 done 时不能在它上面修改', async () => {
+    const f = await afterV1();
+    const analysis = readFileSync(join(f.store.baseDir(f.spaceId), 'analysis.json'), 'utf8');
+    await expect(runFirstVersion(f.ctx, f.spaceId)).rejects.toThrow('项目已有出片版本');
+    expect(f.store.get(f.spaceId).versions).toHaveLength(1);
+    expect(readFileSync(join(f.store.baseDir(f.spaceId), 'analysis.json'), 'utf8')).toBe(analysis);
+    f.store.updateVersion(f.spaceId, 1, { status: 'running' }); // 模拟写完 state.json 后、置 done 前进程被杀
+    await expect(runNextVersion(f.ctx, f.spaceId, 1, [], '回退')).rejects.toThrow('v1 还没有完成');
+  });
+
+  it('素材名额先给没改动的卡片：父版本已用掉视频名额时，新加在前面的视频卡退为生图，旧视频卡保留', async () => {
+    const f = await afterV1();
+    const hook = (prompt: string, i: number) => ({ type: 'replaceCard', shotIndex: i, card: { template: 'hook', props: { index: 1, total: 1, headline: '钱要放在取得到的地方', highlight: ['取得到'], visual: { source: 'video', prompt } } } }) as EditOp;
+    const later = splitShots(stateOf(f, 1))[1];
+    await runNextVersion(f.ctx, f.spaceId, 1, [hook('old clip of coins on a table', later)], '后面加视频');
+    expect(f.calls.videos).toEqual(['old clip of coins on a table']);
+    f.reset();
+    await runNextVersion(f.ctx, f.spaceId, 2, [hook('new clip of a piggy bank', 0)], '前面再加视频');
+    expect(f.calls.videos).toEqual([]);
+    expect(f.calls.images).toEqual(['new clip of a piggy bank']);
+    const cards = stateOf(f, 3).storyboard.shots.flatMap((sh) => (sh.card?.template === 'hook' ? [sh.card.props as { video?: string; visual?: { prompt: string } }] : []));
+    expect(cards.find((c) => c.visual?.prompt === 'old clip of coins on a table')?.video).toMatch(/\.mp4$/);
+  });
+
+  it('换回用过的封面风格：在 base/covers/<风格> 里生成，命中已付费的底图缓存', async () => {
+    const f = await afterV1();
+    await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'setCoverStyle', id: 'swiss' } as EditOp], 'swiss');
+    await runNextVersion(f.ctx, f.spaceId, 2, [{ type: 'setCoverStyle', id: 'bauhaus' } as EditOp], '换回');
+    const covers = join(f.store.baseDir(f.spaceId), 'covers');
+    expect(f.calls.covers).toEqual([{ style: 'swiss', workDir: join(covers, 'swiss') }, { style: 'bauhaus', workDir: join(covers, 'bauhaus') }]);
+    expect(readFileSync(join(f.store.versionDir(f.spaceId, 2), 'cover-3x4.png'), 'utf8')).toBe('3x4 swiss');
+  });
+
+  it('sameBackground 按字段比较，不受键顺序影响', () => {
+    expect(sameBackground({ kind: 'prompt', prompt: '海边' }, JSON.parse('{"prompt":"海边","kind":"prompt"}') as BackgroundSpec)).toBe(true);
+    expect(sameBackground({ kind: 'preset', id: 'cafe' }, { kind: 'preset', id: 'study' })).toBe(false);
+    expect(sameBackground(undefined, undefined)).toBe(true);
+    expect(sameBackground({ kind: 'preset', id: 'cafe' }, undefined)).toBe(false);
   });
 });
 

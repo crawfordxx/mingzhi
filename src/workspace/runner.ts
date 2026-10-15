@@ -107,8 +107,12 @@ async function runVersion(ctx: RunnerCtx, spaceId: string, meta: { parent?: numb
   }
 }
 
-/** 首个版本：跑完整流程；探测、识别、剪口误、cut.mp4、抠像遮罩写 base/，其余写 v<n>/ */
-export function runFirstVersion(ctx: RunnerCtx, spaceId: string): Promise<VersionMeta> {
+/**
+ * 首个版本：跑完整流程；探测、识别、剪口误、cut.mp4、整条抠像图层写 base/，其余写 v<n>/。
+ * 项目已有出片版本时拒绝：base/ 里的分析结果被所有版本共用，重跑会换掉它（剪口误结果不确定），旧版本再改剪辑就会错位。
+ */
+export async function runFirstVersion(ctx: RunnerCtx, spaceId: string): Promise<VersionMeta> {
+  if (ctx.store.get(spaceId).versions.some((v) => v.status === 'done')) throw new Error('项目已有出片版本，不能重新跑首个版本；请在已有版本上修改');
   return runVersion(ctx, spaceId, { summary: '首个版本' }, produceFirst);
 }
 

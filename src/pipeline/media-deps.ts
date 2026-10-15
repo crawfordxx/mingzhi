@@ -2,7 +2,7 @@ import { transcribeWav } from '../asr/local-asr.js';
 import { normalizeLoudness } from '../audio/loudness.js';
 import type { SegmentBackend } from '../compose/segments.js';
 import { renderCut } from '../cut/render-cut.js';
-import { compositeMatte } from '../matting/composite-matte.js';
+import { compositeCut } from '../matting/composite-matte.js';
 import { matteVideo } from '../matting/rvm.js';
 import { extractWav16k } from '../media/extract-audio.js';
 import { probe } from '../media/probe.js';
@@ -14,14 +14,15 @@ export interface MediaDeps {
   transcribe: typeof transcribeWav;
   renderCut: typeof renderCut;
   matte: typeof matteVideo;
-  composite: typeof compositeMatte;
+  /** 整条前景 + 遮罩按剪辑方案取帧后合成到背景 */
+  composite: typeof compositeCut;
   /** 分段渲染的打包、渲染与拼接；缺省为真实 Remotion + ffmpeg */
   segments?: SegmentBackend;
   loudness: typeof normalizeLoudness;
 }
 
 const REAL_MEDIA: MediaDeps = {
-  probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut, matte: matteVideo, composite: compositeMatte, loudness: normalizeLoudness,
+  probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut, matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness,
 };
 
 /** 注入的实现覆盖真实实现 */

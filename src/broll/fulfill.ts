@@ -42,6 +42,8 @@ export interface FulfillOptions {
   onStatus?: (status: string) => void;
   /** 取消信号：每个素材开始前检查，取消时抛 CancelledError */
   signal?: AbortSignal;
+  /** 这些镜头的素材需求排到最后处理（工作台修改版本：先让没改动的卡片用上已付费的缓存，视频名额不被新卡片抢走） */
+  deferShots?: number[];
 }
 /** failures[].shotIndex 指输入分镜（传入 fulfillVisuals 的 storyboard）的镜头下标；归一化可能合并或丢弃镜头，返回的 storyboard 下标可能不同 */
 export interface FulfillResult { storyboard: Storyboard; assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number }
@@ -249,7 +251,9 @@ export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, op
   let assets: BrollAsset[] = [];
   let failures: FulfillResult['failures'] = [];
   let videoRequests = 0;
-  for (const need of visualsOf(storyboard)) {
+  const deferred = (n: VisualNeed): boolean => opts.deferShots?.includes(n.shotIndex) ?? false;
+  const needs = visualsOf(storyboard);
+  for (const need of [...needs.filter((n) => !deferred(n)), ...needs.filter(deferred)]) {
     throwIfCancelled(opts.signal);
     const key = visualKey(need.visual);
     const cached = findCached(env, key, need.visual.source, videoRequests);

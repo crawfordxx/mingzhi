@@ -12,7 +12,9 @@ export const FINAL_FILE = 'final.mp4';
 export const STATE_FILE = 'state.json';
 /** base/ 里与版本无关的分析结果（探测、识别、剪口误），修改版本重建剪辑方案时读它 */
 export const ANALYSIS_FILE = 'analysis.json';
-/** 与 matte.mp4 配套的抠像信息：取景框与人物平均色（换背景合成时重算调色增益） */
+/** base/ 里整条原片的抠像图层：RVM 去溢色前景与灰度遮罩（30fps，与原片逐帧对应） */
+export const LAYER_FILES = ['fgr.mp4', 'matte.mp4'] as const;
+/** 与抠像图层配套的信息：取景框与人物平均色（换背景合成时重算调色增益）；最后写，存在即图层完整 */
 export const MATTE_META = 'matte.json';
 export const COVER_FILES = ['cover-3x4.png', 'cover-4x3.png'] as const;
 

@@ -3,10 +3,11 @@ import { DEFAULT_COVER_STYLE } from '../cover/styles.js';
 import { DEFAULT_PLAN_OPTIONS } from '../cut/plan.js';
 import type { VersionState } from '../edit/apply.js';
 import { validateArgs, type PipelineArgs } from '../pipeline/run.js';
-import { analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, finalQaStage, qaCardsStage, storyboardStage, type Analysis } from '../pipeline/stages.js';
+import { analyzeStage, backgroundStage, captionsStage, composeStage, cutStage, finalQaStage, qaCardsStage, storyboardStage, type Analysis } from '../pipeline/stages.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
 import { ANALYSIS_FILE, FINAL_FILE, linkBroll, linkFile, writeJsonAtomic, type BaseAnalysis } from './runner-files.js';
-import { cutAsPerson, matteInto, pipelineArgs, qaScoreOf, type Person } from './runner-media.js';
+import { makeCover } from './runner-cover.js';
+import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, type Person } from './runner-media.js';
 
 /** 首个版本的初始状态（剪辑参数用默认值，修改都从这里叠加） */
 function initialState(env: VersionEnv): Pick<VersionState, 'settings' | 'coverStyle' | 'bgm' | 'cutOptions' | 'extraCuts' | 'restored'> {
@@ -20,14 +21,14 @@ async function analyze(env: VersionEnv, args: PipelineArgs): Promise<Analysis> {
   return a;
 }
 
-/** 剪切到 base/cut.mp4；有背景时抠像，遮罩存 base/matte.mp4，人像写版本目录 */
+/** 剪切到 base/cut.mp4；有背景时对整条原片抠像（图层存 base/，供以后所有版本只做合成），人像写版本目录 */
 async function makePerson(env: VersionEnv, args: PipelineArgs, a: Analysis): Promise<Person> {
   const cut = join(env.base, 'cut.mp4');
   await cutStage(args, a.plan.keep, cut, env.complete);
   linkFile(cut, join(env.dir, 'cut.mp4'));
   if (!args.background) return cutAsPerson(env, cut);
   const bg = await backgroundStage(args, args.background, env.complete);
-  return matteInto(env, args, cut, bg.path, env.base);
+  return compositePerson(env, args, a.plan.keep, bg.path);
 }
 
 /** 首个版本：分析 → 剪切与抠像 → 字幕 → 分镜与素材 → 卡片自检 → 分段渲染 → 成片检查 → 封面 */
@@ -45,7 +46,7 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const res = await composeStage(args, { person, subject, captions, storyboard, outputDurationSec: a.plan.outputDurationSec, raw: join(env.dir, 'final.raw.mp4'), output: final, cacheDir: join(env.base, 'segments') }, env.complete);
   env.complete('compose', `分段渲染：新渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
   await finalQaStage(args, final, storyboard, cards, env.complete);
-  await coverStage(args, env.meter, storyboard, captions, person, env.complete);
+  await makeCover(env, args, init.coverStyle, storyboard, captions, person);
   const state: VersionState = { ...init, plan: a.plan, captions, storyboard };
   const qaScore = qaScoreOf(cards);
   return { state, changedShots: res.rendered, ...(qaScore !== undefined ? { qaScore } : {}) };

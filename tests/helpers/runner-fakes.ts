@@ -30,8 +30,8 @@ const STORYBOARD = { bgm: 'tech', coverTitle: { title: '怎么存钱', subtitle:
 ] };
 
 export interface Calls {
-  llm: string[]; renderCut: unknown[][]; matte: string[]; composite: string[]; segments: string[]; audio: number;
-  qaOnly: (number[] | undefined)[]; hard: string[]; covers: string[]; images: string[]; videos: string[];
+  llm: string[]; renderCut: unknown[][]; matte: string[]; composite: { bg: string; keep: unknown; cut: string; fgr: string; matte: string }[]; segments: string[]; audio: number;
+  qaOnly: (number[] | undefined)[]; hard: string[]; covers: { style: string; workDir: string }[]; images: string[]; videos: string[];
 }
 
 const json = (file: string): Record<string, unknown> => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
@@ -60,15 +60,16 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
     matte: async (o) => {
       calls.matte.push(o.input);
       const src = json(o.input);
-      writeFileSync(o.output, JSON.stringify({ kind: 'person', of: src, bg: o.backgroundPath, durationSec: src.durationSec }));
+      if (o.output) writeFileSync(o.output, JSON.stringify({ kind: 'person', of: src, bg: o.backgroundPath, durationSec: src.durationSec }));
       if (o.matteOutput) writeFileSync(o.matteOutput, JSON.stringify({ kind: 'matte', of: src }));
-      return { frames: 300, subject: { top: 0.2, bottom: 1, left: 0.2, right: 0.8 }, gains: [1, 1, 1], fps: 30, fgMean: [0.5, 0.4, 0.3] };
+      if (o.fgrOutput) writeFileSync(o.fgrOutput, JSON.stringify({ kind: 'fgr', of: src }));
+      return { frames: 360, subject: { top: 0.2, bottom: 1, left: 0.2, right: 0.8 }, gains: [1, 1, 1], fps: 30, fgMean: [0.5, 0.4, 0.3] };
     },
     composite: async (o) => {
-      calls.composite.push(o.backgroundPath);
+      calls.composite.push({ bg: o.backgroundPath, keep: o.keep, cut: o.cut, fgr: o.fgr, matte: o.matte });
       await hooks.beforeComposite?.();
-      const src = json(o.input);
-      writeFileSync(o.output, JSON.stringify({ kind: 'person', of: src, bg: o.backgroundPath, matte: json(o.matte), durationSec: src.durationSec }));
+      const cut = json(o.cut);
+      writeFileSync(o.output, JSON.stringify({ kind: 'person', of: cut, keep: o.keep, bg: o.backgroundPath, fgr: json(o.fgr), matte: json(o.matte), durationSec: cut.durationSec }));
     },
     segments: {
       withBundle: (_dir, fn) => fn('fake://bundle'),
@@ -92,7 +93,7 @@ const fakeQa = (calls: Calls): QaDeps => ({
 
 const fakeCover = (calls: Calls): CoverDeps => ({
   makeCovers: async (o) => {
-    calls.covers.push(o.style);
+    calls.covers.push({ style: o.style, workDir: o.workDir });
     const cover34 = join(o.workDir, 'cover-3x4.png');
     const cover43 = join(o.workDir, 'cover-4x3.png');
     writeFileSync(cover34, `3x4 ${o.style}`);

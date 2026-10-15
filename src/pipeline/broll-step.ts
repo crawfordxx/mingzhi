@@ -25,6 +25,8 @@ export interface BrollContext {
   reserveYuan?: number;
   /** 取消信号：转给逐条取素材的循环 */
   signal?: AbortSignal;
+  /** 排到最后取素材的镜头（见 FulfillOptions.deferShots） */
+  deferShots?: number[];
   onProgress?: (e: ProgressEvent) => void;
 }
 type Complete = (step: 'broll', message: string, patch?: ProjectPatch) => ProjectFile;
@@ -120,7 +122,7 @@ function progressHooks(ctx: BrollContext, total: number): Pick<FulfillOptions, '
 async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: Storyboard, durationSec: number, complete: Complete): Promise<Storyboard> {
   try {
     const res = await fulfillVisuals(storyboard, resolveDeps(ctx, broll), {
-      workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter, reserveYuan: ctx.reserveYuan, signal: ctx.signal,
+      workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter, reserveYuan: ctx.reserveYuan, signal: ctx.signal, ...(ctx.deferShots ? { deferShots: ctx.deferShots } : {}),
       ...progressHooks(ctx, visualsOf(storyboard).length),
     });
     complete('broll', brollSummary(res.assets, res.failures.length, res.costYuan),

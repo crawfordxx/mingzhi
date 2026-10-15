@@ -1,6 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { existsSync, renameSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import ort from 'onnxruntime-node';
 import type { AppConfig } from '../config.js';
@@ -8,6 +7,7 @@ import { loadBackgroundRgb } from '../background/prepare.js';
 import { probe, type MediaInfo } from '../media/probe.js';
 import { runBuffer } from '../media/exec.js';
 import { rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
+import { closeEncoders, decoder, exited, forEachFrame, killAll, rawInput, reasonOf, rootCause, startEncoder, tmpOf, type Encoder } from './ffmpeg-io.js';
 import { alphaBox, chooseDownsample, colorMatchGains, compositeFrame, foregroundMean, meanRgb, medianBox, type Rgb, type SubjectBox } from './composite.js';
 
 export const RVM_FILE = 'rvm_mobilenetv3_fp32.onnx';
@@ -18,12 +18,15 @@ const SAMPLE_FRAMES = 8;
 const BOX_EVERY = 15;
 const DEFAULT_BLUR = 6;
 
+/** 三路输出可任选：output 换背景成片（需要 backgroundPath）、matteOutput 灰度遮罩、fgrOutput 去溢色前景；都是 30fps、与 input 同尺寸、帧一一对应 */
 export interface MatteOptions {
-  input: string; output: string; backgroundPath: string; cfg: AppConfig; blurSigma?: number; colorMatch?: boolean; onProgress?: (done: number, total: number) => void;
+  input: string; output?: string; backgroundPath?: string; cfg: AppConfig; blurSigma?: number; colorMatch?: boolean; onProgress?: (done: number, total: number) => void;
   /** 取消信号：逐帧检查，取消时抛 CancelledError 并结束子进程 */
   signal?: AbortSignal;
-  /** 同时把 alpha 遮罩存成灰度视频（30fps、与 input 同尺寸）；之后换背景只需合成（见 composite-matte.ts），不必重新推理 */
+  /** alpha 遮罩存成灰度视频；与 fgrOutput 配套后，换背景只需合成（见 composite-matte.ts），不必重新推理 */
   matteOutput?: string;
+  /** RVM 去溢色前景存成 RGB 视频 */
+  fgrOutput?: string;
 }
 /** fgMean：人物平均色（与背景无关，换背景时据此重算增益）；抠不出人或关闭调色时为 null */
 export interface MatteResult { frames: number; subject: SubjectBox | null; gains: Rgb; fps: number; fgMean: Rgb | null }
@@ -72,49 +75,6 @@ class RvmSession {
   }
 }
 
-/** 启动 ffmpeg 解码为 rgb24 原始帧流 */
-function decoder(cfg: AppConfig, input: string, vf: string): ChildProcessWithoutNullStreams {
-  const p = spawn(cfg.ffmpeg, ['-v', 'error', '-nostdin', '-i', input, '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
-  p.stdin.on('error', () => {}); // 解码器不读 stdin，进程提前退出时的 EPIPE 无需处理
-  return p;
-}
-
-/** 进程结束；非 0 退出时带 stderr 报错。返回的 promise 已挂空 catch，不会成为未处理的 rejection */
-function exited(p: ChildProcessWithoutNullStreams, name: string): Promise<void> {
-  let stderr = '';
-  p.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-  const done = new Promise<void>((resolve, reject) => {
-    p.on('error', reject);
-    p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`${name} 失败（退出码 ${code}）：${stderr.slice(-800)}`))));
-  });
-  done.catch(() => {});
-  return done;
-}
-
-const killAll = (...ps: ChildProcessWithoutNullStreams[]): void => {
-  for (const p of ps) if (p.exitCode === null && p.signalCode === null) p.kill('SIGKILL');
-};
-
-const reasonOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
-/** 从 rgb24 流里按整帧切出，逐帧回调（回调可 await，以此形成背压）；chunk 只在凑够一帧时才合并一次 */
-async function forEachFrame(p: ChildProcessWithoutNullStreams, frameBytes: number, onFrame: (frame: Buffer) => Promise<void>): Promise<void> {
-  let chunks: Buffer[] = [];
-  let length = 0;
-  for await (const chunk of p.stdout) {
-    chunks.push(chunk as Buffer);
-    length += (chunk as Buffer).length;
-    if (length < frameBytes) continue;
-    let pending = Buffer.concat(chunks, length);
-    while (pending.length >= frameBytes) {
-      await onFrame(pending.subarray(0, frameBytes));
-      pending = pending.subarray(frameBytes);
-    }
-    chunks = pending.length > 0 ? [pending] : [];
-    length = pending.length;
-  }
-}
-
 /** 均匀抽 SAMPLE_FRAMES 帧逐帧独立推理，估计人物平均色；抠不出人时返回 null */
 async function sampleForeground(rvm: RvmSession, opts: MatteOptions, w: number, h: number, durationSec: number): Promise<Rgb | null> {
   const p = decoder(opts.cfg, opts.input, `fps=${SAMPLE_FRAMES / Math.max(durationSec, 0.1)}`);
@@ -140,56 +100,7 @@ async function sampleForeground(rvm: RvmSession, opts: MatteOptions, w: number, 
   return [0, 1, 2].map((c) => means.reduce((s, m) => s + m[c], 0) / means.length) as unknown as Rgb;
 }
 
-/** tmp：编码进程写入的临时文件，成功后改名为 output */
-interface Encoder { proc: ChildProcessWithoutNullStreams; done: Promise<void>; write: (frame: Buffer) => Promise<void>; broken: () => boolean; tmp: string; output: string }
-
-/** 先写临时文件，成功后再改名：取消或失败时不破坏已有的好文件 */
-const tmpOf = (output: string): string => `${output}.${randomUUID().slice(0, 8)}.tmp.mp4`;
-
-/** 换背景成片的编码参数：rgb24 原始帧 + 输入音轨直接拷贝 */
-const personArgs = (opts: MatteOptions, tmp: string, w: number, h: number): string[] => ['-v', 'error', '-nostdin', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${w}x${h}`, '-r', String(OUT_FPS), '-i', '-',
-  '-i', opts.input, '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', tmp];
-
-/** 灰度遮罩的编码参数：alpha 量化到 0–255 的全范围 gray，crf 10 近无损（实测渐变往返误差 0） */
-const matteArgs = (tmp: string, w: number, h: number): string[] => ['-v', 'error', '-nostdin', '-y', '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${w}x${h}`, '-r', String(OUT_FPS), '-i', '-',
-  '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '10', '-pix_fmt', 'gray', tmp];
-
-/** 启动 x264 编码进程；write 带背压，编码进程退出/出错时立即抛错而不会挂起 */
-function startEncoder(cfg: AppConfig, args: string[], tmp: string, output: string): Encoder {
-  const proc = spawn(cfg.ffmpeg, args);
-  const done = exited(proc, '编码');
-  let broken: Error | null = null;
-  proc.stdin.on('error', (e) => { broken ??= e; });
-  const write = async (frame: Buffer): Promise<void> => {
-    if (broken) throw broken;
-    if (proc.stdin.write(frame)) return;
-    await new Promise<void>((resolve, reject) => {
-      const onDrain = (): void => { cleanup(); resolve(); };
-      const onDead = (): void => { cleanup(); reject(broken ?? new Error('编码进程已提前退出')); };
-      const cleanup = (): void => { proc.stdin.off('drain', onDrain); proc.stdin.off('error', onDead); proc.off('close', onDead); };
-      proc.stdin.once('drain', onDrain);
-      proc.stdin.once('error', onDead);
-      proc.once('close', onDead);
-    });
-  };
-  return { proc, done, write, broken: () => broken !== null, tmp, output };
-}
-
-const isDead = (enc: Encoder): boolean => enc.broken() || enc.proc.exitCode !== null || enc.proc.signalCode !== null;
-
-/** 失败后取根因：某个编码进程自己先挂掉（写管道出错或已退出）时，用它的 stderr 作为原因 */
-async function rootCause(err: unknown, encs: Encoder[]): Promise<string> {
-  for (const enc of encs.filter(isDead)) {
-    try {
-      await enc.done;
-    } catch (e) {
-      return reasonOf(e);
-    }
-  }
-  return reasonOf(err);
-}
-
-/** 整段抠像换背景：解码 → RVM → 合成 → x264 编码（30fps），音轨从输入直接拷贝；给了 matteOutput 时同时输出灰度遮罩视频 */
+/** 整段抠像：解码（fps=30）→ RVM → 按选项输出换背景成片（音轨从输入拷贝）、灰度遮罩、去溢色前景 */
 export async function matteVideo(opts: MatteOptions): Promise<MatteResult> {
   throwIfCancelled(opts.signal);
   const media = await probe(opts.input, opts.cfg);
@@ -207,42 +118,66 @@ function alphaBytes(pha: Float32Array, out: Buffer): Buffer {
   return Buffer.from(out);
 }
 
-/** 打开成片编码器，以及（需要时）遮罩编码器 */
-function openEncoders(opts: MatteOptions, w: number, h: number): Encoder[] {
-  const person = tmpOf(opts.output);
-  const encs = [startEncoder(opts.cfg, personArgs(opts, person, w, h), person, opts.output)];
-  if (!opts.matteOutput) return encs;
-  const matte = tmpOf(opts.matteOutput);
-  return [...encs, startEncoder(opts.cfg, matteArgs(matte, w, h), matte, opts.matteOutput)];
+/** RVM 前景（平面 CHW 0–1）→ 交错 rgb24 */
+function fgrBytes(fgr: Float32Array, plane: number, out: Buffer): Buffer {
+  for (let i = 0; i < plane; i += 1) {
+    for (let c = 0; c < 3; c += 1) out[i * 3 + c] = Math.round(Math.min(1, Math.max(0, fgr[c * plane + i])) * 255);
+  }
+  return Buffer.from(out);
 }
 
-/** 全部编码器收尾并改名（全部成功才改名，避免成片与遮罩不配套） */
-async function closeEncoders(encs: Encoder[]): Promise<void> {
-  for (const enc of encs) enc.proc.stdin.end();
-  await Promise.all(encs.map((enc) => enc.done));
-  for (const enc of encs) renameSync(enc.tmp, enc.output);
+/** 一路输出：编码器 + 从本帧推理结果算出要写的像素 */
+interface Layer { enc: Encoder; frame: (fgr: Float32Array, pha: Float32Array) => Buffer }
+
+/** 换背景成片的编码参数：rgb24 原始帧 + 输入音轨直接拷贝 */
+const personArgs = (input: string, tmp: string, w: number, h: number): string[] => [...rawInput('rgb24', w, h, OUT_FPS),
+  '-i', input, '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', tmp];
+/** 灰度遮罩：alpha 量化到 0–255 的全范围 gray，crf 10 近无损（实测渐变往返误差 0） */
+const matteArgs = (tmp: string, w: number, h: number): string[] => [...rawInput('gray', w, h, OUT_FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '10', '-pix_fmt', 'gray', tmp];
+/** 去溢色前景：RGB 直接编码（libx264rgb，不经 YUV 转换与色度抽样），crf 12 */
+const fgrArgs = (tmp: string, w: number, h: number): string[] => [...rawInput('rgb24', w, h, OUT_FPS), '-c:v', 'libx264rgb', '-preset', 'veryfast', '-crf', '12', '-pix_fmt', 'rgb24', tmp];
+
+/** 按选项打开各路输出：换背景成片（需要背景）、灰度遮罩、去溢色前景 */
+function openLayers(opts: MatteOptions, w: number, h: number, bg: Buffer | null, gains: Rgb): Layer[] {
+  const layers: Layer[] = [];
+  const open = (output: string, args: (tmp: string) => string[], frame: Layer['frame']): void => {
+    const tmp = tmpOf(output);
+    layers.push({ enc: startEncoder(opts.cfg, args(tmp), tmp, output), frame });
+  };
+  const rgb = Buffer.alloc(w * h * 3);
+  if (opts.output && bg) open(opts.output, (t) => personArgs(opts.input, t, w, h), (fgr, pha) => { compositeFrame(fgr, pha, bg, gains, rgb); return Buffer.from(rgb); });
+  const alpha = Buffer.alloc(w * h);
+  if (opts.matteOutput) open(opts.matteOutput, (t) => matteArgs(t, w, h), (_fgr, pha) => alphaBytes(pha, alpha));
+  const fg = Buffer.alloc(w * h * 3);
+  if (opts.fgrOutput) open(opts.fgrOutput, (t) => fgrArgs(t, w, h), (fgr) => fgrBytes(fgr, w * h, fg));
+  return layers;
+}
+
+/** 背景与调色增益：没有成片输出时不需要背景，增益为 1 */
+async function backgroundOf(rvm: RvmSession, opts: MatteOptions, media: MediaInfo): Promise<{ bg: Buffer | null; gains: Rgb; fgMean: Rgb | null }> {
+  const { width: w, height: h } = media;
+  if (opts.output && !opts.backgroundPath) throw new Error('输出换背景成片需要背景图');
+  const bg = opts.output && opts.backgroundPath ? await loadBackgroundRgb(opts.backgroundPath, w, h, opts.blurSigma ?? DEFAULT_BLUR, opts.cfg) : null;
+  const fgMean = opts.colorMatch === false ? null : await sampleForeground(rvm, opts, w, h, media.durationSec);
+  return { bg, fgMean, gains: fgMean && bg ? colorMatchGains(fgMean, meanRgb(bg)) : [1, 1, 1] };
 }
 
 async function matteWith(rvm: RvmSession, opts: MatteOptions, media: MediaInfo): Promise<MatteResult> {
   const { width: w, height: h } = media;
-  const bg = await loadBackgroundRgb(opts.backgroundPath, w, h, opts.blurSigma ?? DEFAULT_BLUR, opts.cfg);
-  const fgMean = opts.colorMatch === false ? null : await sampleForeground(rvm, opts, w, h, media.durationSec);
-  const gains: Rgb = fgMean ? colorMatchGains(fgMean, meanRgb(bg)) : [1, 1, 1];
+  const { bg, gains, fgMean } = await backgroundOf(rvm, opts, media);
   const total = Math.round(media.durationSec * OUT_FPS);
+  const layers = openLayers(opts, w, h, bg, gains);
+  if (layers.length === 0) throw new Error('抠像没有指定任何输出');
+  const encs = layers.map((l) => l.enc);
   const dec = decoder(opts.cfg, opts.input, `fps=${OUT_FPS}`);
   const decDone = exited(dec, '解码');
-  const encs = openEncoders(opts, w, h);
-  const [person, matte] = encs;
-  const out = Buffer.alloc(w * h * 3);
-  const alpha = Buffer.alloc(w * h);
   const boxes: SubjectBox[] = [];
   let frames = 0;
   try {
     await forEachFrame(dec, w * h * 3, async (frame) => {
       throwIfCancelled(opts.signal);
       const { fgr, pha } = await rvm.infer(frame);
-      compositeFrame(fgr, pha, bg, gains, out);
-      await Promise.all([person.write(Buffer.from(out)), ...(matte ? [matte.write(alphaBytes(pha, alpha))] : [])]);
+      await Promise.all(layers.map((l) => l.enc.write(l.frame(fgr, pha))));
       frames += 1;
       if (frames % BOX_EVERY !== 0) return;
       const box = alphaBox(pha, w, h);

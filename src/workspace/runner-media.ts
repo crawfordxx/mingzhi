@@ -1,16 +1,17 @@
 import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { BackgroundSpec } from '../background/resolve.js';
+import type { TimeRange } from '../cut/plan.js';
 import type { VersionState } from '../edit/apply.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { CoverOptions } from '../pipeline/finish-step.js';
 import { mediaOf } from '../pipeline/media-deps.js';
 import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
-import { backgroundStage, matteStage } from '../pipeline/stages.js';
+import { backgroundStage, throttledMatteProgress } from '../pipeline/stages.js';
 import type { CardQaEntry } from '../qa/visual.js';
 import type { VersionEnv } from './runner.js';
-import { FINAL_FILE, isInside, linkFile, linkIfExists, MATTE_META, readJson, writeJsonAtomic, type MatteMeta } from './runner-files.js';
+import { FINAL_FILE, isInside, LAYER_FILES, linkFile, linkIfExists, MATTE_META, readJson, writeJsonAtomic, type MatteMeta } from './runner-files.js';
 
 /** 这个版本的流程参数：工作目录是版本目录，分段缓存在 base/segments；付费开关与预算取项目当前设置 */
 export function pipelineArgs(env: VersionEnv, input: string, state: VersionState, cover: CoverOptions): PipelineArgs {
@@ -35,33 +36,46 @@ export function cutAsPerson(env: VersionEnv, cut: string): Person {
   return { person, subject: null };
 }
 
-/** 抠像推理：人像写版本目录；遮罩与 matte.json 写 matteDir（首个版本为 base/），再引用进版本目录 */
-export async function matteInto(env: VersionEnv, args: PipelineArgs, cut: string, bgPath: string, matteDir: string): Promise<Person> {
-  const person = join(env.dir, 'person.mp4');
-  const matte = join(matteDir, 'matte.mp4');
-  const res = await matteStage(args, cut, bgPath, { person, matte }, env.complete);
-  writeJsonAtomic(join(matteDir, MATTE_META), { subject: res.subject, fgMean: res.fgMean, frames: res.frames } satisfies MatteMeta);
-  if (matteDir !== env.dir) linkMatte(matteDir, env.dir);
-  return { person, subject: res.subject };
-}
-
-/** 把 from 目录的遮罩与 matte.json 引用到 to 目录；没有遮罩返回 false */
-export function linkMatte(from: string, to: string): boolean {
-  if (!existsSync(join(from, 'matte.mp4')) || !existsSync(join(from, MATTE_META))) return false;
-  linkFile(join(from, 'matte.mp4'), join(to, 'matte.mp4'));
-  linkFile(join(from, MATTE_META), join(to, MATTE_META));
-  return true;
-}
-
-/** 只用遮罩 + 背景合成（不跑抠像推理）；遮罩须已在版本目录 */
-export async function compositeInto(env: VersionEnv, args: PipelineArgs, cut: string, bgPath: string): Promise<Person> {
-  const person = join(env.dir, 'person.mp4');
-  const meta = readJson<MatteMeta>(join(env.dir, MATTE_META), '抠像信息');
+/**
+ * base/ 里整条原片（未剪切）的抠像图层：去溢色前景 fgr.mp4 + 灰度遮罩 matte.mp4 + matte.json（最后写，存在即完整）。
+ * 只在第一次需要背景时跑一次 RVM；之后任何版本换背景、改剪辑都只做合成。
+ */
+async function ensureLayers(env: VersionEnv, args: PipelineArgs): Promise<MatteMeta> {
+  const metaFile = join(env.base, MATTE_META);
+  const [fgr, matte] = LAYER_FILES.map((f) => join(env.base, f));
+  if ([metaFile, fgr, matte].every((f) => existsSync(f))) return readJson<MatteMeta>(metaFile, '抠像信息');
   const started = Date.now();
-  await mediaOf(args.media).composite({ input: cut, matte: join(env.dir, 'matte.mp4'), backgroundPath: bgPath, output: person, fgMean: meta.fgMean, cfg: args.cfg, signal: args.signal });
+  const res = await mediaOf(args.media).matte({
+    input: args.input, cfg: args.cfg, signal: args.signal, fgrOutput: fgr, matteOutput: matte, onProgress: throttledMatteProgress(env.emit),
+  });
+  const meta: MatteMeta = { subject: res.subject, fgMean: res.fgMean, frames: res.frames };
+  writeJsonAtomic(metaFile, meta);
+  const secs = Math.max((Date.now() - started) / 1000, 0.001);
+  env.complete('matte', `抠像完成（整条原片）· ${res.frames} 帧 · ${(res.frames / secs).toFixed(1)} 帧/秒`);
+  return meta;
+}
+
+/**
+ * 有背景的人像：从整条图层里按本版剪辑方案取帧（与剪切逐帧对齐）合成到背景。
+ * 取景框与人物平均色沿用整条原片的统计：剪掉的只是停顿与口误，人物位置与肤色分布基本不变，重算要再解码一遍遮罩，收益很小。
+ */
+export async function compositePerson(env: VersionEnv, args: PipelineArgs, keep: TimeRange[], bgPath: string): Promise<Person> {
+  const meta = await ensureLayers(env, args);
+  const person = join(env.dir, 'person.mp4');
+  const [fgr, matte] = LAYER_FILES.map((f) => join(env.base, f));
+  const started = Date.now();
+  await mediaOf(args.media).composite({ cut: join(env.dir, 'cut.mp4'), fgr, matte, keep, backgroundPath: bgPath, output: person, fgMean: meta.fgMean, cfg: args.cfg, signal: args.signal });
   const secs = ((Date.now() - started) / 1000).toFixed(1);
-  env.complete('matte', `换背景合成完成（复用抠像遮罩，未重新推理）· 用时 ${secs} 秒`, { subject: meta.subject, artifacts: { person } });
+  env.complete('matte', `换背景合成完成（复用整条抠像，未重新推理）· 用时 ${secs} 秒`, { subject: meta.subject, artifacts: { person } });
   return { person, subject: meta.subject };
+}
+
+/** 两个背景是否同一个（按种类与字段比较，不受键顺序影响） */
+export function sameBackground(a: BackgroundSpec | undefined, b: BackgroundSpec | undefined): boolean {
+  if (!a || !b) return a === b;
+  if (a.kind === 'preset' && b.kind === 'preset') return a.id === b.id;
+  if (a.kind === 'file' && b.kind === 'file') return a.path === b.path;
+  return a.kind === 'prompt' && b.kind === 'prompt' && a.prompt === b.prompt;
 }
 
 /**
@@ -70,24 +84,22 @@ export async function compositeInto(env: VersionEnv, args: PipelineArgs, cut: st
  */
 export async function resolveBg(env: VersionEnv, args: PipelineArgs, spec: BackgroundSpec, parent: ProjectFile | null, pdir: string): Promise<string> {
   const prev = parent?.background;
-  if (!prev || JSON.stringify(prev.spec) !== JSON.stringify(spec) || !existsSync(prev.path)) return (await backgroundStage(args, spec, env.complete)).path;
+  if (!prev || !sameBackground(prev.spec, spec) || !existsSync(prev.path)) return (await backgroundStage(args, spec, env.complete)).path;
   const path = isInside(pdir, prev.path) ? join(env.dir, basename(prev.path)) : prev.path;
   if (path !== prev.path) linkFile(prev.path, path);
   env.record({ background: { spec, path } });
   return path;
 }
 
-/** 整版复用父版本的人像（含遮罩与背景图） */
+/** 整版复用父版本的人像与背景图 */
 export function reusePerson(env: VersionEnv, pdir: string, parent: ProjectFile | null): Person {
   const person = join(env.dir, 'person.mp4');
   linkFile(join(pdir, 'person.mp4'), person);
-  linkMatte(pdir, env.dir);
   const bg = parent?.background;
   const bgCopy = bg && isInside(pdir, bg.path) ? join(env.dir, basename(bg.path)) : null;
   if (bg && bgCopy && linkIfExists(bg.path, bgCopy)) env.record({ background: { spec: bg.spec, path: bgCopy } });
-  const meta = existsSync(join(env.dir, MATTE_META)) ? readJson<MatteMeta>(join(env.dir, MATTE_META), '抠像信息') : null;
   env.record({ artifacts: { person } });
-  return { person, subject: parent?.subject ?? meta?.subject ?? null };
+  return { person, subject: parent?.subject ?? null };
 }
 
 /** 卡片自检平均分：每张卡片取最后一次四维平均，再对卡片取平均，保留 1 位小数；没有打分返回 undefined */

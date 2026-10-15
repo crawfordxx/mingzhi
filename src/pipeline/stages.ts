@@ -152,9 +152,9 @@ export async function storyboardStage(args: PipelineArgs, captions: TimedCaption
   return brollStage(args, planned, durationSec, brollDir, complete);
 }
 
-/** 只跑素材步骤（修改版本的 regenerateVisual 等也走这里，预算与 maxVideos 由 args.broll / args.meter 约束） */
-export function brollStage(args: PipelineArgs, storyboard: Storyboard, durationSec: number, brollDir: string, complete: Complete): Promise<Storyboard> {
-  return runBroll({ ...args, workDir: brollDir, reserveYuan: coverReserve(args) }, storyboard, durationSec, complete);
+/** 只跑素材步骤（修改版本的 regenerateVisual 等也走这里，预算与 maxVideos 由 args.broll / args.meter 约束；deferShots 的需求排到最后） */
+export function brollStage(args: PipelineArgs, storyboard: Storyboard, durationSec: number, brollDir: string, complete: Complete, deferShots?: number[]): Promise<Storyboard> {
+  return runBroll({ ...args, workDir: brollDir, reserveYuan: coverReserve(args), ...(deferShots ? { deferShots } : {}) }, storyboard, durationSec, complete);
 }
 
 /** 卡片自检（args.qa 为 false 时跳过）；only 给出时只检查这些镜头 */
