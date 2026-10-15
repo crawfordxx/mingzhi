@@ -1,0 +1,39 @@
+import { z } from 'zod';
+import type { TimedCaption } from '../captions/lines.js';
+import type { SubjectBox } from '../matting/composite.js';
+
+/** 画布与版式常量：分界线 y=960 来自参考片实测 */
+export const CANVAS = { width: 1080, height: 1920, fps: 30, seam: 960 } as const;
+export const MIN_SHOT_SEC = 1;
+export const HOOK_WINDOW_SEC = 15;
+
+export const TEMPLATE_IDS = ['hook', 'title', 'bigNumber', 'chips', 'compareBars', 'evidenceList', 'terminal', 'toggles', 'strikeList', 'browser', 'photo', 'cta'] as const;
+export type TemplateId = (typeof TEMPLATE_IDS)[number];
+
+const text = z.string().trim().min(1).max(60);
+const short = z.string().trim().min(1).max(24);
+
+const card = <T extends TemplateId, P extends z.ZodTypeAny>(template: T, props: P) => z.object({ template: z.literal(template), props });
+
+export const CardSpecSchema = z.discriminatedUnion('template', [
+  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(short).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional() })),
+  card('title', z.object({ title: text, subtitle: text.optional(), crumb: short.optional() })),
+  card('bigNumber', z.object({ value: z.string().trim().min(1).max(10), unit: short.optional(), label: text, chips: z.array(short).max(36).optional(), highlight: z.array(short).max(6).optional() })),
+  card('chips', z.object({ groups: z.array(z.object({ label: short, items: z.array(z.object({ text: short, mark: z.enum(['yes', 'no', 'maybe']) })).min(1).max(5) })).min(1).max(2) })),
+  card('compareBars', z.object({ crumb: short.optional(), items: z.array(z.object({ name: short, note: short.optional(), value: z.number().min(0).max(1), annotation: short.optional(), tone: z.enum(['bad', 'warn', 'good']) })).min(1).max(3), verdict: short.optional() })),
+  card('evidenceList', z.object({ crumb: short.optional(), title: text, rows: z.array(z.object({ badge: z.enum(['成本', '收益', '证据', '来源']), text })).min(1).max(5), highlight: z.array(z.number().int().min(0).max(4)).max(5).optional(), tags: z.array(short).max(3).optional() })),
+  card('terminal', z.object({ title: short.optional(), lines: z.array(text).min(1).max(6) })),
+  card('toggles', z.object({ title: short.optional(), rows: z.array(z.object({ label: short, on: z.boolean() })).min(1).max(4), footnote: text.optional() })),
+  card('strikeList', z.object({ title: short.optional(), items: z.array(short).min(1).max(5) })),
+  card('browser', z.object({ url: z.string().trim().min(1).max(80), title: text.optional(), image: z.string().optional() })),
+  card('photo', z.object({ image: z.string().min(1), label: short.optional(), sublabel: text.optional() })),
+  card('cta', z.object({ actions: z.array(z.string().trim().min(1).max(6)).min(1).max(3) })),
+]);
+export type CardSpec = z.infer<typeof CardSpecSchema>;
+
+export const ShotSchema = z.object({ start: z.number(), end: z.number(), layout: z.enum(['split', 'full']), card: CardSpecSchema.optional() });
+export type Shot = { start: number; end: number; layout: 'split' | 'full'; card?: CardSpec };
+export interface Storyboard { shots: Shot[] }
+
+/** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名 */
+export interface TalkProps { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number }
