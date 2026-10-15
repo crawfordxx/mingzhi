@@ -9,6 +9,8 @@ import type { LlmClient } from '../src/llm/kexiang.js';
 import { run } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import type { ProjectFile } from '../src/pipeline/project.js';
+import type { BrollDeps } from '../src/broll/fulfill.js';
+import { brollSummary, parseBrollArgs } from '../src/pipeline/broll-step.js';
 import { runPipeline, type ProgressEvent } from '../src/pipeline/run.js';
 import { hasModels, hasRvm } from './helpers/models.js';
 
@@ -162,5 +164,93 @@ describe('runPipeline 背景提前校验', () => {
       input, workDir, output: join(workDir, 'out.mp4'), cfg: loadConfig({}), llm, background: { kind: 'prompt', prompt: '海边' },
     })).rejects.toThrow('MINGZHI_KX_KEY');
     expect(existsSync(join(workDir, 'project.json'))).toBe(false);
+  });
+});
+
+const BROLL_STORYBOARD = { shots: [
+  { start: 0, end: 3, layout: 'split', card: { template: 'hook', props: { index: 1, total: 1, headline: '钱要放在取得到的地方', highlight: ['取得到'], visual: { source: 'video', prompt: 'a jar of coins on a wooden table, slow push in' } } } },
+  { start: 3, end: 8, layout: 'split', card: { template: 'photo', props: { label: '应急金', visual: { source: 'generate', prompt: 'a savings jar on a desk, editorial photo' } } } },
+  { start: 8, end: 17, layout: 'full' },
+  { start: 17, end: 19.4, layout: 'full', card: { template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } } },
+] };
+
+/** 假素材依赖：用 ffmpeg 产出真实的 jpg / 30fps mp4，让 Remotion 能渲染；记录调用 */
+function fakeBrollDeps(ffmpeg: string): { deps: BrollDeps; calls: { image: string[]; video: string[] } } {
+  const calls = { image: [] as string[], video: [] as string[] };
+  const deps: BrollDeps = {
+    screenshot: async () => { throw new Error('不应截图'); },
+    search: async () => [],
+    image: async (prompt, out) => { calls.image.push(prompt); await run(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1080x960', '-frames:v', '1', out]); return { cost: 0.2 }; },
+    video: async (prompt, out) => { calls.video.push(prompt); await run(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=720x720:r=30:d=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', out]); return { cost: 2.4 }; },
+  };
+  return { deps, calls };
+}
+const brollLlm: LlmClient = { chatJson: async (o) => (o.system.includes('分镜') ? BROLL_STORYBOARD : o.system.includes('剪辑师') ? { cuts: [] } : { lines: [] }) };
+const CLIP = join(import.meta.dirname, 'fixtures', 'talk.mp4');
+
+describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）', () => {
+  it('开启：storyboard 之后取素材并写回卡片，进度与 project.json 记录结果，成片渲染成功', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-br-'));
+    const { deps, calls } = fakeBrollDeps(cfg.ffmpeg);
+    const events: ProgressEvent[] = [];
+    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps,
+      broll: { enabled: true, maxVideos: 1, budgetYuan: 10 }, onProgress: (e) => events.push(e) });
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-4)).toEqual(['storyboard', 'broll', 'compose', 'done']);
+    const brollEvents = events.filter((e) => e.step === 'broll').map((e) => e.message);
+    expect(brollEvents[0]).toMatch(/^素材 1\/2 /);
+    expect(brollEvents.at(-1)).toBe('素材 2 个（截图 0 / 生图 1 / 视频 1）· 花费 ¥2.60 · 失败 0 个');
+    expect(calls.video).toHaveLength(1);
+    expect(calls.image).toHaveLength(1);
+    const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
+    expect(project.broll?.assets.map((a) => a.source).sort()).toEqual(['generate', 'video']);
+    expect(project.broll?.failures).toEqual([]);
+    expect(project.broll?.costYuan).toBeCloseTo(2.6);
+    const cards = project.storyboard?.shots.flatMap((s) => (s.card ? [s.card] : [])) ?? [];
+    const photoImage = (cards.find((c) => c.template === 'photo')?.props as { image?: string }).image ?? '';
+    const hookVideo = (cards.find((c) => c.template === 'hook')?.props as { video?: string }).video ?? '';
+    expect(photoImage).toMatch(/^broll\/[0-9a-f]{12}\.jpg$/);
+    expect(hookVideo).toMatch(/^broll\/[0-9a-f]{12}\.mp4$/);
+    expect(existsSync(join(workDir, photoImage))).toBe(true);
+    expect(existsSync(join(workDir, hookVideo))).toBe(true);
+    expect(existsSync(res.output)).toBe(true);
+  }, 240_000);
+
+  it('关闭：不调用素材依赖，只靠 visual 的 photo 被去掉并补成全屏，project.json 无 broll', async () => {
+    const cfg = loadConfig({});
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-br-'));
+    const { deps, calls } = fakeBrollDeps(cfg.ffmpeg);
+    const events: ProgressEvent[] = [];
+    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps,
+      broll: { enabled: false, maxVideos: 1, budgetYuan: 10 }, onProgress: (e) => events.push(e) });
+    expect(calls).toEqual({ image: [], video: [] });
+    expect(events.find((e) => e.step === 'broll')?.message).toContain('已关闭');
+    expect(res.storyboard.shots.some((s) => s.card?.template === 'photo')).toBe(false);
+    const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
+    expect(project.broll).toBeUndefined();
+    expect(existsSync(join(workDir, 'broll'))).toBe(false);
+    expect(existsSync(res.output)).toBe(true);
+  }, 240_000);
+});
+
+describe('B-roll 选项', () => {
+  it('开启素材获取但没有 task 与注入依赖时，在耗时步骤之前报缺 key', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-fast-'));
+    await expect(runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg: loadConfig({}), llm: brollLlm,
+      broll: { enabled: true, maxVideos: 1, budgetYuan: 10 } })).rejects.toThrow('MINGZHI_KX_KEY');
+    expect(existsSync(join(workDir, 'project.json'))).toBe(false);
+  });
+
+  it('parseBrollArgs：默认开启、1 个视频、预算 10 元；支持 --no-broll、--max-videos、--budget 与 Pexels 环境变量；非法值报错', () => {
+    expect(parseBrollArgs({}, {})).toEqual({ enabled: true, maxVideos: 1, budgetYuan: 10 });
+    expect(parseBrollArgs({ 'no-broll': true, 'max-videos': '0', budget: '3.5' }, { MINGZHI_PEXELS_KEY: 'pk' })).toEqual({ enabled: false, maxVideos: 0, budgetYuan: 3.5, pexelsKey: 'pk' });
+    expect(() => parseBrollArgs({ 'max-videos': '1.5' }, {})).toThrow('--max-videos');
+    expect(() => parseBrollArgs({ budget: 'abc' }, {})).toThrow('--budget');
+    expect(() => parseBrollArgs({ budget: '-1' }, {})).toThrow('--budget');
+  });
+
+  it('brollSummary：图库图片计入生图', () => {
+    const asset = (source: 'screenshot' | 'generate' | 'pexels' | 'video') => ({ key: 'k', file: 'broll/k', source });
+    expect(brollSummary([asset('screenshot'), asset('generate'), asset('pexels'), asset('video')], 2, 2.6)).toBe('素材 4 个（截图 1 / 生图 2 / 视频 1）· 花费 ¥2.60 · 失败 2 个');
   });
 });

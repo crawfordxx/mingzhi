@@ -85,6 +85,9 @@ const SAMPLES_B: CardSpec[] = [
   { template: 'browser', props: { url: 'github.com/eternity4719/HowToLiveBetter', image: 'broll/test.jpg' } },
   { template: 'photo', props: { image: 'broll/test.jpg', label: '应急金：3 到 6 个月生活费', sublabel: '放在随时取得到的地方' } },
   { template: 'cta', props: { actions: ['关注', '点赞', '收藏'] } },
+  // 视频素材：2 秒 30fps 的测试片，镜头比它长时循环
+  { template: 'photo', props: { video: 'broll/test.mp4', label: '动起来的画面', sublabel: '镜头比素材长时循环播放' } },
+  { template: 'hook', props: { index: 1, total: 1, headline: '视频做钩子卡的底', highlight: ['钩子卡'], video: 'broll/test.mp4' } },
 ];
 
 describe('卡片模板 B 组', () => {
@@ -95,6 +98,7 @@ describe('卡片模板 B 组', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mz-tpl-'));
     mkdirSync(join(dir, 'broll'));
     await run(loadConfig({}).ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1080x1080', '-frames:v', '1', join(dir, 'broll', 'test.jpg')]);
+    await run(loadConfig({}).ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=720x720:r=30:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', join(dir, 'broll', 'test.mp4')]);
     const output = join(dir, `${card.template}.png`);
     await renderCardStill({ workDir: dir, output, card });
     expect(statSync(output).size).toBeGreaterThan(5000);

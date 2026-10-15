@@ -17,13 +17,15 @@ import { renderTalk } from '../compose/render.js';
 import { matteVideo } from '../matting/rvm.js';
 import { extractWav16k } from '../media/extract-audio.js';
 import { probe, type MediaInfo } from '../media/probe.js';
+import { runBroll, validateBroll, type BrollOptions } from './broll-step.js';
+import type { BrollDeps } from '../broll/fulfill.js';
 import { generateStoryboard } from '../storyboard/generate.js';
 import type { Storyboard } from '../storyboard/schema.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
 
-export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'compose' | 'done';
+export type PipelineStep = 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose' | 'done';
 export interface ProgressEvent { step: PipelineStep; message: string }
-export interface PipelineArgs { input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; onProgress?: (e: ProgressEvent) => void }
+export interface PipelineArgs { input: string; workDir: string; output: string; cfg: AppConfig; llm: LlmClient; background?: BackgroundSpec; task?: TaskClient; broll?: BrollOptions; brollDeps?: BrollDeps; onProgress?: (e: ProgressEvent) => void }
 export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard }
 
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
@@ -140,7 +142,8 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
 
   const person = relative(workDir, base);
   if (person.startsWith('..')) throw new Error(`人像视频必须在工作目录内：${base}`);
-  const storyboard = await planStoryboard(llm, captions, a.plan.outputDurationSec, complete);
+  const planned = await planStoryboard(llm, captions, a.plan.outputDurationSec, complete);
+  const storyboard = await runBroll(args, planned, a.plan.outputDurationSec, complete);
   const baseInfo = await probe(base, cfg);
   // 成片时长不超过人像视频的实际时长（剪切编码后可能比方案略短），避免末尾取不到帧
   const durationSec = Math.min(a.plan.outputDurationSec, baseInfo.durationSec);
@@ -157,6 +160,7 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
 /** 全流程；每步完成后增量写 project.json 并回调一次，供 P5 剪辑直播使用 */
 export async function runPipeline(args: PipelineArgs): Promise<PipelineResult> {
   if (args.background) validateBackground(args.background, args.cfg, args.task);
+  validateBroll(args.broll, args.brollDeps, args.task);
   mkdirSync(args.workDir, { recursive: true });
   mkdirSync(dirname(args.output), { recursive: true });
   const projectPath = join(args.workDir, 'project.json');

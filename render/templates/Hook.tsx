@@ -2,6 +2,7 @@ import React from 'react';
 import { AbsoluteFill, Img, staticFile, useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
 import { balanceLines, tokenize, type Token } from './headline.js';
+import { ShotVideo } from './ShotVideo.js';
 import { CONTENT_W, Reveal, SafeArea, clampLines, fitFontSize, fitScale, lineCount, maxFontSize, springAt, type PropsOf, type TemplateProps } from './parts.js';
 
 const HEADLINE_PX = 76;
@@ -23,12 +24,14 @@ const STAT_PAD_X = 26;
 const STAT_TEXT_W = CONTENT_W - STAT_PAD_X * 2 - 4;
 const LIME_SOFT = 'rgba(212, 242, 60, 0.12)';
 
-/** 钩子卡底：全黑；有图时铺图（缓慢推近）并压暗 55%；不随卡片进出场移动 */
+/** 钩子卡底：全黑；有视频时静音循环铺满、有图时铺图（缓慢推近），都压暗 55%；不随卡片进出场移动 */
 export const HookBackdrop: React.FC<TemplateProps<'hook'>> = ({ props, local }) => (
   <AbsoluteFill style={{ background: THEME.hookBg }}>
-    {props.image ? (
+    {props.video || props.image ? (
       <>
-        <Img src={staticFile(props.image)} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${1 + Math.min(local / 8, 1) * 0.05})` }} />
+        {props.video ? <ShotVideo src={props.video} local={local} /> : (
+          <Img src={staticFile(props.image ?? '')} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${1 + Math.min(local / 8, 1) * 0.05})` }} />
+        )}
         <AbsoluteFill style={{ background: 'rgba(14, 15, 12, 0.55)' }} />
       </>
     ) : (

@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs';
+import type { BrollAsset } from '../broll/fulfill.js';
 import type { Transcript } from '../asr/types.js';
 import type { CaptionLine, TimedCaption } from '../captions/lines.js';
 import type { CaptionsSource } from '../captions/polish.js';
@@ -37,6 +38,8 @@ export interface ProjectFile {
   storyboardDemoted?: number;
   /** 分镜里因超过 8 秒被截短的带卡片镜头数 */
   storyboardCapped?: number;
+  /** B-roll 素材获取结果（P3b）：取到的素材、失败的镜头与花费（元）；未开启时缺省 */
+  broll?: { assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number };
   artifacts: ProjectArtifacts;
 }
 

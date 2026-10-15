@@ -1,6 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, Easing, Img, interpolate, staticFile, useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
+import { ShotVideo } from './ShotVideo.js';
 import { CONTENT_W, Reveal, SAFE, clampLines, fitFontSize, springAt, type TemplateProps } from './parts.js';
 
 /** Ken Burns：多少秒内推近多少 */
@@ -11,12 +12,12 @@ const LABEL_TEXT_W = CONTENT_W - LABEL_PAD_X * 2;
 /** 标签卡底边离卡片区底部的距离（避开压在分界线上的字幕） */
 const LABEL_BOTTOM = 960 - SAFE.bottom + 50;
 
-/** 图片底：铺满卡片区并缓慢推近；不随卡片进出场移动 */
+/** 图片/视频底：有 video 时静音铺满并循环；否则图片铺满并缓慢推近；不随卡片进出场移动 */
 export const PhotoBackdrop: React.FC<TemplateProps<'photo'>> = ({ props, local }) => {
   const zoom = interpolate(local, [0, ZOOM_SEC], [0, ZOOM], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.inOut(Easing.sin) });
   return (
     <AbsoluteFill style={{ background: '#111111' }}>
-      {props.image ? <Img src={staticFile(props.image)} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', transform: `scale(${1 + zoom})` }} /> : null}
+      {props.video ? <ShotVideo src={props.video} local={local} /> : props.image ? <Img src={staticFile(props.image)} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', transform: `scale(${1 + zoom})` }} /> : null}
     </AbsoluteFill>
   );
 };
