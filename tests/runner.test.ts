@@ -91,6 +91,18 @@ describe('runFirstVersion', () => {
     expect(f.calls.matte).toEqual([]);
     expect(inode(join(v1, 'person.mp4'))).toBe(inode(join(f.store.baseDir(f.spaceId), 'cut.mp4')));
   });
+
+  it('没有背景时抽帧取到的人物框写进 project.json 的 subject；没取到则为 null', async () => {
+    const box = { top: 0.3, bottom: 1, left: 0.1, right: 0.9 };
+    const f = makeFixture({ background: undefined });
+    f.hooks.subject = box;
+    await runFirstVersion(f.ctx, f.spaceId);
+    const file = join(f.store.versionDir(f.spaceId, 1), 'project.json');
+    expect(JSON.parse(readFileSync(file, 'utf8')).subject).toEqual(box);
+    const g = makeFixture({ background: undefined });
+    await runFirstVersion(g.ctx, g.spaceId);
+    expect(JSON.parse(readFileSync(join(g.store.versionDir(g.spaceId, 1), 'project.json'), 'utf8')).subject).toBeNull();
+  });
 });
 
 describe('runNextVersion：只重跑受影响的阶段', () => {

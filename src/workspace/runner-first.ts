@@ -40,7 +40,7 @@ async function makePerson(env: VersionEnv, args: PipelineArgs, a: Analysis): Pro
   const cut = join(env.base, 'cut.mp4');
   await cutStage(args, a.plan.keep, cut, env.complete);
   linkFile(cut, join(env.dir, 'cut.mp4'));
-  if (!args.background) return cutAsPerson(env, cut);
+  if (!args.background) return cutAsPerson(env, args, cut);
   const bg = await backgroundStage(args, args.background, env.complete);
   return compositePerson(env, args, a.plan.keep, bg.path);
 }

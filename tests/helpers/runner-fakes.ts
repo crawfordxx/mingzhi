@@ -59,6 +59,7 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
     extractWav: async (_i, wav) => { writeFileSync(wav, 'wav'); },
     transcribe: () => ({ durationSec: SOURCE_SEC, segments: SEGMENTS, tokens: TOKENS }),
     renderCut: async (input, keep, output) => { calls.cutInputs.push(input); calls.renderCut.push(keep); writeFileSync(output, JSON.stringify({ kind: 'cut', keep, durationSec: keepSec(keep) })); },
+    subject: async () => hooks.subject ?? null,
     matte: async (o) => {
       calls.matte.push(o.input);
       const src = json(o.input);
@@ -123,7 +124,7 @@ const fakeBroll = (calls: Calls) => (meter: CostMeter): BrollDeps => ({
   video: async (prompt, _imageUrl, out) => { calls.videos.push(prompt); writeFileSync(out, 'mp4'); meter.addTask('video', 2.4, '视频'); return { cost: 2.4 }; },
 });
 
-export interface Hooks { onSegment?: () => Promise<void> | void; beforeComposite?: () => Promise<void> | void; /** 多段口播时假模型给出的段落顺序 */ order?: number[] }
+export interface Hooks { /** 不换背景时假的人物取景结果 */ subject?: { top: number; bottom: number; left: number; right: number } | null; onSegment?: () => Promise<void> | void; beforeComposite?: () => Promise<void> | void; /** 多段口播时假模型给出的段落顺序 */ order?: number[] }
 
 export interface Fixture { ctx: RunnerCtx; store: SpaceStore; spaceId: string; calls: Calls; events: WorkEvent[]; hooks: Hooks; reset: () => void; cfg: AppConfig }
 

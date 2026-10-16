@@ -11,7 +11,7 @@ export interface PersonClip { x: number; y: number; w: number; h: number; radius
 export interface PersonTransform { scale: number; x: number; y: number; clip?: PersonClip }
 /** 分屏时头顶距分界线的距离（px） */
 const HEAD_GAP = 60;
-/** 抠不出人时按头顶在画面 12% 处估计 */
+/** 画中画拿不到人物框时按头顶在画面 12% 处估计 */
 const DEFAULT_TOP = 0.12;
 
 /**
@@ -67,7 +67,7 @@ function pipTransform(subject: SubjectBox | null, videoW: number, videoH: number
 
 /**
  * 视频铺满人像区域（cover）：竖屏按宽铺满；横屏等更宽的视频按区域高度放大，水平方向以人物为中心裁切。
- * 全屏的区域是整张画布；分屏的区域是分界线以下。分屏时把头顶放在分界线下 HEAD_GAP，且上不露分界线以上、下不露画布底。
+ * 全屏的区域是整张画布；分屏的区域是分界线以下。分屏时把头顶放在分界线下 HEAD_GAP，且上不露分界线以上、下不露画布底；没有人物框时视频在区域内居中。
  * 画中画缩进右下小窗；浮层、全屏插入与全屏相同（全屏插入时人像被素材盖住，位置由 PersonLayer 保持不动）
  */
 export function personTransform(layout: Layout, subject: SubjectBox | null, videoW: number, videoH: number): PersonTransform {
@@ -79,8 +79,8 @@ export function personTransform(layout: Layout, subject: SubjectBox | null, vide
   const h = videoH * scale;
   const x = centerX(subject, w);
   if (!isSplit) return { scale, x, y: Math.round((CANVAS.height - h) / 2) };
-  const top = subject?.top ?? DEFAULT_TOP;
-  const wanted = CANVAS.seam + HEAD_GAP - top * h;
+  // 没有人物框（没人或检测失败）时画面居中：不按头顶估计位置摆，免得把真实头顶压到底边
+  const wanted = subject ? CANVAS.seam + HEAD_GAP - subject.top * h : CANVAS.seam + (regionH - h) / 2;
   const y = Math.min(CANVAS.seam, Math.max(CANVAS.height - h, wanted));
   return { scale, x, y };
 }

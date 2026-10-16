@@ -88,7 +88,7 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     // 渲染进度事件（compose）会连续出现多次，按相邻去重后比较
     // 整片自检不达标时会局部重做一轮（再渲染一次、再测一次），所以中段可能重复出现 compose、loudness、qa-film
     const order = events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]);
-    expect(order.slice(0, 11)).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness']);
+    expect(order.slice(0, 12)).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness']); // matte：不换背景时的人物取景
     expect(order.slice(-4)).toEqual(['qa-film', 'qa-final', 'cover', 'done']);
     // 兜底分行按字数换行，「高性价比」可能被拆到相邻两行，所以拼接所有字幕行再断言
     const assText = readFileSync(join(work, 'captions.ass'), 'utf8').split('\n')

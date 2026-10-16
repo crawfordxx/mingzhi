@@ -79,7 +79,7 @@ function validateNext(args: PipelineArgs, c: Change, parent: VersionState): void
 /** 人像：没背景用剪切结果；没重剪也没换背景整版沿用；否则从 base 的整条抠像图层按本版剪辑方案合成（不再跑抠像推理，除非图层还不存在） */
 async function nextPerson(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, plan: CutPlan): Promise<Person> {
   const spec = c.next.settings.background;
-  if (!spec) return cutAsPerson(env, join(env.dir, 'cut.mp4'));
+  if (!spec) return cutAsPerson(env, args, join(env.dir, 'cut.mp4'));
   if (!c.stages.has('cut') && !c.stages.has('matte')) return reusePerson(env, p.dir, p.project);
   const bgPath = await resolveBg(env, args, spec, p.project, p.dir);
   return compositePerson(env, args, plan.keep, bgPath);

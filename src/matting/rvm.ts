@@ -43,7 +43,7 @@ const zeroState = (): Recurrent => {
 };
 
 /** 一个 RVM 推理会话：保存循环状态，逐帧推理（rgb24 交错 → fgr 平面 CHW 与 pha） */
-class RvmSession {
+export class RvmSession {
   private state = zeroState();
   private readonly src: Float32Array;
   private readonly dsr: ort.Tensor;

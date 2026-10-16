@@ -14,6 +14,7 @@ import { writeStoryboardCredits } from '../broll/credit-store.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { BrollDeps } from '../broll/fulfill.js';
 import type { Storyboard } from '../storyboard/schema.js';
+import { subjectStage } from './subject-step.js';
 import { validateAudio, type AudioOptions } from './audio-step.js';
 import { validateStyles, type CoverDeps, type CoverOptions } from './finish-step.js';
 import type { CaptionStyleId } from '../captions/styles.js';
@@ -151,6 +152,8 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
     bgPath = bg.path;
     base = join(args.workDir, 'person.mp4');
     subject = (await matteStage(args, cut, bg.path, { person: base }, complete)).subject;
+  } else {
+    subject = await subjectStage(args, cut, complete);
   }
   const captions = await captionsStage(args, a, join(args.workDir, 'captions.ass'), complete);
   const whiteBalance = await whiteBalanceOf(args, bgPath ?? base);

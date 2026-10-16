@@ -40,8 +40,18 @@ describe('personTransform', () => {
     expect(t.x).toBeLessThanOrEqual(0);
     expect(t.x + 1280 * t.scale).toBeGreaterThanOrEqual(1080);
   });
-  it('没有取景框时按头顶在 12% 处估计', () => {
-    expect(personTransform('split', null, 1080, 1920).y).toBe(960 + 60 - 0.12 * 1920);
+  it('没有取景框时分屏按画面居中（不按头顶估计位置压到底边）', () => {
+    // 1080×1920：视频高 1920、区域高 960，视频中心对齐区域中心 → y = 960 + (960 - 1920) / 2
+    expect(personTransform('split', null, 1080, 1920).y).toBe(480);
+    // 1280×720：铺满区域后高 960，居中即贴合区域，y 恰为分界线
+    expect(personTransform('split', null, 1280, 720).y).toBe(960);
+  });
+  it('没有取景框时分屏的视频始终盖住下半屏（上不超分界线、下不露底）', () => {
+    for (const [w, h] of [[1080, 1920], [720, 1280], [1280, 720], [1080, 1350]] as const) {
+      const t = personTransform('split', null, w, h);
+      expect(t.y).toBeLessThanOrEqual(960);
+      expect(t.y + h * t.scale).toBeGreaterThanOrEqual(1920);
+    }
   });
 });
 
