@@ -5,6 +5,7 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { MAX_VIDEO_BYTES } from './gather.js';
 import type { Candidate } from './sources/types.js';
+import { assertRemoteUrl } from './sources/url-guard.js';
 import { wikimediaFetch } from './sources/wikimedia.js';
 import { downloadImage, ORIGINAL_MAX_BYTES } from './still-fetch.js';
 
@@ -33,6 +34,7 @@ export function sizedUrl(c: Candidate, edge = WIKI_PHOTO_EDGE): { url: string; w
 
 /** 流式下载并在超过上限时中止；先写临时文件，完整后改名 */
 async function downloadVideo(url: string, dest: string, fetchImpl: typeof fetch, signal?: AbortSignal): Promise<void> {
+  assertRemoteUrl(url, '视频');
   const timeout = AbortSignal.timeout(VIDEO_TIMEOUT_MS);
   const res = await fetchImpl(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   if (!res.ok || !res.body) throw new Error(`视频下载失败 ${res.status}：${url}`);

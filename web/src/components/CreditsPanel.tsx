@@ -5,7 +5,7 @@
 import { motion } from 'motion/react';
 import type { Ref } from 'react';
 import type { CreditItem, CreditMark, Credits } from '../api';
-import { hostOf, markText, modifiedLabels, noticeOf, panelNotices, sourceLabel, summaryOf } from '../lib/credits';
+import { hostOf, markText, modifiedLabels, noticeOf, panelNotices, safeHref, sourceLabel, summaryOf } from '../lib/credits';
 import { Ico, It, SOFT, Tap } from '../ui';
 
 export type CreditsView = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; credits: Credits };
@@ -37,11 +37,13 @@ function Thumb({ item }: { item: CreditItem }) {
 
 function Who({ item }: { item: CreditItem }) {
   const host = hostOf(item.page);
+  const authorUrl = safeHref(item.authorUrl);
+  const page = safeHref(item.page);
   return (
     <div className="cred-t">
       <b>{sourceLabel(item.source)}</b>
-      {item.author && <span className="cred-by">· {item.authorUrl ? <a href={item.authorUrl} target="_blank" rel="noreferrer">{item.author}</a> : item.author}</span>}
-      {item.page && <a className="cred-src" href={item.page} target="_blank" rel="noreferrer">{item.source === 'screenshot' ? host : '作品页'}{Ico.ext}</a>}
+      {item.author && <span className="cred-by">· {authorUrl ? <a href={authorUrl} target="_blank" rel="noreferrer">{item.author}</a> : item.author}</span>}
+      {page && <a className="cred-src" href={page} target="_blank" rel="noreferrer">{item.source === 'screenshot' ? host : '作品页'}{Ico.ext}</a>}
     </div>
   );
 }
@@ -49,11 +51,12 @@ function Who({ item }: { item: CreditItem }) {
 function Meta({ item }: { item: CreditItem }) {
   const labels = modifiedLabels(item.modified);
   const showLicense = !(item.aiGenerated && item.license === 'AI 生成');
+  const licenseUrl = safeHref(item.licenseUrl);
   return (
     <div className="cred-meta">
       {item.aiGenerated && <span className="cred-chip ai">AI 生成</span>}
-      {showLicense && (item.licenseUrl
-        ? <a className="cred-chip lic" href={item.licenseUrl} target="_blank" rel="noreferrer">{item.license}</a>
+      {showLicense && (licenseUrl
+        ? <a className="cred-chip lic" href={licenseUrl} target="_blank" rel="noreferrer">{item.license}</a>
         : <span className="cred-chip lic">{item.license}</span>)}
       {labels.map((l) => <span key={l} className="cred-chip mod">{l}</span>)}
     </div>

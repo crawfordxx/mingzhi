@@ -2,6 +2,7 @@ import { rethrowIfCancelled } from '../cancel.js';
 import { DEFAULT_COVER, MIN_COVER, planCrop, type Cover, type Size } from './crop.js';
 import type { Beat } from './plan.js';
 import type { Candidate, Source, SourceQuery } from './sources/types.js';
+import { guardCandidate } from './sources/url-guard.js';
 
 /** 一个免费图库来源 */
 export interface NamedSource { name: 'pexels' | 'pixabay' | 'openverse' | 'wikimedia'; search: Source }
@@ -109,7 +110,12 @@ async function searchAll(sources: readonly NamedSource[], q: SourceQuery, signal
   const counts: Record<string, number> = {};
   const errors: string[] = [];
   const found = settled.flatMap((r, i) => {
-    if (r.status === 'fulfilled') { counts[sources[i].name] = r.value.length; return r.value; }
+    if (r.status === 'fulfilled') {
+      // 外部来源给的网址只收公网 http(s)，不合格的候选丢掉
+      const ok = r.value.flatMap((c) => guardCandidate(c) ?? []);
+      counts[sources[i].name] = ok.length;
+      return ok;
+    }
     rethrowIfCancelled(r.reason);
     if (signal?.aborted) throw r.reason;
     errors.push(`${sources[i].name}：${reason(r.reason)}`);

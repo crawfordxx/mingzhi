@@ -19,8 +19,9 @@ const p = (name: string): string => join(dir, name);
 const lavfi = (name: string, src: string, extra: string[] = []): Promise<unknown> =>
   run(FFMPEG, ['-v', 'error', '-y', '-f', 'lavfi', '-i', src, '-frames:v', '1', ...extra, p(name)]);
 
+// 预览图是本机文件：只有本地候选（截图、生成图）允许，图库候选的预览图必须是公网 http(s)
 const cand = (id: string, over: Partial<Candidate> = {}): Candidate => ({
-  id, source: 'wikimedia', kind: 'photo', thumb: p(`${id}.png`), url: `https://example.com/${id}`, width: 1920, height: 1080,
+  id, source: 'generated', kind: 'photo', thumb: p(`${id}.png`), url: `https://example.com/${id}`, width: 1920, height: 1080,
   page: `https://example.com/p/${id}`, license: 'CC0', attributionRequired: false, aiGenerated: false, ...over,
 });
 

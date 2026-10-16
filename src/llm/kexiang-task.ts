@@ -129,8 +129,12 @@ export class KexiangTaskClient implements TaskClient {
   }
 }
 
+const protocolOf = (url: string): string => { try { return new URL(url).protocol; } catch { return ''; } };
+
 /** 先写 <dest>.part，完整下载后再改名，避免中断留下半截文件 */
 export async function downloadTo(url: string, dest: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+  // 任务结果里的地址来自远程接口：只收 http(s)，拒绝 file:、data: 等协议
+  if (!/^https?:$/.test(protocolOf(url))) throw new Error(`下载地址不是 http(s) 网址，已拒绝：${url.slice(0, 120)}`);
   const res = await fetchImpl(url, { signal: AbortSignal.timeout(5 * 60_000) });
   if (!res.ok || !res.body) throw new Error(`下载失败 ${res.status}：${url}`);
   const part = `${dest}.part`;

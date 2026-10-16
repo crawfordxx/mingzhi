@@ -61,3 +61,17 @@ export function hostOf(page: string): string {
     return page;
   }
 }
+
+/**
+ * 只把 http(s) 网址渲染成链接：credits 里的作者主页、作品页、许可链接来自第三方元数据，
+ * javascript:、data:、file: 之类的协议在工作台源里点开会执行脚本或读本机文件；不合格返回 undefined（按纯文字显示）
+ */
+export function safeHref(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url.trim());
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}

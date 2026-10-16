@@ -1,6 +1,7 @@
 import { rmSync } from 'node:fs';
 import type { AppConfig } from '../config.js';
 import { downloadTo, type TaskClient } from '../llm/kexiang-task.js';
+import { isRemoteUrl } from './sources/url-guard.js';
 import { run } from '../media/exec.js';
 
 export const IMAGE_MODEL = 'GPT-Image-2.5-Flare';
@@ -70,7 +71,9 @@ export async function searchPexels(apiKey: string, query: string, dest: string, 
   const json = (await res.json()) as PexelsResponse;
   const photo = json.photos?.[0];
   const photoUrl = photo?.src?.large2x;
-  if (!photo || !photoUrl) return false;
+  // 第三方返回的网址只收公网 http(s)：图片地址不合格当作没有结果，作品页与主页不合格不记
+  if (!photo || !photoUrl || !isRemoteUrl(photoUrl)) return false;
   await downloadTo(photoUrl, dest, fetchImpl);
-  return { page: photo.url ?? 'https://www.pexels.com', ...(photo.photographer ? { author: photo.photographer } : {}), ...(photo.photographer_url ? { authorUrl: photo.photographer_url } : {}) };
+  const page = photo.url && isRemoteUrl(photo.url) ? photo.url : 'https://www.pexels.com';
+  return { page, ...(photo.photographer ? { author: photo.photographer } : {}), ...(photo.photographer_url && isRemoteUrl(photo.photographer_url) ? { authorUrl: photo.photographer_url } : {}) };
 }

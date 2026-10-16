@@ -17,6 +17,16 @@ const render = (view: CreditsView, over: Partial<Parameters<typeof CreditsPanel>
   renderToStaticMarkup(<CreditsPanel version={2} view={view} onMark={vi.fn()} onCopy={vi.fn()} onClose={vi.fn()} {...over} />);
 
 describe('素材来源面板渲染', () => {
+  it('第三方链接只渲染 http(s)：javascript:、data:、相对路径（「AI 生成」）不出链接，文字照常显示', () => {
+    const evil = item({ author: 'Mallory', authorUrl: 'javascript:fetch("/api/runs",{method:"POST"})', page: 'data:text/html,<script>1</script>', licenseUrl: 'file:///etc/passwd' });
+    const html = render(ready([evil, ai, item({ file: 'gen.jpg', source: 'generated', page: 'AI 生成', aiGenerated: true })]));
+    expect(html).not.toMatch(/href="(javascript|data|file):/i);
+    expect(html).not.toContain('href="AI 生成"');
+    expect(html).toContain('Mallory');
+    expect(html).toContain('Pexels License');
+    expect(render(ready([item()]))).toContain('href="https://www.pexels.com/@ann"');
+  });
+
   it('逐条列出：来源、作者、许可、加工项、缩略图、替换与删除', () => {
     const html = render(ready([item(), ccBy, shot, ai], 'Pexels @Ann'));
     expect(html).toContain('素材来源');
