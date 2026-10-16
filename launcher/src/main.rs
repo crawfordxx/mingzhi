@@ -2,7 +2,7 @@
 //!
 //! 环境变量（开发 / 联调用）：
 //! - MINGZHI_APP_ROOT：应用根目录（默认 macOS ~/Library/Application Support/Mingzhi）
-//! - MINGZHI_MANIFEST：用这个清单文件代替编译进来的清单
+//! - MINGZHI_MANIFEST：用这个清单文件代替编译进来的清单（注意：清单版本号更高会抬高 data/data-version，之后低版本启动器会被挡住）
 //! - MINGZHI_APP_DIR：用现成目录当应用本体（不下载 app 项）
 //! - MINGZHI_NO_BROWSER=1：不自动打开浏览器，也不弹出错误对话框（只打印）
 //!
@@ -104,8 +104,8 @@ fn run() -> Result<ExitCode> {
     };
 
     let manifest = load_manifest()?;
-    // 数据被更新版本用过时，旧启动器不碰它
-    dataver::ensure(&root, &manifest.version)?;
+    // 数据被更新版本用过时，旧启动器不碰它（只读检查；标记在服务启动成功后才更新，见 flow）
+    dataver::check(&root, &manifest.version)?;
     let app_dir = std::env::var_os("MINGZHI_APP_DIR").map(PathBuf::from);
     let settings = Arc::new(RwLock::new(State::load(&root.state_file())?.settings()));
     let proxy = ProxyConfig::from_env();

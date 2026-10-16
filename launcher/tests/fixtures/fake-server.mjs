@@ -18,7 +18,7 @@ else {
     res.writeHead(ok ? 200 : 503, { 'content-type': 'application/json' });
     res.end(ok ? '{"ok":true}' : '{}');
   });
-  // 与真实服务一致：端口被占用时顺延
+  // 测试里用系统分配的空闲端口（不用 MINGZHI_PORT 指定的 4321，免得与本机正在跑的服务冲突）
   const listen = (port, left) => {
     server.once('error', (err) => {
       if (err.code === 'EADDRINUSE' && left > 0) listen(port + 1, left - 1);
@@ -29,15 +29,15 @@ else {
       console.log(`明知AI剪辑 已启动：http://127.0.0.1:${server.address().port}`);
       if (mode === 'quit-later') {
         // 模拟用户在工作台里点「退出」：正常退出，退出码 0
-        setTimeout(() => process.exit(0), 400);
+        setTimeout(() => process.exit(0), 1500);
       }
       if (mode === 'crash-later') {
         setTimeout(() => {
           console.error('Error: boom 渲染进程崩了');
           process.exit(3);
-        }, 400);
+        }, 1500);
       }
     });
   };
-  listen(Number(process.env.MINGZHI_PORT) || 0, 10);
+  listen(0, 0);
 }

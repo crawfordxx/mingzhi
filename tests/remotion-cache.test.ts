@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // 只记录传给 bundle 的参数，不真的打包
@@ -10,7 +12,7 @@ vi.mock('@remotion/bundler', () => ({
   },
 }));
 
-const { remotionCacheDir, withBundle } = await import('../src/compose/render.js');
+const { pruneStaleRemotionCaches, remotionCacheDir, withBundle } = await import('../src/compose/render.js');
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -36,5 +38,65 @@ describe('Remotion webpack 缓存目录', () => {
     const compiler = { options: { cache: false } };
     expect(() => plugins[0].apply(compiler)).not.toThrow();
     expect(compiler.options.cache).toBe(false);
+  });
+});
+
+describe('清理过期的 webpack 缓存（每个应用版本一份，不清会随升级一直长）', () => {
+  const NOW = 'a'.repeat(32);
+  const OLD1 = 'b'.repeat(32);
+  const OLD2 = 'c'.repeat(32);
+  let dir: string;
+  const make = (...parts: string[]): string => {
+    const p = join(dir, ...parts);
+    mkdirSync(p, { recursive: true });
+    writeFileSync(join(p, 'f'), 'x');
+    return p;
+  };
+  const setup = (): void => { dir = mkdtempSync(join(tmpdir(), 'mz-cache-')); };
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('删掉同一环境目录下 hash 不同的兄弟，以及别的 Remotion 版本的环境目录，当前的保留', () => {
+    setup();
+    make('remotion-production-4.0.531', NOW);
+    make('remotion-production-4.0.531', OLD1);
+    make('remotion-production-4.0.531', OLD2);
+    make('remotion-production-4.0.100', OLD1);
+    pruneStaleRemotionCaches(dir, `remotion-production-4.0.531${join('/', NOW)}`);
+    expect(existsSync(join(dir, 'remotion-production-4.0.531', NOW, 'f'))).toBe(true);
+    expect(existsSync(join(dir, 'remotion-production-4.0.531', OLD1))).toBe(false);
+    expect(existsSync(join(dir, 'remotion-production-4.0.531', OLD2))).toBe(false);
+    expect(existsSync(join(dir, 'remotion-production-4.0.100'))).toBe(false);
+  });
+
+  it('名称不符合模式的一律不碰（用户自己放的东西、其它缓存）', () => {
+    setup();
+    make('remotion-production-4.0.531', NOW);
+    const mine = make('remotion-production-4.0.531', 'my-backup');
+    const short = make('remotion-production-4.0.531', 'abc123');
+    const other = make('other-cache', OLD1);
+    const dotted = make('remotion-production-latest', OLD1);
+    pruneStaleRemotionCaches(dir, `remotion-production-4.0.531/${NOW}`);
+    for (const p of [mine, short, other, dotted]) expect(existsSync(join(p, 'f')), p).toBe(true);
+  });
+
+  it('缓存名认不出时什么都不删；目录不存在也不报错', () => {
+    setup();
+    make('remotion-production-4.0.531', OLD1);
+    for (const name of ['', 'n', 'remotion-production-4.0.531', `evil/${NOW}`, `../${NOW}`, `remotion-production-4.0.531/not-a-hash`]) {
+      pruneStaleRemotionCaches(dir, name);
+    }
+    expect(existsSync(join(dir, 'remotion-production-4.0.531', OLD1, 'f'))).toBe(true);
+    expect(() => pruneStaleRemotionCaches(join(dir, 'nope'), `remotion-production-4.0.531/${NOW}`)).not.toThrow();
+  });
+
+  it('插件 apply 时顺带清理（用 bundler 给的缓存名）', async () => {
+    setup();
+    vi.stubEnv('MINGZHI_DATA_DIR', dir);
+    const cacheRoot = join(dir, 'cache', 'remotion');
+    mkdirSync(join(cacheRoot, 'remotion-production-4.0.531', OLD1), { recursive: true });
+    await withBundle('/work', async () => undefined);
+    const plugins = captured.options!.webpackOverride({ resolve: {} }).plugins as { apply: (c: unknown) => void }[];
+    plugins[0].apply({ options: { cache: { type: 'filesystem', name: `remotion-production-4.0.531/${NOW}` } } });
+    expect(existsSync(join(cacheRoot, 'remotion-production-4.0.531', OLD1))).toBe(false);
   });
 });

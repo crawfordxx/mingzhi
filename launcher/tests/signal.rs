@@ -35,11 +35,20 @@ fn pid_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
-/// 起启动器，等到「工作台已就绪」，返回（进程，服务进程 pid）。
-/// `keep_reading` 为 false 时丢掉 stderr 的读端，模拟终端窗口已经断开（之后任何写 stderr 都会失败）。
-fn spawn_launcher(root: &std::path::Path, server: &TestServer, keep_reading: bool) -> (Child, i32) {
+/// 写好假清单（一个假 node，下载后用假服务脚本充当）与假应用目录，返回（清单路径，应用目录，清单）。
+/// `node_route_ok` 为 false 时 node 的下载地址返回 404，必需项安装会失败。
+fn write_fixture(
+    root: &std::path::Path,
+    server: &TestServer,
+    node_route_ok: bool,
+) -> (PathBuf, PathBuf) {
     let node = node_targz();
-    server.route("/node.tar.gz", vec![Behavior::Serve(node.clone())]);
+    let behavior = if node_route_ok {
+        Behavior::Serve(node.clone())
+    } else {
+        Behavior::NotFound
+    };
+    server.route("/node.tar.gz", vec![behavior]);
     let mut it = archive_item(
         "node-fake",
         &node,
@@ -64,18 +73,41 @@ fn spawn_launcher(root: &std::path::Path, server: &TestServer, keep_reading: boo
     let app = root.join("appdir");
     std::fs::create_dir_all(app.join("src/server")).unwrap();
     std::fs::write(app.join("src/server/index.ts"), "").unwrap();
+    (manifest_path, app)
+}
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mingzhi-launcher"))
-        .env("MINGZHI_APP_ROOT", root.join("root"))
-        .env("MINGZHI_MANIFEST", &manifest_path)
-        .env("MINGZHI_APP_DIR", &app)
+/// 带好环境变量的启动器命令（不弹浏览器、不走代理）。
+fn launcher_command(root: &std::path::Path) -> Command {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_mingzhi-launcher"));
+    cmd.env("MINGZHI_APP_ROOT", root.join("root"))
+        .env("MINGZHI_MANIFEST", root.join("manifest.json"))
+        .env("MINGZHI_APP_DIR", root.join("appdir"))
         .env("MINGZHI_NO_BROWSER", "1")
         .env_remove("HTTP_PROXY")
         .env_remove("HTTPS_PROXY")
         .env_remove("http_proxy")
         .env_remove("https_proxy")
         .env_remove("ALL_PROXY")
-        .env_remove("all_proxy")
+        .env_remove("all_proxy");
+    cmd
+}
+
+/// 起启动器，等到「工作台已就绪」，返回（进程，服务进程 pid）。
+/// `keep_reading` 为 false 时丢掉 stderr 的读端，模拟终端窗口已经断开（之后任何写 stderr 都会失败）。
+fn spawn_launcher(root: &std::path::Path, server: &TestServer, keep_reading: bool) -> (Child, i32) {
+    spawn_launcher_seeded(root, server, keep_reading, |_| {})
+}
+
+/// 同上，启动前先让 `seed` 往应用根目录（`<root>/root`）里放东西。
+fn spawn_launcher_seeded(
+    root: &std::path::Path,
+    server: &TestServer,
+    keep_reading: bool,
+    seed: impl FnOnce(&std::path::Path),
+) -> (Child, i32) {
+    write_fixture(root, server, true);
+    seed(&root.join("root"));
+    let mut child = launcher_command(root)
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
         .spawn()
@@ -175,13 +207,7 @@ fn 第二次启动交接后以退出码10退出且原实例不受影响() {
     let server = TestServer::start();
     let (mut first, _service_pid) = spawn_launcher(tmp.path(), &server, true);
 
-    let second = Command::new(env!("CARGO_BIN_EXE_mingzhi-launcher"))
-        .env("MINGZHI_APP_ROOT", tmp.path().join("root"))
-        .env("MINGZHI_MANIFEST", tmp.path().join("manifest.json"))
-        .env("MINGZHI_APP_DIR", tmp.path().join("appdir"))
-        .env("MINGZHI_NO_BROWSER", "1")
-        .output()
-        .unwrap();
+    let second = launcher_command(tmp.path()).output().unwrap();
     let err = String::from_utf8_lossy(&second.stderr);
     assert_eq!(second.status.code(), Some(10), "{err}");
     assert!(
@@ -196,4 +222,117 @@ fn 第二次启动交接后以退出码10退出且原实例不受影响() {
     if !exits_within(&mut first, Duration::from_secs(12)) {
         let _ = first.kill();
     }
+}
+
+// ---- 接线：dataver / prune 在 main 与 flow 里的调用 ----
+
+fn marker(root: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(root.join("root/data/data-version")).ok()
+}
+
+fn stop(mut child: Child) {
+    // SAFETY：向刚起的子进程发信号
+    unsafe { libc::kill(child.id() as i32, libc::SIGINT) };
+    if !exits_within(&mut child, Duration::from_secs(12)) {
+        let _ = child.kill();
+    }
+}
+
+fn seed_dirs(app_root: &std::path::Path, marker: &str) {
+    for dir in ["app/0.9.0", "app/0.8.0", "app/my-notes"] {
+        std::fs::create_dir_all(app_root.join(dir)).unwrap();
+        std::fs::write(app_root.join(dir).join("f"), "x").unwrap();
+    }
+    std::fs::create_dir_all(app_root.join("data")).unwrap();
+    std::fs::write(app_root.join("data/data-version"), marker).unwrap();
+}
+
+/// 服务启动成功后：数据版本记成自己的版本，旧 app 目录在后台被清掉，其它目录不动。
+#[test]
+fn 启动成功后登记数据版本并后台清理旧版本() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start();
+    let (child, _service_pid) =
+        spawn_launcher_seeded(tmp.path(), &server, true, |r| seed_dirs(r, "0.5.0"));
+
+    let root = tmp.path().join("root");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while (root.join("app/0.9.0").exists() || marker(tmp.path()).as_deref() != Some("1.0.0"))
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(marker(tmp.path()).as_deref(), Some("1.0.0"));
+    assert!(!root.join("app/0.9.0").exists() && !root.join("app/0.8.0").exists());
+    assert!(
+        root.join("app/my-notes/f").exists(),
+        "名字不是版本号的目录不能动"
+    );
+    stop(child);
+}
+
+/// 数据已被更新版本用过：只读检查就拒绝，不装任何东西、不改标记、不清理。
+#[test]
+fn 数据版本比启动器新时拒绝启动且不动任何数据() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start();
+    write_fixture(tmp.path(), &server, true);
+    seed_dirs(&tmp.path().join("root"), "9.0.0");
+
+    let out = launcher_command(tmp.path()).output().unwrap();
+
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(err.contains("请使用最新版启动器"), "{err}");
+    assert_eq!(marker(tmp.path()).as_deref(), Some("9.0.0"));
+    assert!(tmp.path().join("root/app/0.9.0/f").exists(), "不清理");
+    assert!(!tmp.path().join("root/runtime/node").exists(), "不安装");
+    assert_eq!(server.total_requests(), 0, "不下载");
+}
+
+/// 升级中途失败（必需项下载不到）：标记保持不变，不清理旧版本，留着的旧启动器照常能用。
+#[test]
+fn 安装失败时数据版本标记不变也不清理旧版本() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start();
+    write_fixture(tmp.path(), &server, false);
+    seed_dirs(&tmp.path().join("root"), "0.5.0");
+
+    let mut child = launcher_command(tmp.path())
+        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
+    let mut page = None;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while page.is_none() && Instant::now() < deadline {
+        let Some(Ok(line)) = lines.next() else { break };
+        page = line
+            .split_once("进度页：")
+            .map(|(_, u)| u.trim().to_string());
+    }
+    let page = page.expect("没拿到进度页地址");
+    std::thread::spawn(move || for _ in lines {});
+
+    let mut failed = false;
+    while !failed && Instant::now() < deadline {
+        let body = ureq::get(&format!("{page}/api/state"))
+            .call()
+            .unwrap()
+            .into_string()
+            .unwrap();
+        let state: serde_json::Value = serde_json::from_str(&body).unwrap();
+        failed = state["stage"] == "failed";
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(failed, "应停在「出错」阶段");
+    std::thread::sleep(Duration::from_millis(300)); // 给（本不该发生的）后台清理一点时间
+
+    assert_eq!(marker(tmp.path()).as_deref(), Some("0.5.0"));
+    assert!(tmp.path().join("root/app/0.9.0/f").exists());
+    stop(child);
 }

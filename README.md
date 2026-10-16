@@ -169,7 +169,7 @@
 | --- | --- | --- |
 | 应用目录 | `~/Library/Application Support/Mingzhi` | `%LOCALAPPDATA%\Mingzhi` |
 
-应用目录里：`runtime/` 是 Node 与 Chrome，`app/<版本>/` 是应用本体，`data/` 是你的项目（`data/spaces/`）、模型（`data/models/`）、配乐字体（`data/assets/`）、ffmpeg（`data/bin/`）与渲染缓存（`data/cache/remotion/`，首次出片后约 170 MB，可随时删除，下次渲染会重建）。`data/data-version` 记录用过这份数据的最高版本：如果你不小心打开了旧版启动器，它会提示「请使用最新版启动器」并退出，不会改动你的数据。安装后一共约 **1.1 GB**（应用本体约 250 MB，Node 与 Chrome 约 380 MB，模型、ffmpeg、配乐与字体约 480 MB）。导出的成片和封面在 `下载/明知AI剪辑/`。可想 AI 的 key 在 macOS 上存于钥匙串（条目名 `mingzhi`），Windows 上加密存在 `data/` 里。
+应用目录里：`runtime/` 是 Node 与 Chrome，`app/<版本>/` 是应用本体，`data/` 是你的项目（`data/spaces/`）、模型（`data/models/`）、配乐字体（`data/assets/`）、ffmpeg（`data/bin/`）与渲染缓存（`data/cache/remotion/`，首次出片后约 170 MB，可随时删除，下次渲染会重建；升级后旧版本的缓存会自动清掉）。`data/data-version` 记录用过这份数据的最高版本（新版启动器成功起来之后才更新）：如果你不小心打开了旧版启动器，它会提示「请使用最新版启动器」并退出，不会改动你的数据。安装后一共约 **1.1 GB**（应用本体约 250 MB，Node 与 Chrome 约 380 MB，模型、ffmpeg、配乐与字体约 480 MB）。导出的成片和封面在 `下载/明知AI剪辑/`。可想 AI 的 key 在 macOS 上存于钥匙串（条目名 `mingzhi`），Windows 上加密存在 `data/` 里。
 
 **卸载**：先退出，删掉启动器，再删掉上面的应用目录（项目会一起删掉，「下载」里导出的成片不受影响）。macOS 上可以再到「钥匙串访问」里删掉名为 `mingzhi` 的条目。
 </details>
@@ -178,7 +178,7 @@
 
 有新版本时，工作台右上角会出现「有新版本 v0.x」，点开能看到更新说明，点「去下载」打开 Release 页面。下载新的启动器双击即可：通常只需补下新的应用本体（约 50–60 MB），模型等没变的组件不会重下，项目和设置都保留。
 
-启动器启动时会自动清理旧版本：`app/` 下保留当前版本和上一版（便于回退，每个约 250 MB），更早的版本，以及不再使用的旧版 Chrome（`runtime/chrome-headless-shell/<旧版本>/`）会被删除。只清理这两处、名称是版本号的文件夹，不会动 `data/`。上一版不想留的话，退出后手动删掉 `app/<上一版版本号>/` 即可。
+升级后，工作台起来之后启动器会在后台自动清理旧版本：`app/` 下只保留当前版本，更旧的版本文件夹和不再使用的旧版 Chrome（`runtime/chrome-headless-shell/<旧版本>/`）会被删除，渲染缓存（`data/cache/remotion/`）里旧版本留下的那份也会在下次渲染前清掉。只清理这几处、名称是版本号的文件夹，不会动 `data/` 里的项目、模型和设置。不支持回退到旧版本：旧版启动器看到数据已被新版用过，会提示「请使用最新版启动器」。
 
 检查更新每天最多一次，只向 GitHub 发一个匿名请求，不带任何标识；会使用 `HTTPS_PROXY` 环境变量或 macOS 的系统代理。没查到（比如当时网络不通）也不会提示，当天不再重试；不想要可以在齿轮 →「检查更新」里关掉。也可以随时自己去 [Releases][releases] 看。
 

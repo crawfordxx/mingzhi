@@ -93,7 +93,7 @@ fn 清单里没有chrome时不删任何chrome目录() {
 }
 
 #[test]
-fn app目录保留当前与上一版其余删除() {
+fn app目录只保留当前版本() {
     let (_tmp, root) = setup();
     for v in ["0.0.9", "0.1.0", "0.1.5", "0.2.0"] {
         mkdir(&root, &format!("app/{v}"));
@@ -105,19 +105,31 @@ fn app目录保留当前与上一版其余删除() {
         .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    assert_eq!(names, vec!["0.0.9", "0.1.0"]);
-    assert!(exists(&root, "app/0.2.0/f") && exists(&root, "app/0.1.5/f"));
+    assert_eq!(names, vec!["0.0.9", "0.1.0", "0.1.5"], "上一版也删");
+    assert!(exists(&root, "app/0.2.0/f"));
 }
 
 #[test]
-fn 比当前新的app目录和不像版本号的目录不碰() {
+fn 比当前新的app目录和不是严格semver的目录不碰() {
     let (_tmp, root) = setup();
-    for v in ["0.1.0", "0.2.0", "0.3.0", "tmp", "backup-0.0.1", "0.2"] {
+    let keep = [
+        "0.2.0",
+        "0.3.0",
+        "tmp",
+        "backup-0.0.1",
+        "0.2",
+        "0.0.1-backup",
+        "v0.0.1",
+        "0.0.1.0",
+        "0.0.1-rc.1",
+        "00.0.1x",
+    ];
+    for v in keep {
         mkdir(&root, &format!("app/{v}"));
     }
     let removed = prune(&root, &manifest("0.2.0", "149.0.7790.0"), PLATFORM);
     assert!(removed.is_empty(), "{removed:?}");
-    for v in ["0.1.0", "0.2.0", "0.3.0", "tmp", "backup-0.0.1", "0.2"] {
+    for v in keep {
         assert!(exists(&root, &format!("app/{v}/f")), "{v}");
     }
 }
@@ -127,7 +139,6 @@ fn 比当前新的app目录和不像版本号的目录不碰() {
 fn 符号链接不跟随不删除() {
     let (_tmp, root) = setup();
     mkdir(&root, "app/0.2.0");
-    mkdir(&root, "app/0.1.5");
     let outside = tempfile::tempdir().unwrap();
     fs::write(outside.path().join("keep"), "x").unwrap();
     std::os::unix::fs::symlink(outside.path(), root.app().join("0.0.1")).unwrap();
@@ -178,7 +189,6 @@ fn 被清理目录的安装记录一并去掉其它记录保留() {
     assert_eq!(
         keys,
         vec![
-            "app-darwin-arm64@app/0.1.0",
             "app-darwin-arm64@app/0.2.0",
             "legacy-id",
             "node-darwin-arm64@runtime/node"

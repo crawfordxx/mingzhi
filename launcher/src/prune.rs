@@ -1,10 +1,11 @@
 //! 清理旧版本：只删 AppRoot 里、名称符合版本号模式、当前清单已不再引用的旧目录。
 //!
 //! - `runtime/chrome-headless-shell/<版本>`：不是当前清单引用的 Chrome 版本，整个删除；
-//! - `app/<版本>`：保留当前版本和「上一版」（版本号低于当前的最高一个，便于回退），更旧的删除；
-//!   不比当前版本低的目录一律不碰。
+//! - `app/<版本>`：只保留当前版本，版本号更低的删除（回退不受支持：旧启动器会被 data-version 挡住）；
+//!   目录名必须是严格的 `x.y.z`，不比当前版本低的、名字不是严格 semver 的（用户自己的目录）一律不碰。
 //!
 //! 尽力而为：删不掉（被占用等）就留着，下次启动再试；不会让启动失败。
+//! 目录大（上万个文件）、Windows 上还可能被杀软扫描，调用方应放到服务启动之后的后台线程里做。
 
 use crate::fsx;
 use crate::manifest::Manifest;
@@ -111,20 +112,25 @@ fn prune_chrome(root: &AppRoot, manifest: &Manifest, platform: &str) -> Vec<Path
         .collect()
 }
 
+/// 严格的 `x.y.z`（只有数字，三段）。
+fn is_strict_semver(name: &str) -> bool {
+    let parts: Vec<&str> = name.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
 fn prune_apps(root: &AppRoot, current: &str) -> Vec<PathBuf> {
     let Some(cur) = Version::parse(current) else {
         return Vec::new();
     };
-    let mut older: Vec<(Version, String, PathBuf)> = subdirs(&root.app())
+    subdirs(&root.app())
         .into_iter()
-        .filter_map(|(name, path)| Some((Version::parse(&name)?, name, path)))
-        .filter(|(v, _, _)| *v < cur)
-        .collect();
-    older.sort();
-    older.pop(); // 上一版留着
-    older
-        .into_iter()
-        .filter(|(_, _, path)| remove(path))
-        .map(|(_, _, path)| path)
+        .filter(|(name, _)| is_strict_semver(name))
+        .filter_map(|(name, path)| Some((Version::parse(&name)?, path)))
+        .filter(|(v, _)| *v < cur)
+        .filter(|(_, path)| remove(path))
+        .map(|(_, path)| path)
         .collect()
 }

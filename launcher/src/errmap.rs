@@ -91,6 +91,9 @@ const RULES: [(Kind, &[&str]); 9] = [
             "网络错误",
             "连接中断",
             "连接提前结束",
+            // 408 / 429 是临时错误（稍后重试即可），不算「地址不可用」
+            "服务器返回 408",
+            "服务器返回 429",
             "os error 10060)",
             "os error 10061)",
             "os error 11001)",
@@ -98,19 +101,25 @@ const RULES: [(Kind, &[&str]); 9] = [
     ),
     (
         Kind::Unavailable,
-        &[
-            "服务器返回 4",
-            "文件长度超出清单",
-            "文件总长度与清单不符",
-            "超出清单声明",
-        ],
+        &["文件长度超出清单", "文件总长度与清单不符", "超出清单声明"],
     ),
 ];
 
-/// 应用本体（id 以 `app-` 开头）所有地址都是 4xx（代理认证 407 除外）：
+/// 消息里出现了「永久性」的 4xx（不含 407 代理认证、408 超时、429 限流这三个与地址本身无关的）。
+fn has_permanent_4xx(lower: &str) -> bool {
+    lower.match_indices("服务器返回 ").any(|(i, m)| {
+        let code: String = lower[i + m.len()..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        code.len() == 3 && code.starts_with('4') && !["407", "408", "429"].contains(&code.as_str())
+    })
+}
+
+/// 应用本体（id 以 `app-` 开头）所有地址都是永久性 4xx：
 /// 它只有 GitHub Release 一个地址，换下载源没有用，要单独说。
 fn app_unreachable(lower: &str) -> bool {
-    lower.starts_with("app-") && lower.contains("服务器返回 4") && !lower.contains("服务器返回 407")
+    lower.starts_with("app-") && has_permanent_4xx(lower)
 }
 
 pub fn classify(raw: &str) -> Kind {
@@ -120,7 +129,9 @@ pub fn classify(raw: &str) -> Kind {
         if *kind == Kind::Proxy && app_unreachable(&lower) {
             return Kind::AppUnavailable;
         }
-        if pats.iter().any(|p| lower.contains(p)) {
+        let hit = pats.iter().any(|p| lower.contains(p))
+            || (*kind == Kind::Unavailable && has_permanent_4xx(&lower));
+        if hit {
             return *kind;
         }
     }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -26,15 +26,43 @@ export function remotionCacheDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(loadConfig(env).dataDir, 'cache', 'remotion');
 }
 
+const CACHE_HASH = /^[0-9a-f]{32}$/;
+const CACHE_ENV_DIR = /^remotion-production-[\d.]+$/;
+
 /**
- * 把 webpack 缓存目录指到 cacheDirectory。bundler 在 webpackOverride 之后才写入 cache 配置，
+ * 清掉数据目录里过期的 webpack 缓存：缓存名是整份打包配置的 md5（含应用目录的绝对路径），
+ * 每个应用版本一份、约 170 MB，不清理会随升级一直长。`name` 是 bundler 给的 `remotion-production-<版本>/<hash>`。
+ * 只删 cacheDir 之下、名称符合模式的目录：同一环境目录下 hash 不同的兄弟，以及别的 Remotion 版本的环境目录。
+ */
+export function pruneStaleRemotionCaches(cacheDir: string, name: string): void {
+  const [envDir, hash] = name.split(/[\\/]/);
+  if (!envDir || !hash || !CACHE_ENV_DIR.test(envDir) || !CACHE_HASH.test(hash)) return; // 认不出就什么都不删
+  const remove = (path: string): void => {
+    try { rmSync(path, { recursive: true, force: true }); } catch { /* 删不掉下次再试，不影响打包 */ }
+  };
+  const list = (dir: string): string[] => {
+    try { return readdirSync(dir); } catch { return []; }
+  };
+  for (const entry of list(cacheDir)) {
+    if (entry !== envDir && CACHE_ENV_DIR.test(entry)) remove(join(cacheDir, entry));
+  }
+  for (const entry of list(join(cacheDir, envDir))) {
+    if (entry !== hash && CACHE_HASH.test(entry)) remove(join(cacheDir, envDir, entry));
+  }
+}
+
+/**
+ * 把 webpack 缓存目录指到 cacheDirectory，并清掉过期缓存。bundler 在 webpackOverride 之后才写入 cache 配置，
  * 所以不能直接在 override 里改；插件的 apply 发生在 webpack 补默认值（含默认缓存目录）之前，在这里设置最稳妥。
  */
 function cacheDirPlugin(cacheDirectory: string): { apply: (compiler: { options: { cache?: unknown } }) => void } {
   return {
     apply(compiler) {
       const cache = compiler.options.cache;
-      if (cache && typeof cache === 'object') (cache as { cacheDirectory?: string }).cacheDirectory = cacheDirectory;
+      if (!cache || typeof cache !== 'object') return;
+      const c = cache as { cacheDirectory?: string; name?: string };
+      c.cacheDirectory = cacheDirectory;
+      if (c.name) pruneStaleRemotionCaches(cacheDirectory, c.name);
     },
   };
 }

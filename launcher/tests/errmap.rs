@@ -214,3 +214,23 @@ fn 数据版本过新归为请使用最新版启动器() {
     assert_eq!(f.kind, Kind::Outdated);
     assert_eq!(f.title, "请使用最新版启动器");
 }
+
+#[test]
+fn 状态码408与429是临时错误不算地址不可用() {
+    for code in [408, 429] {
+        let app = format!("app-darwin-arm64 下载失败，所有镜像均不可用（最后一次：https://github.com/o/r/a：服务器返回 {code}）");
+        assert_eq!(friendly(&app).kind, Kind::Network, "{code}");
+        let node =
+            format!("node 下载失败，所有镜像均不可用（最后一次：https://x：服务器返回 {code}）");
+        assert_eq!(friendly(&node).kind, Kind::Network, "{code}");
+    }
+    for code in [403, 404, 410] {
+        let app = format!(
+            "app-darwin-arm64 下载失败，所有镜像均不可用（最后一次：https://x：服务器返回 {code}）"
+        );
+        assert_eq!(friendly(&app).kind, Kind::AppUnavailable, "{code}");
+        let node =
+            format!("node 下载失败，所有镜像均不可用（最后一次：https://x：服务器返回 {code}）");
+        assert_eq!(friendly(&node).kind, Kind::Unavailable, "{code}");
+    }
+}

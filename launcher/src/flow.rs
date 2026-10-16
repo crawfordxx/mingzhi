@@ -30,6 +30,7 @@ enum Flow<T> {
 pub fn run(shared: Arc<Shared>, plan: Arc<Plan>, rx: Receiver<Command>) {
     shared.progress.register(&plan.items());
     let mut optional: Option<Sender<()>> = None;
+    let mut cleaned = false;
     loop {
         let flow = prepare(&shared, &plan, &rx).and(|| start_service(&shared, &plan, &rx));
         let mut service = match flow {
@@ -38,12 +39,30 @@ pub fn run(shared: Arc<Shared>, plan: Arc<Plan>, rx: Receiver<Command>) {
             Flow::Exit => return,
         };
         // 服务起来后在后台补可选项（只开一个后台线程）
+        after_service_started(&plan, &mut cleaned);
         let kick = optional.get_or_insert_with(|| spawn_optional(plan.clone()));
         let _ = kick.send(());
         match watch(&shared, &mut service, &rx, kick) {
             Flow::Next(()) | Flow::Again => continue,
             Flow::Exit => return,
         }
+    }
+}
+
+/// 必需项装好、服务启动成功之后的收尾：
+/// - 登记数据版本（放在这里：升级中途失败时标记不变，留着的旧启动器照常能用）；
+/// - 后台清理旧版本（目录大，不能拖慢启动；只做一次）。
+fn after_service_started(plan: &Arc<Plan>, cleaned: &mut bool) {
+    if let Err(e) = crate::dataver::record(&plan.root, &plan.manifest.version) {
+        crate::signal::say(&format!("提示：没能记录数据版本（{e}）"));
+    }
+    if !std::mem::replace(cleaned, true) {
+        let plan = plan.clone();
+        std::thread::spawn(move || {
+            for dir in crate::prune::prune(&plan.root, &plan.manifest, &plan.platform) {
+                crate::signal::say(&format!("已清理旧版本：{}", dir.display()));
+            }
+        });
     }
 }
 
@@ -76,13 +95,7 @@ fn prepare(shared: &Shared, plan: &Plan, rx: &Receiver<Command>) -> Flow<()> {
         |i| plan.includes(i) && !i.optional,
     );
     match required {
-        Ok(_) => {
-            // 必需项都装好了再清理旧版本（失败时旧的可能还要回退用）
-            for dir in crate::prune::prune(&plan.root, &plan.manifest, &plan.platform) {
-                crate::signal::say(&format!("已清理旧版本：{}", dir.display()));
-            }
-            Flow::Next(())
-        }
+        Ok(_) => Flow::Next(()),
         Err(e) => {
             shared.set(Stage::Failed, Some(friendly(&e.to_string())), None);
             wait_for(rx, &[Command::Retry])
