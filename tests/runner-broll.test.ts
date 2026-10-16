@@ -1,10 +1,11 @@
 // 工作台版本运行器接 B-roll 编排：首版规划节拍放素材、写 credits.json；修改版本「换一张 B-roll」只重做该镜头
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { VersionState } from '../src/edit/apply.js';
 import type { ProjectFile } from '../src/pipeline/project.js';
 import { runFirstVersion, runNextVersion } from '../src/workspace/runner.js';
+import { measureFilm, type MeasureOptions } from '../src/qa/film-measure.js';
 import { beatJson, brollAnswers, fakeBrollDeps, makeBrollFixtures, POOL, wiki } from './helpers/broll-fakes.js';
 import { makeFixture, type Fixture } from './helpers/runner-fakes.js';
 
@@ -65,5 +66,31 @@ describe('运行器 × B-roll 编排', () => {
     expect(s3.shots.some((s) => s.broll?.file === s2.shots[other].broll?.file)).toBe(false);
     expect(s3.shots.find((s) => s.broll)?.broll?.file).toBe(s2.shots[k].broll?.file); // 标了 replace 但没提交的不动
     expect(meta3.changedShots.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('工作台路径的真实整片度量：版本目录里只有素材引用，记录在 base/broll；同一候选换个文件名再用一次也判复用', async () => {
+    const f = makeFixture();
+    withBroll(f, []);
+    let opts: MeasureOptions | undefined;
+    const ok = { ok: true, durationSec: 0, metrics: [], templates: [], skipped: [] };
+    f.ctx.qaDeps = { ...f.ctx.qaDeps, film: async (o) => { opts = o; return ok; } };
+    await runFirstVersion(f.ctx, f.spaceId);
+    const base = f.store.baseDir(f.spaceId);
+    const dir1 = f.store.versionDir(f.spaceId, 1);
+    const s1 = readJson<VersionState>(join(dir1, 'state.json')).storyboard;
+    expect(opts?.workDir).toBe(dir1);
+    expect(opts?.metaDir).toBe(base);
+    const used = s1.shots.find((s) => s.broll)?.broll;
+    if (!used || !opts) throw new Error('v1 应放进 B-roll');
+    // 同一张图的另一份裁切（文件名不同、候选 id 相同），放进一个人物全屏镜头
+    const twin = used.file.replace(/(\.\w+)$/, '-twin$1');
+    copyFileSync(join(base, used.file), join(base, twin));
+    copyFileSync(join(base, `${used.file}.json`), join(base, `${twin}.json`));
+    copyFileSync(join(base, used.file), join(dir1, twin));
+    // 第 1 个镜头改成全屏插入这张「孪生」图
+    const storyboard = { ...s1, shots: s1.shots.map((s, i) => (i === 0 ? { start: s.start, end: s.end, layout: 'broll' as const, broll: { ...used, file: twin } } : s)) };
+    const report = await measureFilm({ ...opts, storyboard });
+    expect(report.metrics.find((m) => m.id === 'reuse')).toMatchObject({ ok: false });
+    expect(report.metrics.find((m) => m.id === 'reuse')?.detail).toMatch(/复用 wikimedia:/);
   }, 120_000);
 });

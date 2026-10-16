@@ -1,7 +1,7 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
-import { CONTENT_W, CardFrame, Reveal, SafeArea, SurfaceContext, clampLines, easeAt, fitFontSize, maxFontSize, springAt, textEm, type TemplateProps } from './parts.js';
+import { CONTENT_W, CardFrame, Reveal, SafeArea, SurfaceContext, clampLines, easeAt, fitFontSize, maxFontSize, springAt, textEm, useMinPx, type TemplateProps } from './parts.js';
 
 const NUMBER_PX = 260;
 /** 没有标签格时数字是整张卡的主体：更大，说明排在下方 */
@@ -35,14 +35,27 @@ export function countUp(value: string, p: number): string {
   return (target * p).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: grouped });
 }
 
-/** 大数字 + 右侧 unit · label（右侧放不下时改到数字下方）；用隐藏的终值占位，滚动时右侧文字不跳 */
-const Header: React.FC<{ value: string; unit?: string; label: string; p: number }> = ({ value, unit, label, p }) => {
+/**
+ * 大数字右侧（或下方）说明的排法与字号：右侧放不下时改到数字下方；浮层（minPx > 0）一律排到下方，字号不低于 minPx。
+ * 允许折成两行换大字号（不为排成一行缩成小字）
+ */
+export function headerSide(value: string, unit: string | undefined, label: string, minPx: number): { stacked: boolean; px: number } {
   const numPx = fitFontSize(value, INNER_W * 0.62, NUMBER_PX, 80);
   const sideW = INNER_W - textEm(value) * numPx * 0.95 - SIDE_GAP;
   const side = unit ? `${unit} · ${label}` : label;
-  const stacked = maxFontSize(side, sideW, 2) < SIDE_STACK_PX;
-  // 允许折成两行换大字号（不为排成一行缩成小字）
-  const sidePx = Math.max(SIDE_MIN_PX, Math.min(46, maxFontSize(side, (stacked ? INNER_W : sideW) * 0.94, 2)));
+  const stacked = minPx > 0 || maxFontSize(side, sideW, 2) < SIDE_STACK_PX;
+  return { stacked, px: Math.max(minPx, SIDE_MIN_PX, Math.min(46, maxFontSize(side, (stacked ? INNER_W : sideW) * 0.94, 2))) };
+}
+
+/** 标签格的字号与列数（浮层最多 3 列，字号不低于 minPx） */
+export const cellPx = (text: string, w: number, minPx: number): number => Math.max(minPx, fitFontSize(text, w - 20, w > 200 ? 34 : 28, 17, 2));
+export const cellCols = (n: number, minPx: number): number => (minPx ? Math.min(3, colsFor(n)) : colsFor(n));
+export const cellWidth = (cols: number): number => cellW(cols);
+
+/** 大数字 + 右侧 unit · label（右侧放不下时改到数字下方）；用隐藏的终值占位，滚动时右侧文字不跳 */
+const Header: React.FC<{ value: string; unit?: string; label: string; p: number; minPx: number }> = ({ value, unit, label, p, minPx }) => {
+  const numPx = fitFontSize(value, INNER_W * 0.62, NUMBER_PX, 80);
+  const { stacked, px: sidePx } = headerSide(value, unit, label, minPx);
   return (
     <div style={{ display: 'flex', flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'flex-start' : 'baseline', gap: stacked ? 18 : SIDE_GAP }}>
       <div style={{ position: 'relative', flex: 'none', fontSize: numPx, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.045em', fontVariantNumeric: 'tabular-nums' }}>
@@ -74,11 +87,11 @@ const SoloHeader: React.FC<{ value: string; unit?: string; label: string; p: num
   );
 };
 
-const Cell: React.FC<{ text: string; hot: boolean; p: number; w: number }> = ({ text, hot, p, w }) => (
+const Cell: React.FC<{ text: string; hot: boolean; p: number; w: number; minPx: number }> = ({ text, hot, p, w, minPx }) => (
   <Reveal p={p} dy={16} from={0.94}>
-    <div style={{ height: CELL_H, borderRadius: 16, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 8px',
+    <div style={{ height: minPx ? undefined : CELL_H, minHeight: CELL_H, paddingTop: minPx ? 10 : 0, paddingBottom: minPx ? 10 : 0, borderRadius: 16, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 8px',
       background: hot ? THEME.tint.hot : CELL_BG, border: hot ? `2.5px solid ${GREEN}` : '2.5px solid transparent',
-      color: hot ? THEME.greenText : THEME.ink, fontSize: fitFontSize(text, w - 20, w > 200 ? 34 : 28, 17, 2), fontWeight: hot ? 700 : 500, lineHeight: 1.2 }}>
+      color: hot ? THEME.greenText : THEME.ink, fontSize: cellPx(text, w, minPx), fontWeight: hot ? 700 : 500, lineHeight: 1.2 }}>
       <span style={clampLines(2)}>{text}</span>
     </div>
   </Reveal>
@@ -88,18 +101,21 @@ const Cell: React.FC<{ text: string; hot: boolean; p: number; w: number }> = ({ 
 export const BigNumber: React.FC<TemplateProps<'bigNumber'>> = ({ props, local }) => {
   const { fps } = useVideoConfig();
   const paper = React.useContext(SurfaceContext) === 'paper';
+  // 浮层整块缩小显示：说明与标签格的字号不低于浮层字号下限（缩放后 ≥ 28px），标签格最多 3 列
+  const minPx = useMinPx();
   const chips = props.chips ?? [];
+  const cols = cellCols(chips.length, minPx);
   const hot = new Set(props.highlight ?? []);
   const body = (
     <>
       <Reveal p={springAt(local, 0, fps)} dy={20}>
         {chips.length === 0 && paper
           ? <SoloHeader value={props.value} unit={props.unit} label={props.label} p={easeAt(local, COUNT_START, COUNT_SEC)} />
-          : <Header value={props.value} unit={props.unit} label={props.label} p={easeAt(local, COUNT_START, COUNT_SEC)} />}
+          : <Header value={props.value} unit={props.unit} label={props.label} p={easeAt(local, COUNT_START, COUNT_SEC)} minPx={minPx} />}
       </Reveal>
       {chips.length > 0 ? (
-        <div style={{ marginTop: 52, display: 'grid', gridTemplateColumns: `repeat(${colsFor(chips.length)}, 1fr)`, gap: GAP }}>
-          {chips.map((c, i) => <Cell key={i} text={c} hot={hot.has(c)} w={cellW(colsFor(chips.length))} p={springAt(local, 0.2 + i * 0.025, fps)} />)}
+        <div style={{ marginTop: 52, display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: GAP }}>
+          {chips.map((c, i) => <Cell key={i} text={c} hot={hot.has(c)} w={cellW(cols)} minPx={minPx} p={springAt(local, 0.2 + i * 0.025, fps)} />)}
         </div>
       ) : null}
     </>

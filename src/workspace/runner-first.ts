@@ -69,7 +69,6 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const whiteBalance = await whiteBalanceOf(args, env.record({}).background?.path ?? person);
   const planned = await storyboardStage(args, captions, a.plan.outputDurationSec, env.base, env.complete, whiteBalance);
   linkBroll(planned, env.base, env.dir);
-  const brollBeats = env.record({}).broll?.beats;
   const checked = await qaCardsStage(args, env.meter, planned, captions, env.complete);
   const cards = checked.cards;
   const final = join(env.dir, FINAL_FILE);
@@ -80,11 +79,13 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const first = await composeStage(args, composeInput, env.complete);
   env.complete('compose', `分段渲染：新渲 ${first.rendered.length} 段 · 复用缓存 ${first.reused.length} 段`);
   // 整片自检：首版不达标时局部重做一轮（只重渲受影响的镜头）
-  const film = await filmQaStage(args, composeInput, first, env.complete, true);
+  const film = await filmQaStage(args, composeInput, first, env.complete, true, env.base);
   const { storyboard } = film;
   const res = film.composed;
   // 授权记录按卡片自检、整片自检之后的最终分镜写（自检可能改掉带图的卡、去掉复用的素材）
   writeStoryboardCredits(storyboard, env.base, env.dir);
+  // 节拍记录在整片自检之后读：局部重做去掉的素材已同步成跳过
+  const brollBeats = env.record({}).broll?.beats;
   await finalQaStage(args, final, storyboard, cards, env.complete, res.outroStartSec);
   await makeCover(env, args, init.coverStyle, storyboard, captions, person);
   const state: VersionState = { ...init, plan: a.plan, captions, storyboard, ...(brollBeats ? { brollBeats } : {}) };

@@ -61,6 +61,8 @@ describe('runFirstVersion', () => {
     expect(f.calls.hard).toEqual([join(v1, FINAL_FILE)]);
     // 整片自检检查本版成片（假度量达标，不触发局部重做）；白平衡参考取人物背景图
     expect(f.calls.film).toEqual([join(v1, FINAL_FILE)]);
+    // 素材记录在 base/broll：整片度量按它判同一候选的复用
+    expect(f.calls.filmMetaDir).toEqual([base]);
     expect(f.calls.meanColor).toEqual([readJson<ProjectFile>(join(v1, 'project.json')).background?.path]);
     expect(f.calls.llm).toEqual(expect.arrayContaining(['剪口误', '分镜']));
     expect(meta.costYuan).toBeCloseTo(f.calls.llm.length * 0.01 + 1.2); // 每次模型调用 ¥0.01 + 封面

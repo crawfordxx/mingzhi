@@ -96,8 +96,8 @@ export const BrollSchema = z.object({
   durationSec: z.number().finite().positive().optional(),
   /** 画面角标：网页截图标来源站点（kind=source），AI 生成标「AI 生成」（kind=ai）；图库素材不标（署名在 credits 与导出文本里） */
   label: MediaLabelSchema.optional(),
-  /** 分屏铺图时底图额外压暗（叠加黑色的不透明度）：整片自检发现图上的浅色字对比度不够时加 */
-  dim: z.number().min(0).max(0.8).optional(),
+  /** 铺图变体：卡片铺在这张素材上时底部压暗加深、玻璃卡几乎不透明（整片自检发现图上文字对比度不够时切换） */
+  legible: z.boolean().optional(),
 }).refine((b) => (BROLL_EXTS[b.kind] as readonly string[]).includes(extOf(b.file)), '素材扩展名与类型不符');
 export type Broll = z.infer<typeof BrollSchema>;
 

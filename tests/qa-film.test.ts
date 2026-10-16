@@ -2,10 +2,19 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeGray, blankSpans, GRID, staticSpans, type FrameSeries } from '../src/qa/film-frames.js';
 import {
-  blankMetric, coverageMetric, diversityMetric, filmReport, firstFrameMetric, LIMITS, photoSeconds, readabilityMetric, reuseMetric, sfxMetric, staticMetric, templateSeconds,
+  blankMetric, coverageMetric, diversityMetric, filmReport, firstFrameMetric, LIMITS, photoSeconds, readabilityMetric, reuseMetric, sfxMetric, staticLimit, staticMetric, templateSeconds,
   type FilmMetric, type FilmReport,
 } from '../src/qa/film.js';
-import { planRedo } from '../src/qa/film-redo.js';
+import { planRedo, syncBeats } from '../src/qa/film-redo.js';
+import { measureFilm } from '../src/qa/film-measure.js';
+import { FLOAT_MIN_PX, FLOAT_SCALE } from '../render/templates/parts.js';
+import { chipLabelPx, chipPillPx, chipsZoom } from '../render/templates/Chips.js';
+import { cellCols, cellPx, cellWidth, headerSide } from '../render/templates/BigNumber.js';
+import { subtitlePx } from '../render/templates/Title.js';
+import { writeAssetMeta } from '../src/broll/credit-store.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as pathJoin } from 'node:path';
 import { textContrast } from '../src/qa/readability.js';
 import { runQaFilm } from '../src/pipeline/qa-step.js';
 import { cardLead } from '../src/compose/card-carry.js';
@@ -22,6 +31,11 @@ const textured = (k = 0): Uint8Array => Uint8Array.from({ length: PX }, (_, i) =
 const topFlat = (k = 0): Uint8Array => {
   const t = textured(k);
   return Uint8Array.from(t, (v, i) => (Math.floor(i / GRID.width) < GRID.topRows ? 180 : v));
+};
+/** 上半屏前 n 个块行（每行 6 像素）平坦、其余纹理 */
+const topFlatRows = (n: number): Uint8Array => {
+  const t = textured(3);
+  return Uint8Array.from(t, (v, i) => (Math.floor(i / GRID.width) < n * GRID.block ? 120 : v));
 };
 const join = (frames: Uint8Array[]): Uint8Array => {
   const out = new Uint8Array(frames.length * PX);
@@ -57,9 +71,16 @@ describe('抽帧度量（审片报告 1.1 节口径：108×192 灰度、每秒 5
     expect(spans).toEqual([{ start: 0, end: 3.8 }]);
   });
 
-  it('空白率按 1 秒滑动平均判「任何时刻」：一两帧的闪白不算，持续 1 秒以上算', () => {
-    const blip = analyzeGray(join([...times(10, (k) => textured(k)), topFlat(), ...times(10, (k) => textured(k + 20))]));
+  it('空白率两种判定并存：1 秒滑动平均（持续空白）与逐帧闪白（连续 ≥ 3 帧 ≥ 90%，前后都不空白）；1–2 帧不算闪白', () => {
+    const blip = analyzeGray(join([...times(10, (k) => textured(k)), topFlat(), topFlat(1), ...times(10, (k) => textured(k + 20))]));
     expect(blankSpans(blip, 0.8).spans).toEqual([]);
+    expect(blankSpans(blip, 0.8).flashes).toEqual([]);
+    const flash = analyzeGray(join([...times(10, (k) => textured(k)), ...times(3, (k) => topFlat(k)), ...times(10, (k) => textured(k + 20))]));
+    const f = blankSpans(flash, 0.8);
+    expect(f.spans).toEqual([]); // 3 帧在 1 秒窗口里平均只有 60%
+    expect(f.flashes).toEqual([{ start: 2, end: 2.6 }]);
+    // 开头就空白（前面没有镜头）不算闪白，由首帧指标管
+    expect(blankSpans(analyzeGray(join([...times(3, (k) => topFlat(k)), ...times(10, (k) => textured(k))])), 0.8).flashes).toEqual([]);
     const long = analyzeGray(join([...times(10, (k) => textured(k)), ...times(8, (k) => topFlat(k)), ...times(10, (k) => textured(k + 20))]));
     const r = blankSpans(long, 0.8);
     expect(r.peak).toBeCloseTo(1, 5);
@@ -76,16 +97,28 @@ function series(kinds: ('static' | 'moving' | 'blank')[]): FrameSeries {
 }
 
 describe('整片指标', () => {
-  it('静止合计超过上限（2 分钟内 25 秒）判不合格，并定位到占比最大的镜头', () => {
+  it('静止合计超过上限判不合格，并定位到占比最大的镜头；上限按片长折算（2 分钟 25 秒，最少 2 秒）', () => {
     // 0–6 秒运动；6–12 秒静止（标题卡）；12–20 运动
     const s = series([...times(6, () => 'moving' as const), ...times(6, () => 'static' as const), ...times(8, () => 'moving' as const)]);
     const shots = [full(0, 6), split(6, 12, title('静止的标题')), full(12, 20)];
-    const m = staticMetric(shots, s, 20, 5);
+    const m = staticMetric(shots, s, 20);
     expect(m.ok).toBe(false);
+    expect(m.limit).toBeCloseTo(20 * 25 / 120, 5);
     expect(m.value).toBeGreaterThan(5);
     expect(m.shots).toEqual([1]);
-    expect(staticMetric(shots, s, 20).ok).toBe(true); // 默认上限 25 秒
-    expect(LIMITS.staticSec).toBe(25);
+    expect(staticMetric(shots, s, 20, 6).ok).toBe(true);
+    expect(staticLimit(120)).toBe(25);
+    expect(staticLimit(240)).toBe(50);
+    expect(staticLimit(12)).toBeCloseTo(2.5, 5);
+    expect(staticLimit(5)).toBe(2);
+  });
+
+  it('闪白也判空白率不合格，detail 写出时刻并定位镜头', () => {
+    const frames = analyzeGray(join([...times(10, (k) => textured(k)), ...times(3, (k) => topFlat(k)), ...times(10, (k) => textured(k + 20))]));
+    const m = blankMetric([full(0, 2.2), split(2.2, 4.6, title('闪'))], frames);
+    expect(m.ok).toBe(false);
+    expect(m.detail).toMatch(/闪白 2\.0–2\.6 秒/);
+    expect(m.shots).toEqual([0, 1]);
   });
 
   it('空白率任何时刻 ≤ 80%：超标定位到镜头', () => {
@@ -98,16 +131,17 @@ describe('整片指标', () => {
     expect(blankMetric(shots, series(times(10, () => 'moving' as const))).ok).toBe(true);
   });
 
-  it('首帧非空：卡片版式看上半屏（几乎全是平坦块算空，try2 的 99.6% 判空），人物全屏与素材全屏只排除纯色帧', () => {
+  it('首帧非空：卡片版式上半屏平坦块 ≤ 80%；人物全屏与素材全屏只排除纯色帧', () => {
     const card = [split(0, 3, title('标题'))];
     const person = [full(0, 3)];
     expect(firstFrameMetric(analyzeGray(join([flat(0), textured(1)])), card).ok).toBe(false);
-    expect(firstFrameMetric(analyzeGray(join([topFlat(0), textured(1)])), card).ok).toBe(false);
+    expect(firstFrameMetric(analyzeGray(join([topFlatRows(12), textured(1)])), card).ok).toBe(false); // 12/14 ≈ 86%
+    expect(firstFrameMetric(analyzeGray(join([topFlatRows(10), textured(1)])), card).ok).toBe(true); // 10/14 ≈ 71%
     expect(firstFrameMetric(analyzeGray(join([textured(0), textured(1)])), card).ok).toBe(true);
     // 上半屏是素净的墙、人在下半屏：人物全屏不算空；纯黑帧仍算空
     expect(firstFrameMetric(analyzeGray(join([topFlat(0), textured(1)])), person).ok).toBe(true);
     expect(firstFrameMetric(analyzeGray(join([flat(0), textured(1)])), person).ok).toBe(false);
-    expect(LIMITS.firstFrameMaxBlank).toBe(0.95);
+    expect(LIMITS.firstFrameMaxBlank).toBe(0.8);
   });
 
   it('模板多样性：同模板连用 > 2、evidenceList > 20%、2 分钟内呈现模式 < 4 都算问题，并给出模板时长分布', () => {
@@ -246,7 +280,9 @@ describe('局部重做：按指标定位镜头，只改目标镜头', () => {
     expect(plan.unfixed.join('')).toMatch(/第 4 镜/);
   });
 
-  it('首帧空：第一个镜头不是钩子时用第一句字幕做钩子（本地图形兜底）', () => {
+  it('首帧空：第一个镜头不是钩子时改成钩子（没有卡片用第一句字幕，有卡片用卡片标题；本地图形兜底）', () => {
+    const titled = planRedo(sb([split(0, 3, title('原来的标题')), ...base().slice(1)]), report([metric('firstFrame', [0])]), caps, 20);
+    expect(titled.storyboard.shots[0].card).toMatchObject({ template: 'hook', props: { headline: '原来的标题' } });
     const shots = [full(0, 3), ...base().slice(1)];
     const plan = planRedo(sb(shots), report([metric('firstFrame', [0])]), caps, 20);
     expect(plan.actions[0]).toMatchObject({ shotIndex: 0, kind: 'hook' });
@@ -268,14 +304,44 @@ describe('局部重做：按指标定位镜头，只改目标镜头', () => {
     expect(plan.storyboard.shots.slice(0, 2)).toEqual(shots.slice(0, 2));
   });
 
-  it('可读性：浅色字不够亮时给底图加压暗，深色字看不清时取消底图', () => {
+  it('可读性：先切到铺图变体（预先量过变体的对比度达标），变体仍不达标才取消底图', () => {
     const shots: Shot[] = [split(0, 3, hook(), photo('broll/h.jpg')), full(3, 6), split(6, 13, ev(2), photo('broll/b.jpg')), full(13, 20)];
-    const contrasts = [{ shotIndex: 0, contrast: 3.2, polarity: 'light' as const }, { shotIndex: 2, contrast: 3.8, polarity: 'dark' as const }];
+    const contrasts = [{ shotIndex: 0, contrast: 3.2, polarity: 'light' as const, legible: 6.1 }, { shotIndex: 2, contrast: 3.8, polarity: 'dark' as const, legible: 4.1 }];
     const plan = planRedo(sb(shots), report([metric('readability', [0, 2])], { contrasts }), caps, 20);
-    expect(plan.actions.map((a) => [a.shotIndex, a.kind])).toEqual([[0, 'dim'], [2, 'unbacked']]);
-    expect(plan.storyboard.shots[0].broll?.dim).toBeGreaterThan(0);
+    expect(plan.actions.map((a) => [a.shotIndex, a.kind])).toEqual([[0, 'legible'], [2, 'unbacked']]);
+    expect(plan.storyboard.shots[0]).toEqual({ ...shots[0], broll: { ...photo('broll/h.jpg'), legible: true } });
     expect(plan.storyboard.shots[2]).toEqual(split(6, 13, ev(2)));
     expect(plan.storyboard.shots[1]).toEqual(shots[1]);
+  });
+
+  it('首帧空且第 1 镜超过 4 秒：在字幕边界切开，前段改钩子、后段原样；已有钩子顺延编号', () => {
+    const shots = [full(0, 7), split(7, 10, hook()), full(10, 20)];
+    const capsLong = [{ start: 0, end: 3, text: '先说结论' }, { start: 3, end: 7, text: '再看原因' }, { start: 7, end: 20, text: '后面' }];
+    const plan = planRedo(sb(shots), report([metric('firstFrame', [0])]), capsLong, 20);
+    expect(plan.actions[0]).toMatchObject({ shotIndex: 0, kind: 'split' });
+    const out = plan.storyboard.shots;
+    expect(out).toHaveLength(4);
+    expect(out[0]).toMatchObject({ start: 0, end: 3, layout: 'split', card: { template: 'hook', props: { headline: '先说结论', index: 1, total: 2 } } });
+    expect(out[1]).toEqual(full(3, 7));
+    expect(out[2].card).toMatchObject({ template: 'hook', props: { index: 2, total: 2 } });
+    expect(out[3]).toEqual(shots[2]);
+  });
+
+  it('同一候选（文件不同）复用：去掉后出现镜头的 B-roll', () => {
+    const shots: Shot[] = [{ start: 0, end: 3, layout: 'broll', broll: photo('broll/a.jpg') }, full(3, 6), split(6, 13, title('标题'), photo('broll/a-split.jpg')), full(13, 20)];
+    const plan = planRedo(sb(shots), report([metric('reuse', [2])]), caps, 20);
+    expect(plan.actions).toEqual([expect.objectContaining({ shotIndex: 2, kind: 'dedupe' })]);
+    expect(plan.storyboard.shots[2]).toEqual(split(6, 13, title('标题')));
+  });
+
+  it('模板单调：套分镜规则修正（连用第 3 张转掉），只动被改的镜头', () => {
+    const ev2 = (): CardSpec => ev(2);
+    const shots = [split(0, 10, ev2()), split(10, 20, ev2()), split(20, 30, ev2()), ...times(9, (i) => full(30 + i * 10, 40 + i * 10))];
+    const plan = planRedo(sb(shots), { ...report([metric('diversity', [])]), durationSec: 120 }, caps, 120);
+    expect(plan.actions.length).toBeGreaterThan(0);
+    expect(plan.actions.every((a) => a.kind === 'rules')).toBe(true);
+    expect(plan.storyboard.shots.length).toBe(shots.length);
+    expect(plan.storyboard.shots.slice(3)).toEqual(shots.slice(3));
   });
 
   it('全部达标时不做任何修改', () => {
@@ -311,7 +377,20 @@ describe('整片自检步骤：度量 → 最多 1 轮局部重做 → 复测，
     const last = h.patches[h.patches.length - 1];
     expect(last.message).toMatch(/局部重做后.*整片自检 1\/1 达标/);
     expect(last.patch?.film).toMatchObject({ before: { ok: false }, actions: [{ shotIndex: 1, kind: 'overlay' }], after: { ok: true } });
-    expect(last.patch?.storyboard).toBeDefined();
+    // 重做后的分镜先单独落盘一次（工作台直播据此刷新镜头列表）
+    const shotsEvent = h.patches.find((p) => p.patch?.storyboard && !p.patch.film);
+    expect(shotsEvent?.message).toMatch(/局部重做后的分镜：2 个镜头/);
+  });
+
+  it('重渲失败：撤回重做动作（actions 置空并说明），沿用原成片与原分镜', async () => {
+    const patches: { message: string; patch?: Record<string, unknown> }[] = [];
+    const ctx = { cfg: { ffmpeg: 'ffmpeg' } as never, workDir: '/tmp', redo: true, measure: async () => bad };
+    const res = await runQaFilm(ctx, { video: 'out.mp4', storyboard: sb(shots) }, caps, async () => { throw new Error('渲染炸了'); }, (_s, message, patch) => { patches.push({ message, patch }); return {} as never; });
+    expect(res.cut.storyboard.shots).toEqual(shots);
+    const last = patches[patches.length - 1];
+    expect(last.message).toMatch(/局部重做渲染失败，已撤回.*渲染炸了/);
+    expect(last.patch?.film).toMatchObject({ actions: [], before: { ok: false } });
+    expect(last.patch?.storyboard).toBeUndefined();
   });
 
   it('工作台修改版本只检查不重做；全部达标也不重渲', async () => {
@@ -345,5 +424,57 @@ describe('拆开的静止镜头后段延续卡片（lead）', () => {
     const replayed = sfxCues([head, { ...tail, lead: undefined }]).filter((c) => c.sec >= 4 - 0.05);
     expect(inTail.length).toBe(1);
     expect(replayed.length).toBeGreaterThan(1);
+  });
+});
+
+describe('重做后同步 B-roll 节拍记录', () => {
+  it('素材被重做去掉的节拍改为跳过（不再指向分镜里没有的文件），其余原样', () => {
+    const beat = { start: 3, end: 6, kind: 'photo', present: 'split', query: [], queryZh: [], mustShow: '', avoid: [], shotSize: 'medium' } as never;
+    const records = [
+      { ...(beat as object), candidates: 3, status: 'placed', file: 'broll/a.jpg', layout: 'split' },
+      { ...(beat as object), candidates: 3, status: 'placed', file: 'broll/b.jpg', layout: 'broll' },
+      { ...(beat as object), candidates: 0, status: 'skipped', reason: '没有候选' },
+    ] as never[];
+    const out = syncBeats(records, sb([{ start: 0, end: 3, layout: 'broll', broll: photo('broll/b.jpg') }, full(3, 10)]));
+    expect(out[0]).toMatchObject({ status: 'skipped', reason: expect.stringMatching(/整片自检/) });
+    expect(out[0]).not.toHaveProperty('file');
+    expect(out[1]).toBe(records[1]);
+    expect(out[2]).toBe(records[2]);
+  });
+});
+
+describe('整片度量读素材记录的目录（工作台：素材在版本目录，记录在 base/broll）', () => {
+  it('metaDir 指向记录目录时，同一候选的两个文件判复用；只看版本目录时退化成按文件判断', async () => {
+    const base = mkdtempSync(pathJoin(tmpdir(), 'mz-meta-'));
+    const version = mkdtempSync(pathJoin(tmpdir(), 'mz-ver-'));
+    const meta = (file: string) => writeAssetMeta(base, file, { credit: { file, source: 'wikimedia', page: 'p', license: 'CC0', attributionRequired: false, aiGenerated: false, modified: [], query: '', fetchedAt: '' }, candidateId: 'wikimedia:42', kind: 'photo', focal: { x: 0.5, y: 0.5 } });
+    meta('broll/a.jpg');
+    meta('broll/a-split.jpg');
+    const storyboard = sb([{ start: 0, end: 3, layout: 'broll', broll: photo('broll/a.jpg') }, full(3, 6), split(6, 9, title('标题'), photo('broll/a-split.jpg'))]);
+    const opts = { ffmpeg: 'ffmpeg', workDir: version, video: pathJoin(version, 'missing.mp4'), storyboard };
+    const withMeta = await measureFilm({ ...opts, metaDir: base });
+    expect(withMeta.metrics.find((m) => m.id === 'reuse')).toMatchObject({ ok: false, shots: [2] });
+    expect(withMeta.skipped[0]).toMatch(/抽帧失败/);
+    const blind = await measureFilm(opts);
+    expect(blind.metrics.find((m) => m.id === 'reuse')?.ok).toBe(true);
+  }, 60_000);
+});
+
+describe('拆出的浮层卡字号下限（浮层整块缩到 0.64，缩放后 ≥ 28px）', () => {
+  it('标签卡、数字卡、标题卡在浮层里的每种字号 × 缩放 ≥ 28；纸面上不受影响', () => {
+    const groups = [{ label: '交付流程很长的组名', items: [{ text: '需求方案', mark: 'yes' as const }, { text: '开发部署上线验收', mark: 'yes' as const }] }];
+    const k = chipsZoom(groups);
+    const sizes = [
+      chipPillPx('开发部署上线验收', k, FLOAT_MIN_PX), chipLabelPx('交付流程很长的组名', k, FLOAT_MIN_PX),
+      headerSide('5', '次以内', '传统驻场允许的修改次数极其有限', FLOAT_MIN_PX).px,
+      ...['个位数修改', '严格限制', '线性流程'].map((t) => cellPx(t, cellWidth(cellCols(3, FLOAT_MIN_PX)), FLOAT_MIN_PX)),
+      subtitlePx('按需求交付 vs 定义问题、验证结果', FLOAT_MIN_PX),
+    ];
+    for (const px of sizes) expect(px * FLOAT_SCALE).toBeGreaterThanOrEqual(28);
+    expect(headerSide('5', '次以内', '传统驻场允许的修改次数极其有限', FLOAT_MIN_PX).stacked).toBe(true);
+    expect(cellCols(12, FLOAT_MIN_PX)).toBe(3);
+    // 纸面（下限 0）维持原排法
+    expect(cellCols(12, 0)).toBe(6);
+    expect(cellPx('个位数修改', cellWidth(4), 0)).toBeLessThan(FLOAT_MIN_PX);
   });
 });

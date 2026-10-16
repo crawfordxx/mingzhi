@@ -1,22 +1,24 @@
 /**
  * 整片自检的局部重做（最多 1 轮）：按不达标的指标定位到镜头，只改这些镜头，不动其余镜头与时间轴（拆分只在目标镜头内部切一刀）。
- * - 首帧空 → 第一个镜头改成钩子（第一句字幕做标题，本地图形兜底）
+ * - 首帧空 → 第一个镜头改成钩子（原卡片标题或第一句字幕做标题，本地图形兜底）
  * - 素材复用 → 后出现的镜头去掉重复素材
- * - 铺图卡片看不清 → 浅色字压暗底图，深色字取消底图
+ * - 铺图卡片看不清 → 切到铺图变体（底部压暗加深、玻璃卡几乎不透明）；变体也不达标才取消底图
  * - 空白过多 → 紧凑卡改浮层（人物全屏 + 浮卡）
  * - 静止过长 → 演进卡把条目铺开逐条出现；其余卡片在静止段里按字幕边界切开，后半段换版式（紧凑卡改浮层，其余回人物全屏）
  * - 模板单调 → 套用 Task 6 的分镜规则（编排后的分镜上复检修正，带素材的镜头不降级）
  * 音效重复由音效规划保证（同类变体轮换、用尽丢弃），这里不重做；摄影级画面不足需要新素材，只报告
  */
 import type { TimedCaption } from '../captions/lines.js';
+import type { BeatRecord } from '../pipeline/broll-beats.js';
 import { cardLead } from '../compose/card-carry.js';
+import { cardTitle } from '../pipeline/detail.js';
 import { fillReveal, fitReveal, fitRevealToShots, revealItems, REVEAL_TAIL_SEC } from '../storyboard/reveal.js';
 import { applyStoryboardRules } from '../storyboard/rules.js';
 import type { CardSpec, Shot, Storyboard, TemplateId } from '../storyboard/schema.js';
 import { dominantShot, shotFiles, type FilmMetric, type FilmReport } from './film.js';
 import { MIN_CONTRAST } from './readability.js';
 
-export type RedoKind = 'hook' | 'dedupe' | 'dim' | 'unbacked' | 'overlay' | 'reveal' | 'split' | 'rules';
+export type RedoKind = 'hook' | 'dedupe' | 'legible' | 'unbacked' | 'overlay' | 'reveal' | 'split' | 'rules';
 export interface RedoAction { shotIndex: number; kind: RedoKind; detail: string }
 /** storyboard：重做后的分镜；actions 按原分镜的镜头序号；unfixed：定位到了但改不了的原因 */
 export interface RedoPlan { storyboard: Storyboard; actions: RedoAction[]; unfixed: string[] }
@@ -31,23 +33,6 @@ const BREAK_AFTER_SEC = 2;
 /** 首帧兜底的钩子最长这么久，镜头更长时在字幕边界切开、后段保持原样 */
 const HOOK_MAX_SEC = 4;
 const HOOK_TEXT_MAX = 60;
-/** 压暗后按白字算的目标对比度（留出半透明白字、抗锯齿的余量） */
-const DIM_TARGET = 5.5;
-const DIM_MIN = 0.3;
-const DIM_MAX = 0.8;
-const SRGB_GAMMA = 2.2;
-
-/**
- * 浅色字压暗底图的强度（叠加黑色的不透明度）：按量到的对比度反推底色亮度（按白字算），压到目标对比度需要的亮度；
- * 已有压暗时叠加；夹在 0.3–0.8
- */
-export function dimFor(contrast: number, current = 0): number {
-  const bg = Math.max(0.01, 1.05 / Math.max(1, contrast) - 0.05);
-  const target = 1.05 / DIM_TARGET - 0.05;
-  const need = bg <= target ? DIM_MIN : 1 - (target / bg) ** (1 / SRGB_GAMMA);
-  const total = 1 - (1 - current) * (1 - Math.max(DIM_MIN, need));
-  return Math.round(Math.min(DIM_MAX, total) * 100) / 100;
-}
 const FPS = 30;
 
 interface Split { index: number; at: number; head: Shot; tail: Shot }
@@ -81,19 +66,20 @@ function cutPoint(captions: TimedCaption[], lo: number, hi: number, target: numb
 
 // ---------- 首帧 ----------
 
-/** 第一个镜头改成钩子：标题取镜头里第一句字幕；已有的钩子顺延编号（最多 3 张） */
+/** 第一个镜头改成钩子：标题取原卡片的标题（不丢内容），没有卡片时取镜头里第一句字幕；已有的钩子顺延编号（最多 3 张） */
 function hookFirst(w: Work, captions: TimedCaption[]): Work {
   const s = w.shots[0];
   if (!s) return w;
   if (s.card?.template === 'hook') return note(w, '首帧空：第 1 镜已是钩子，未改');
   const hooks = w.shots.filter((x) => x.card?.template === 'hook').length;
-  const text = (captions.find((c) => c.end > s.start && c.start < s.end) ?? captions[0])?.text.trim().slice(0, HOOK_TEXT_MAX);
-  if (!text || hooks >= 3) return note(w, `首帧空：${!text ? '没有字幕可做钩子标题' : '钩子已有 3 张'}，未改`);
+  const caption = (captions.find((c) => c.end > s.start && c.start < s.end) ?? captions[0])?.text;
+  const text = ((s.card ? cardTitle(s.card) : undefined) ?? caption)?.trim().slice(0, HOOK_TEXT_MAX);
+  if (!text || hooks >= 3) return note(w, `首帧空：${!text ? '没有标题或字幕可做钩子标题' : '钩子已有 3 张'}，未改`);
   const total = hooks + 1;
   const renumbered = w.shots.map((x) => (x.card?.template === 'hook' ? { ...x, card: { ...x.card, props: { ...x.card.props, index: x.card.props.index + 1, total } } } : x));
   const card: CardSpec = { template: 'hook', props: { index: 1, total, headline: text, highlight: [] } };
   const base = { ...w, shots: renumbered };
-  if (s.end - s.start <= HOOK_MAX_SEC + 1e-9) return edit(base, 0, { start: s.start, end: s.end, layout: 'split', card }, 'hook', `第一句字幕做钩子：${text}`);
+  if (s.end - s.start <= HOOK_MAX_SEC + 1e-9) return edit(base, 0, { start: s.start, end: s.end, layout: 'split', card }, 'hook', `改成钩子：${text}`);
   const at = cutPoint(captions, s.start + 1.5, s.start + HOOK_MAX_SEC, s.start + 3);
   return split(base, { index: 0, at, head: { start: s.start, end: at, layout: 'split', card }, tail: { ...s, start: at } }, `前 ${(at - s.start).toFixed(1)} 秒改成钩子：${text}`);
 }
@@ -132,17 +118,18 @@ function dedupe(w: Work, m: FilmMetric): Work {
 
 // ---------- 可读性 ----------
 
+/** 铺图卡片看不清：先切到铺图变体（量过变体达标）；变体也不达标才取消底图 */
 function readable(w: Work, r: FilmReport): Work {
   const bad = (r.contrasts ?? []).filter((c) => c.contrast < MIN_CONTRAST);
   return bad.reduce((acc, c) => {
     const s = acc.shots[c.shotIndex];
     if (!s?.broll || acc.claimed.has(c.shotIndex)) return acc;
-    if (c.polarity === 'light') {
-      const dim = dimFor(c.contrast, s.broll.dim ?? 0);
-      return edit(acc, c.shotIndex, { ...s, broll: { ...s.broll, dim } }, 'dim', `文字对比度 ${c.contrast.toFixed(1)}，底图压暗 ${Math.round(dim * 100)}%`);
+    if (c.legible !== undefined && c.legible >= MIN_CONTRAST) {
+      return edit(acc, c.shotIndex, { ...s, broll: { ...s.broll, legible: true } }, 'legible', `文字对比度 ${c.contrast.toFixed(1)}，改铺图变体（压暗加深、玻璃卡不透明）后 ${c.legible.toFixed(1)}`);
     }
     const { broll: _b, ...rest } = s;
-    return edit(acc, c.shotIndex, rest, 'unbacked', `文字对比度 ${c.contrast.toFixed(1)}（深色字），取消底图`);
+    const why = c.legible === undefined ? '' : `，铺图变体也只有 ${c.legible.toFixed(1)}`;
+    return edit(acc, c.shotIndex, rest, 'unbacked', `文字对比度 ${c.contrast.toFixed(1)}${why}，取消底图`);
   }, w);
 }
 
@@ -228,6 +215,16 @@ export function planRedo(storyboard: Storyboard, report: FilmReport, captions: T
   if (failing(report, 'coverage')) w = note(w, '摄影级画面不足：需要更多素材（填写 Pexels 或 Pixabay key、放宽素材预算），局部重做不新增素材');
   const shots = applySplits(w.shots, w.splits);
   return { storyboard: w.actions.length > 0 ? { ...storyboard, shots } : storyboard, actions: w.actions, unfixed: w.unfixed };
+}
+
+/** 节拍记录与重做后的分镜对齐：素材已不在分镜里的节拍改为跳过（去掉文件与落点，「换一张」不会再找到它），其余原样 */
+export function syncBeats(records: BeatRecord[], storyboard: Storyboard): BeatRecord[] {
+  const files = new Set(storyboard.shots.flatMap(shotFiles));
+  return records.map((r) => {
+    if (r.status !== 'placed' || !r.file || files.has(r.file)) return r;
+    const { file: _f, layout: _l, placement: _p, ...rest } = r;
+    return { ...rest, status: 'skipped', reason: '整片自检局部重做去掉了这个素材' };
+  });
 }
 
 /** project.json 的 film 字段：首次度量、局部重做做了什么（与改不了的原因）、重做后的复测（没重做时缺省） */

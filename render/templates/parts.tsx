@@ -96,6 +96,18 @@ export const GLASS: React.CSSProperties = {
   boxShadow: '0 24px 64px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.12), inset 0 0 0 1.5px rgba(255, 255, 255, 0.55)',
 };
 
+/** 铺图变体（broll.legible）：玻璃卡几乎不透明，图上的深色字回到纸面卡的对比度 */
+export const GLASS_SOLID: React.CSSProperties = { ...GLASS, background: 'rgba(250, 248, 244, 0.96)' };
+/** 当前卡片是否铺在「铺图变体」的素材上（CardLayer 提供） */
+export const SolidGlassContext = React.createContext(false);
+const useGlass = (): React.CSSProperties => (React.useContext(SolidGlassContext) ? GLASS_SOLID : GLASS);
+
+/** 浮层整块卡片区的缩放（CardLayer 用）；浮层里文字的字号下限按缩放后 ≥ 28px（以 1080 宽计）折算 */
+export const FLOAT_SCALE = 0.64;
+export const FLOAT_MIN_PX = Math.ceil(28 / FLOAT_SCALE);
+/** 当前表面的字号下限：浮层为 FLOAT_MIN_PX，其余 0。要在卡框（CardFrame / 玻璃 SafeArea）之外读（卡框内部会重置为 paper） */
+export const useMinPx = (): number => (React.useContext(SurfaceContext) === 'float' ? FLOAT_MIN_PX : 0);
+
 /**
  * 安全区容器：纸面上内容在安全区里垂直居中，带 fill 的卡框（CardFrame fill）撑满安全区（上半屏空白率 ≤ 35%）；
  * 浮层与图上时贴安全区底部排（浮层是胸前的下三分之一字条，图上压在渐变暗部）。scale < 1 时整体缩小，纸面上缩小后仍撑满安全区；
@@ -105,8 +117,9 @@ export const SafeArea: React.FC<{ scale?: number; glass?: boolean; children: Rea
   const surface = React.useContext(SurfaceContext);
   const bottom = surface === 'image' || surface === 'float';
   const paper = surface === 'paper';
+  const skin = useGlass();
   const body = glass && !paper
-    ? <div style={{ ...GLASS, borderRadius: THEME.radius, padding: '40px 44px 44px' }}><SurfaceContext.Provider value="paper">{children}</SurfaceContext.Provider></div>
+    ? <div style={{ ...skin, borderRadius: THEME.radius, padding: '40px 44px 44px' }}><SurfaceContext.Provider value="paper">{children}</SurfaceContext.Provider></div>
     : children;
   const inner: React.CSSProperties = paper
     ? { height: SAFE_H / scale, display: 'flex', flexDirection: 'column', justifyContent: 'center', transform: `scale(${scale})`, transformOrigin: 'top center' }
@@ -121,7 +134,8 @@ export const SafeArea: React.FC<{ scale?: number; glass?: boolean; children: Rea
 /** 白色圆角卡片；在图上或浮层里变成磨砂玻璃卡。fill：纸面上撑满安全区、内容垂直居中（图上与浮层仍按内容高度） */
 export const CardFrame: React.FC<{ padding?: string; fill?: boolean; style?: React.CSSProperties; children: React.ReactNode }> = ({ padding = '44px 48px', fill = false, style, children }) => {
   const surface = React.useContext(SurfaceContext);
-  const skin: React.CSSProperties = surface === 'paper' ? { background: THEME.card, boxShadow: THEME.shadow } : GLASS;
+  const glass = useGlass();
+  const skin: React.CSSProperties = surface === 'paper' ? { background: THEME.card, boxShadow: THEME.shadow } : glass;
   const stretch: React.CSSProperties = fill && surface === 'paper' ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' } : {};
   return (
     <div style={{ ...skin, borderRadius: THEME.radius, padding, ...stretch, ...style }}>
@@ -131,10 +145,10 @@ export const CardFrame: React.FC<{ padding?: string; fill?: boolean; style?: Rea
 };
 
 /** 面包屑：橙点 + 小字；直接压在图上或人物上时字改为近白（不给 color 时） */
-export const Crumb: React.FC<{ text: string; size?: number; maxWidth?: number; color?: string }> = ({ text, size = 26, maxWidth = CONTENT_W, color }) => {
+export const Crumb: React.FC<{ text: string; size?: number; maxWidth?: number; color?: string; minPx?: number }> = ({ text, size = 26, maxWidth = CONTENT_W, color, minPx = 18 }) => {
   const surface = React.useContext(SurfaceContext);
   const ink = color ?? (surface === 'paper' ? THEME.sub : 'rgba(255, 255, 255, 0.92)');
-  const px = fitFontSize(text, maxWidth - 30, size, 18);
+  const px = fitFontSize(text, maxWidth - 30, Math.max(size, minPx), minPx);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: px, fontWeight: 600, color: ink, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
       <span style={{ width: 11, height: 11, borderRadius: 6, background: THEME.crumbDot, flex: 'none' }} />

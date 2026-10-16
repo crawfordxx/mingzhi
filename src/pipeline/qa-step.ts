@@ -10,7 +10,7 @@ import { defaultPalette } from '../qa/palette.js';
 import { qaCards as realQaCards, type CardQaEntry, type QaCardsOptions } from '../qa/visual.js';
 import { filmSummary, type FilmReport } from '../qa/film.js';
 import { contentEnd, measureFilm } from '../qa/film-measure.js';
-import { planRedo, type FilmQa, type RedoAction } from '../qa/film-redo.js';
+import { planRedo, syncBeats, type FilmQa, type RedoAction } from '../qa/film-redo.js';
 import { CANVAS, type Storyboard } from '../storyboard/schema.js';
 import { captionCenterY, visualLayout } from '../compose/layout.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
@@ -98,14 +98,14 @@ export async function runQaFinal(ctx: QaFinalContext, video: string, storyboard:
 }
 
 /** redo：是否允许局部重做（CLI 与工作台首版重做；修改版本只检查，免得改掉用户点名的版式）；measure 缺省为真实度量 */
-export interface QaFilmContext { cfg: AppConfig; workDir: string; redo: boolean; signal?: AbortSignal; measure?: typeof measureFilm }
+export interface QaFilmContext { cfg: AppConfig; workDir: string; redo: boolean; signal?: AbortSignal; measure?: typeof measureFilm; /** 素材记录所在目录（工作台是 base），缺省 workDir */ metaDir?: string }
 /** 一版成片：视频文件、它对应的分镜与片尾开始时刻 */
 export interface FilmCut { video: string; storyboard: Storyboard; outroStartSec?: number }
 
 const actionText = (actions: RedoAction[]): string => actions.map((a) => `第 ${a.shotIndex + 1} 镜：${a.detail}`).join('；');
 
 async function measureCut(ctx: QaFilmContext, cut: FilmCut): Promise<FilmReport> {
-  const o = { ffmpeg: ctx.cfg.ffmpeg, workDir: ctx.workDir, video: cut.video, storyboard: cut.storyboard, signal: ctx.signal };
+  const o = { ffmpeg: ctx.cfg.ffmpeg, workDir: ctx.workDir, ...(ctx.metaDir ? { metaDir: ctx.metaDir } : {}), video: cut.video, storyboard: cut.storyboard, signal: ctx.signal };
   return (ctx.measure ?? measureFilm)(cut.outroStartSec === undefined ? o : { ...o, outroStartSec: cut.outroStartSec });
 }
 
@@ -134,7 +134,7 @@ export async function runQaFilm(ctx: QaFilmContext, cut: FilmCut, captions: Time
   return redoOnce(ctx, cut, { before, actions: plan.actions, unfixed }, plan.storyboard, rerender, complete);
 }
 
-/** 按重做后的分镜重渲并复测；重渲失败时保留原成片 */
+/** 按重做后的分镜重渲并复测：重做后的分镜先落盘一次（工作台直播刷新镜头列表，同时把 B-roll 节拍记录对齐）；重渲失败时撤回重做动作、保留原成片 */
 async function redoOnce(ctx: QaFilmContext, cut: FilmCut, film: FilmQa, storyboard: Storyboard, rerender: (s: Storyboard) => Promise<FilmCut>, complete: Complete<'qa-film'>): Promise<{ cut: FilmCut; film: FilmQa }> {
   let next: FilmCut;
   try {
@@ -142,9 +142,14 @@ async function redoOnce(ctx: QaFilmContext, cut: FilmCut, film: FilmQa, storyboa
   } catch (err) {
     rethrowIfBalance(err);
     rethrowIfCancelled(err);
-    complete('qa-film', `局部重做渲染失败，保留原成片：${err instanceof Error ? err.message : String(err)}`, { film });
-    return { cut, film };
+    const reason = `局部重做渲染失败，已撤回（${actionText(film.actions)}）：${err instanceof Error ? err.message : String(err)}`;
+    const reverted: FilmQa = { ...film, actions: [], unfixed: [...film.unfixed, reason] };
+    complete('qa-film', reason, { film: reverted });
+    return { cut, film: reverted };
   }
+  const project = complete('qa-film', `局部重做后的分镜：${next.storyboard.shots.length} 个镜头`, { storyboard: next.storyboard });
+  const beats = project?.broll?.beats;
+  const synced = beats ? syncBeats(beats, next.storyboard) : undefined;
   let after: FilmReport | undefined;
   try {
     after = await measureCut(ctx, next);
@@ -153,6 +158,7 @@ async function redoOnce(ctx: QaFilmContext, cut: FilmCut, film: FilmQa, storyboa
   }
   const done: FilmQa = { ...film, ...(after ? { after } : {}) };
   const tail = [...(after?.skipped ?? []), ...film.unfixed];
-  complete('qa-film', [`局部重做后：${after ? filmSummary(after) : '复测失败'}`, ...tail].join(' · '), { film: done, storyboard: next.storyboard });
+  const brollPatch = project?.broll && synced && synced.some((r, i) => r !== beats?.[i]) ? { broll: { ...project.broll, beats: synced } } : {};
+  complete('qa-film', [`局部重做后：${after ? filmSummary(after) : '复测失败'}`, ...tail].join(' · '), { film: done, ...brollPatch });
   return { cut: next, film: done };
 }

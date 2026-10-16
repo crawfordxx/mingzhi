@@ -6,8 +6,11 @@ import { analyzeGray, extractGray, type FrameSeries } from './film-frames.js';
 import { filmReport, type FilmReport } from './film.js';
 import { measureReadability, type ShotContrast } from './readability.js';
 
-/** video：成片；workDir：素材与记录所在目录（也是渲染静帧的 publicDir）；outroStartSec：有品牌片尾时给出（音效规划要用） */
-export interface MeasureOptions { ffmpeg: string; workDir: string; video: string; storyboard: Storyboard; outroStartSec?: number; signal?: AbortSignal }
+/**
+ * video：成片；workDir：素材所在目录（渲染静帧的 publicDir）；metaDir：素材记录（同名 .json）所在目录，缺省同 workDir
+ * （工作台的素材缓存与记录在 base/broll，版本目录里只有素材文件的引用）；outroStartSec：有品牌片尾时给出（音效规划要用）
+ */
+export interface MeasureOptions { ffmpeg: string; workDir: string; metaDir?: string; video: string; storyboard: Storyboard; outroStartSec?: number; signal?: AbortSignal }
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -36,6 +39,6 @@ async function contrasts(o: MeasureOptions): Promise<{ contrasts?: ShotContrast[
 export async function measureFilm(o: MeasureOptions): Promise<FilmReport> {
   const durationSec = contentEnd(o.storyboard);
   const sfx = sfxCues(o.storyboard.shots, o.outroStartSec === undefined ? {} : { outroStartSec: o.outroStartSec });
-  const candidateOf = (file: string): string | undefined => readAssetMeta(o.workDir, file)?.candidateId;
+  const candidateOf = (file: string): string | undefined => readAssetMeta(o.metaDir ?? o.workDir, file)?.candidateId;
   return filmReport({ storyboard: o.storyboard, durationSec, sfx, candidateOf, ...(await frames(o, durationSec)), ...(await contrasts(o)) });
 }

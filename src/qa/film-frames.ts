@@ -15,8 +15,11 @@ export const STILL_DIFF = 0.8;
 export const STATIC_MIN_SEC = 3;
 /** 6×6 块的标准差小于它算平坦 */
 export const FLAT_STD = 2.5;
-/** 空白率按这么长的滑动窗口平均后判「任何时刻」（秒）：一两帧的过渡闪白不算，停留 1 秒以上才算 */
+/** 持续空白：空白率按这么长的滑动窗口平均后判（秒） */
 export const BLANK_WINDOW_SEC = 1;
+/** 闪白：连续这么多帧（每秒 5 帧，即 0.6 秒）上半屏平坦块 ≥ FLASH_BLANK，且前后的帧都不空白（审片报告 0:04、0:36 的卡间闪空白） */
+export const FLASH_FRAMES = 3;
+export const FLASH_BLANK = 0.9;
 
 export interface Span { start: number; end: number }
 /** diffs[k] 是第 k 与 k+1 帧上半屏的平均差；blank[k] 是第 k 帧上半屏的平坦块比例；first 是第 0 帧（上半屏空白率与整帧标准差） */
@@ -89,8 +92,23 @@ export function staticSpans(s: FrameSeries, minSec = STATIC_MIN_SEC): Span[] {
   return spans;
 }
 
-/** 空白率按 1 秒滑动平均：峰值、峰值时刻（窗口中点）与超过 limit 的区间（相连的窗口合并） */
-export function blankSpans(s: FrameSeries, limit: number): { peak: number; peakAt: number; spans: Span[] } {
+/** 闪白：连续 ≥ FLASH_FRAMES 帧平坦块 ≥ FLASH_BLANK，前一帧与后一帧都存在且空白率 ≤ limit；开头或结尾的空白不算（由首帧与持续空白管） */
+function flashSpans(s: FrameSeries, limit: number): Span[] {
+  const spans: Span[] = [];
+  let from = -1;
+  s.blank.forEach((b, k) => {
+    if (b >= FLASH_BLANK) { if (from < 0) from = k; return; }
+    if (from > 0 && k - from >= FLASH_FRAMES && s.blank[from - 1] <= limit && b <= limit) spans.push({ start: round3(from / s.fps), end: round3(k / s.fps) });
+    from = -1;
+  });
+  return spans;
+}
+
+/**
+ * 空白率两种判定并存：持续空白（1 秒滑动平均超过 limit 的区间，相连的窗口合并）与闪白（逐帧，见 flashSpans）；
+ * 另给 1 秒平均的峰值与峰值时刻（窗口中点）
+ */
+export function blankSpans(s: FrameSeries, limit: number): { peak: number; peakAt: number; spans: Span[]; flashes: Span[] } {
   const w = Math.max(1, Math.round(BLANK_WINDOW_SEC * s.fps));
   const n = Math.max(1, s.blank.length - w + 1);
   const avg = Array.from({ length: n }, (_, k) => s.blank.slice(k, k + w).reduce((a, b) => a + b, 0) / Math.min(w, s.blank.length - k));
@@ -101,7 +119,7 @@ export function blankSpans(s: FrameSeries, limit: number): { peak: number; peakA
     const last = acc[acc.length - 1];
     return last && last.end >= span.start ? [...acc.slice(0, -1), { start: last.start, end: span.end }] : [...acc, span];
   }, []);
-  return { peak: round3(avg[peakK]), peakAt: round3((peakK + w / 2) / s.fps), spans };
+  return { peak: round3(avg[peakK]), peakAt: round3((peakK + w / 2) / s.fps), spans, flashes: flashSpans(s, limit) };
 }
 
 /** 抽取成片前 endSec 秒的灰度帧（108×192、每秒 5 帧）；ffmpeg 出错时抛错 */

@@ -32,7 +32,7 @@ const STORYBOARD = { bgm: 'tech', coverTitle: { title: '怎么存钱', subtitle:
 
 export interface Calls {
   llm: string[]; renderCut: unknown[][]; matte: string[]; composite: { bg: string; keep: unknown; cut: string; fgr: string; matte: string }[]; segments: string[]; grain: (boolean | undefined)[]; concat: string[][]; cutInputs: string[]; audio: number;
-  qaOnly: (number[] | undefined)[]; qaKeep: (number[] | undefined)[]; hard: string[]; film: string[]; meanColor: string[]; covers: { style: string; workDir: string }[]; images: string[]; videos: string[];
+  qaOnly: (number[] | undefined)[]; qaKeep: (number[] | undefined)[]; hard: string[]; film: string[]; filmMetaDir: (string | undefined)[]; meanColor: string[]; covers: { style: string; workDir: string }[]; images: string[]; videos: string[];
 }
 
 const json = (file: string): Record<string, unknown> => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
@@ -100,7 +100,7 @@ const fakeQa = (calls: Calls): QaDeps => ({
   },
   hardChecks: async (video) => { calls.hard.push(video); return [{ id: 'fps', ok: true, detail: '30 fps' }]; },
   // 整片自检：假成片不是真视频，度量一律达标（不触发局部重做）；记下被检查的成片
-  film: async (o) => { calls.film.push(o.video); return { ok: true, durationSec: 0, metrics: [], templates: [], skipped: [] }; },
+  film: async (o) => { calls.film.push(o.video); calls.filmMetaDir.push(o.metaDir); return { ok: true, durationSec: 0, metrics: [], templates: [], skipped: [] }; },
 });
 
 const fakeCover = (calls: Calls): CoverDeps => ({
@@ -129,7 +129,7 @@ export interface Fixture { ctx: RunnerCtx; store: SpaceStore; spaceId: string; c
 
 export const DEFAULT_SETTINGS: SpaceSettings = { background: { kind: 'preset', id: 'study' }, captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 1 };
 
-const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], grain: [], concat: [], cutInputs: [], audio: 0, qaOnly: [], qaKeep: [], hard: [], film: [], meanColor: [], covers: [], images: [], videos: [] });
+const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], grain: [], concat: [], cutInputs: [], audio: 0, qaOnly: [], qaKeep: [], hard: [], film: [], filmMetaDir: [], meanColor: [], covers: [], images: [], videos: [] });
 
 /** 建一个临时项目与全部假依赖；reset() 清空调用记录（在 v1 跑完之后调用，只看修改版本做了什么） */
 export function makeFixture(settings: Partial<SpaceSettings> = {}, inputSecs: number[] = [SOURCE_SEC]): Fixture {

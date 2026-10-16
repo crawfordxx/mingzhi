@@ -159,5 +159,7 @@ export function detailOfStep(step: string, patch: ProjectPatch, project: Project
   if (step === 'qa-cards' && patch.qa && patch.qa.cards.length > 0) return cardsDetail(patch.qa.cards);
   if (step === 'qa-final' && patch.qa && patch.qa.hard.length > 0) return hardDetail(patch.qa.hard);
   if (step === 'qa-film' && patch.film) return filmDetail(patch.film);
+  // 整片自检局部重做改了分镜（拆镜头、换版式）：再发一次镜头列表
+  if (step === 'qa-film' && patch.storyboard) return shotsDetail(patch.storyboard);
   return undefined;
 }

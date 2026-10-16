@@ -1,7 +1,7 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
-import { CONTENT_W, CardFrame, SAFE_H, Reveal, SafeArea, clampLines, fitFontSize, fitScale, lineCount, springAt, textEm, type PropsOf, type TemplateProps } from './parts.js';
+import { CONTENT_W, CardFrame, SAFE_H, Reveal, SafeArea, clampLines, fitFontSize, fitScale, lineCount, springAt, textEm, useMinPx, type PropsOf, type TemplateProps } from './parts.js';
 
 type Mark = 'yes' | 'no' | 'maybe';
 type Group = PropsOf<'chips'>['groups'][number];
@@ -34,6 +34,10 @@ const zoomOf = (groups: Group[]): number => (groups.reduce((n, g) => n + g.items
 
 const pillPx = (text: string, k: number): number => fitFontSize(text, PILLS_W - 90, Math.round(42 * k), 22);
 const labelPx = (label: string, k: number): number => fitFontSize(label, LABEL_W, Math.round(38 * k), 22, 2);
+/** 实际字号：不低于当前表面的下限（浮层见 useMinPx） */
+export const chipPillPx = (text: string, k: number, minPx: number): number => Math.max(minPx, pillPx(text, k));
+export const chipLabelPx = (label: string, k: number, minPx: number): number => Math.max(minPx, labelPx(label, k));
+export const chipsZoom = (groups: Group[]): number => zoomOf(groups);
 /** 胶囊宽度估算：文字 + 图标 + 间距 + 左右内边距 */
 const pillWidth = (text: string, k: number): number => {
   const px = pillPx(text, k);
@@ -72,8 +76,8 @@ const MarkIcon: React.FC<{ mark: Mark; size: number; color: string }> = ({ mark,
 };
 
 /** 胶囊：依次弹入（带一点过冲） */
-const Pill: React.FC<{ text: string; mark: Mark; p: number; k: number }> = ({ text, mark, p, k }) => {
-  const px = pillPx(text, k);
+const Pill: React.FC<{ text: string; mark: Mark; p: number; k: number; minPx: number }> = ({ text, mark, p, k, minPx }) => {
+  const px = chipPillPx(text, k, minPx);
   const c = MARKS[mark];
   return (
     <Reveal p={p} dy={10} from={0.6}>
@@ -86,11 +90,12 @@ const Pill: React.FC<{ text: string; mark: Mark; p: number; k: number }> = ({ te
   );
 };
 
-const Row: React.FC<{ group: Group; first: number; divider: boolean; local: number; fps: number; k: number }> = ({ group, first, divider, local, fps, k }) => (
-  <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: `${ROW_PAD_Y}px 0`, borderTop: divider ? '2px solid #EFEDE9' : 'none' }}>
-    <div style={{ width: LABEL_W, flex: 'none', fontSize: labelPx(group.label, k), fontWeight: 600, color: THEME.sub, lineHeight: LABEL_LH, ...clampLines(2) }}>{group.label}</div>
+/** minPx > 0（浮层）时组名单独一行、胶囊排在下面，字号不低于 minPx（缩放后 ≥ 28px） */
+const Row: React.FC<{ group: Group; first: number; divider: boolean; local: number; fps: number; k: number; minPx: number }> = ({ group, first, divider, local, fps, k, minPx }) => (
+  <div style={{ display: 'flex', flexDirection: minPx ? 'column' : 'row', alignItems: minPx ? 'flex-start' : 'center', gap: 20, padding: `${ROW_PAD_Y}px 0`, borderTop: divider ? '2px solid #EFEDE9' : 'none' }}>
+    <div style={{ width: minPx ? undefined : LABEL_W, flex: 'none', fontSize: chipLabelPx(group.label, k, minPx), fontWeight: 600, color: THEME.sub, lineHeight: LABEL_LH, ...clampLines(2) }}>{group.label}</div>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: PILL_GAP }}>
-      {group.items.map((it, i) => <Pill key={i} text={it.text} mark={it.mark} k={k} p={springAt(local, FIRST_POP + (first + i) * STAGGER, fps, { damping: 12, mass: 0.6 })} />)}
+      {group.items.map((it, i) => <Pill key={i} text={it.text} mark={it.mark} k={k} minPx={minPx} p={springAt(local, FIRST_POP + (first + i) * STAGGER, fps, { damping: 12, mass: 0.6 })} />)}
     </div>
   </div>
 );
@@ -100,10 +105,11 @@ export const Chips: React.FC<TemplateProps<'chips'>> = ({ props, local }) => {
   const { fps } = useVideoConfig();
   const k = zoomOf(props.groups);
   const firsts = props.groups.map((_, gi) => props.groups.slice(0, gi).reduce((n, g) => n + g.items.length, 0));
+  const minPx = useMinPx();
   return (
-    <SafeArea scale={fitScale(estimateChipsHeight(props.groups), SAFE_H, MIN_SCALE)}>
+    <SafeArea scale={minPx ? 1 : fitScale(estimateChipsHeight(props.groups), SAFE_H, MIN_SCALE)}>
       <CardFrame fill padding={`${CARD_PAD_Y}px ${PAD_X}px`}>
-        {props.groups.map((g, gi) => <Row key={gi} group={g} first={firsts[gi]} divider={gi > 0} local={local} fps={fps} k={k} />)}
+        {props.groups.map((g, gi) => <Row key={gi} group={g} first={firsts[gi]} divider={gi > 0} local={local} fps={fps} k={k} minPx={minPx} />)}
       </CardFrame>
     </SafeArea>
   );

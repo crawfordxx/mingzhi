@@ -6,7 +6,7 @@ import type { Broll, CardSpec, Shot } from '../../src/storyboard/schema.js';
 import { CANVAS } from '../../src/storyboard/schema.js';
 import { THEME } from '../theme.js';
 import { renderBackdrop, renderCard } from '../templates/index.js';
-import { GLASS, SurfaceContext } from '../templates/parts.js';
+import { FLOAT_SCALE, GLASS, SolidGlassContext, SurfaceContext } from '../templates/parts.js';
 import { BrollMedia } from './BrollLayer.js';
 
 /** 进场：从下方 80px、0.94 缩放、透明度 0 弹入（约 0.5 秒收敛）；全片第一个镜头不从空白开始，内容第 0 帧就完整，只从 1.035 轻轻收回 */
@@ -46,7 +46,6 @@ const SPLIT_SHADE = 'linear-gradient(180deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0
  * 浮层：整块卡片区（1080×960）缩到 0.64，像下三分之一字条一样压在人物胸前：卡片内容贴底排，底边约在 y=1242，
  * 整块（含钩子、图片的固定底）底边 1300，在 y=1400 的字幕上方；卡片向上长，最高不过 y≈780，不遮脸
  */
-const FLOAT_SCALE = 0.64;
 const FLOAT_BOTTOM = 1300;
 const FLOAT_TOP = FLOAT_BOTTOM - CANVAS.seam * FLOAT_SCALE;
 /** 从没有卡片的镜头（人物全屏等）切进分屏：卡片区连同完整的卡片在 3 帧内快速显出（不从空白弹入），人像在下面同时下移，不露米色空底 */
@@ -58,24 +57,23 @@ const SEAM_BOX: React.CSSProperties = { position: 'absolute', left: 0, top: 0, w
 /** 一个镜头在卡片层上的画法参数：local/dur 为镜头内时间，motion 为进出场，lead 为卡片内部时钟的提前量（见 cardLead） */
 type Part = { shot: Shot; local: number; dur: number; motion: Motion; lead?: number };
 
-/** 分屏的底：有素材时素材铺满 + 渐变压暗（整片自检发现图上文字看不清时再整体压暗 broll.dim），否则米色底 + 模板固定底（钩子黑底、图片） */
+/** 铺图变体（broll.legible）的压暗：中段起就压下去，卡片与直接压在图上的浅色字（面包屑、钩子标题）都落在深色上 */
+const SPLIT_SHADE_LEGIBLE = 'linear-gradient(180deg, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.2) 20%, rgba(10, 9, 8, 0.4) 40%, rgba(10, 9, 8, 0.74) 62%, rgba(10, 9, 8, 0.88) 100%)';
+
+/** 分屏的底：有素材时素材铺满 + 渐变压暗（铺图变体压得更深），否则米色底 + 模板固定底（钩子黑底、图片） */
 const SplitBase: React.FC<Part> = ({ shot, local, dur }) => (
   <div style={{ ...SEAM_BOX, background: THEME.stage }}>
-    {shot.broll ? (
-      <>
-        <BrollMedia broll={shot.broll} local={local} dur={dur} />
-        <AbsoluteFill style={{ background: SPLIT_SHADE }} />
-        {shot.broll.dim ? <AbsoluteFill style={{ background: `rgba(0, 0, 0, ${shot.broll.dim})` }} /> : null}
-      </>
-    ) : shot.card ? renderBackdrop(shot.card, local, dur) : null}
+    {shot.broll ? <><BrollMedia broll={shot.broll} local={local} dur={dur} /><AbsoluteFill style={{ background: shot.broll.legible ? SPLIT_SHADE_LEGIBLE : SPLIT_SHADE }} /></> : shot.card ? renderBackdrop(shot.card, local, dur) : null}
   </div>
 );
 
-/** 分屏的卡片：有素材时贴底排在图上（白卡变玻璃） */
+/** 分屏的卡片：有素材时贴底排在图上（白卡变玻璃；铺图变体用几乎不透明的玻璃） */
 const SplitContent: React.FC<Part> = ({ shot, local, dur, motion, lead }) => (
   <div style={SEAM_BOX}>
     <SurfaceContext.Provider value={shot.broll ? 'image' : 'paper'}>
-      {shot.card ? <CardMotion card={shot.card} local={local} dur={dur} motion={motion} lead={lead} /> : null}
+      <SolidGlassContext.Provider value={Boolean(shot.broll?.legible)}>
+        {shot.card ? <CardMotion card={shot.card} local={local} dur={dur} motion={motion} lead={lead} /> : null}
+      </SolidGlassContext.Provider>
     </SurfaceContext.Provider>
   </div>
 );

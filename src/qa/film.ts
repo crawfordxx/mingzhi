@@ -10,11 +10,13 @@ import { blankSpans, staticSpans, type FrameSeries, type Span } from './film-fra
 import { MIN_CONTRAST, type ShotContrast } from './readability.js';
 
 /**
- * 阈值：静止 > 3 秒合计每 2 分钟 ≤ 25 秒；任何时刻上半屏空白率 ≤ 80%；摄影级画面 ≥ 25% 片长；同一音效 ≤ 6 次；铺图卡片文字对比度 ≥ 4.5。
- * 首帧「空」指几乎纯色：卡片版式上半屏平坦块 > 95%（try2 的钩子从空白弹入，第 0 帧 99.6%），或整帧标准差 < 8（纯黑、纯米色）；
- * 内容偏少但不空的首帧（短标题卡）由空白率指标管
+ * 阈值：静止 > 3 秒合计按片长折算（每 2 分钟 25 秒，最少 2 秒）；任何时刻上半屏空白率 ≤ 80%（1 秒平均）且没有闪白；
+ * 首帧：卡片版式上半屏平坦块 ≤ 80%，人物与素材全屏只排除纯色帧（整帧标准差 < 8）；摄影级画面 ≥ 25% 片长；同一音效 ≤ 6 次；铺图卡片文字对比度 ≥ 4.5
  */
-export const LIMITS = { staticSec: 25, staticPerSec: 120, maxBlank: 0.8, firstFrameMaxBlank: 0.95, firstFrameMinStd: 8, minCoverage: 0.25, maxSfx: 6, minContrast: MIN_CONTRAST } as const;
+export const LIMITS = { staticSec: 25, staticPerSec: 120, staticMinSec: 2, maxBlank: 0.8, firstFrameMaxBlank: 0.8, firstFrameMinStd: 8, minCoverage: 0.25, maxSfx: 6, minContrast: MIN_CONTRAST } as const;
+
+/** 静止合计上限：按片长折算（2 分钟 25 秒），最少 2 秒 */
+export const staticLimit = (durationSec: number): number => Math.max(LIMITS.staticMinSec, (LIMITS.staticSec * durationSec) / LIMITS.staticPerSec);
 
 export type FilmMetricId = 'static' | 'blank' | 'firstFrame' | 'diversity' | 'coverage' | 'reuse' | 'sfx' | 'readability';
 /** 一项整片指标：value 与 limit 同单位；shots 为不达标时定位到的镜头序号；spans 为对应的成片时间区间（抽帧类指标） */
@@ -32,8 +34,8 @@ export function dominantShot(shots: Shot[], span: Span): number {
   return shots.reduce((best, s, i) => (overlap(s, span) > overlap(shots[best], span) ? i : best), 0);
 }
 
-/** 静止 > 3 秒的段合计：上限按片长折算（2 分钟 25 秒，短片仍是 25 秒） */
-export function staticMetric(shots: Shot[], frames: FrameSeries, durationSec: number, limit = LIMITS.staticSec * Math.max(1, durationSec / LIMITS.staticPerSec)): FilmMetric {
+/** 静止 > 3 秒的段合计：上限按片长折算（见 staticLimit） */
+export function staticMetric(shots: Shot[], frames: FrameSeries, durationSec: number, limit = staticLimit(durationSec)): FilmMetric {
   const spans = staticSpans(frames);
   const total = spans.reduce((n, s) => n + s.end - s.start, 0);
   const longest = Math.max(0, ...spans.map((s) => s.end - s.start));
@@ -45,15 +47,18 @@ export function staticMetric(shots: Shot[], frames: FrameSeries, durationSec: nu
   };
 }
 
-/** 任何时刻上半屏空白率（平坦块口径，1 秒滑动平均）≤ 80% */
+const spanText = (spans: Span[]): string => spans.map((s) => `${fmt(s.start)}–${fmt(s.end)} 秒`).join('、');
+const shotsOver = (shots: Shot[], spans: Span[]): number[] => uniq(spans.flatMap((sp) => shots.flatMap((s, i) => (overlap(s, sp) > 0.2 - 1e-9 ? [i] : []))));
+
+/** 任何时刻上半屏空白率（平坦块口径）：1 秒平均 ≤ 80%，且没有闪白（连续 ≥ 3 帧 ≥ 90%） */
 export function blankMetric(shots: Shot[], frames: FrameSeries): FilmMetric {
   const r = blankSpans(frames, LIMITS.maxBlank);
-  const ok = r.spans.length === 0;
-  const where = ok ? '' : `；超标 ${r.spans.map((s) => `${fmt(s.start)}–${fmt(s.end)} 秒`).join('、')}`;
+  const ok = r.spans.length === 0 && r.flashes.length === 0;
+  const where = [r.spans.length > 0 ? `；持续空白 ${spanText(r.spans)}` : '', r.flashes.length > 0 ? `；闪白 ${spanText(r.flashes)}` : ''].join('');
   return {
-    id: 'blank', label: '上半屏空白率', value: r.peak, limit: LIMITS.maxBlank, ok, spans: r.spans,
-    detail: `最高 ${pct(r.peak)}（${fmt(r.peakAt)} 秒，上限 ${pct(LIMITS.maxBlank)}）${where}`,
-    shots: ok ? [] : uniq(r.spans.flatMap((sp) => shots.flatMap((s, i) => (overlap(s, sp) > 0.2 ? [i] : [])))),
+    id: 'blank', label: '上半屏空白率', value: r.peak, limit: LIMITS.maxBlank, ok, spans: [...r.spans, ...r.flashes],
+    detail: `最高 ${pct(r.peak)}（1 秒平均，${fmt(r.peakAt)} 秒，上限 ${pct(LIMITS.maxBlank)}）${where}`,
+    shots: ok ? [] : shotsOver(shots, [...r.spans, ...r.flashes]),
   };
 }
 

@@ -205,7 +205,7 @@ async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change,
   const res = await composeStage(args, input, env.complete);
   env.complete('compose', `分段渲染：重渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
   // 修改版本只做整片自检、不局部重做：用户点名的改动不被自检改掉
-  await filmQaStage(args, input, res, env.complete, false);
+  await filmQaStage(args, input, res, env.complete, false, env.base);
   return { changed: changedAgainstParent(p, res), rerendered: rerenderedAgainst(p, res), hashes: res.hashes, contents: res.contents, ...(res.outroStartSec === undefined ? {} : { outroStartSec: res.outroStartSec }) };
 }
 

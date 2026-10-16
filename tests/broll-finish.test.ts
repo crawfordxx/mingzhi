@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { labelCardMedia, rebalance, recordCardAssets } from '../src/pipeline/broll-finish.js';
+import { keepExisting, labelCardMedia, rebalance, recordCardAssets } from '../src/pipeline/broll-finish.js';
 import { readAssetMeta } from '../src/broll/credit-store.js';
 import { referenceColor } from '../src/broll/ref-color.js';
 import { loadConfig } from '../src/config.js';
@@ -36,6 +36,8 @@ describe('卡片自带的图按授权记录加「AI 生成」角标', () => {
     expect(out[1]).toEqual(shots[1]);
     expect(out[2].card).toMatchObject({ props: { mediaLabel: { kind: 'ai', text: 'AI 生成' } } });
     expect(out[3]).toEqual(shots[3]);
+    // 素材步骤意外失败走回退时，留在卡片上的生成图也要标角标
+    expect(keepExisting(sb(shots), dir, 12).shots[0].card).toMatchObject({ props: { mediaLabel: { kind: 'ai', text: 'AI 生成' } } });
     // Pexels 卡片兜底素材记下摄影师与作品页
     expect(readAssetMeta(dir, 'broll/px.jpg')?.credit).toMatchObject({ source: 'pexels', author: 'Ann Lee', authorUrl: 'https://www.pexels.com/@ann', page: 'https://www.pexels.com/photo/1/' });
   });

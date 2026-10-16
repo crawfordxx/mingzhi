@@ -13,8 +13,8 @@ import { runBuffer } from '../media/exec.js';
 import { CANVAS, type Shot, type Storyboard } from '../storyboard/schema.js';
 
 export const MIN_CONTRAST = 4.5;
-/** polarity：文字比底亮（light，压暗底图有用）还是比底暗（dark，压暗反而更糟，只能取消底图） */
-export interface ShotContrast { shotIndex: number; contrast: number; polarity: 'light' | 'dark' }
+/** polarity：文字比底亮（light）还是比底暗（dark）；legible：不达标时换成铺图变体（broll.legible）后量到的对比度 */
+export interface ShotContrast { shotIndex: number; contrast: number; polarity: 'light' | 'dark'; legible?: number }
 
 /** 两张图同一像素三个通道的差之和超过它才算文字像素（排除编码噪声） */
 const TEXT_DIFF = 40;
@@ -84,7 +84,25 @@ async function renderShot(serveUrl: string, shot: Shot, hideText: boolean, outpu
   await renderStill({ composition, serveUrl, inputProps, output, frame, imageFormat: 'png' });
 }
 
-/** 逐个铺图卡片渲染两张静帧并量对比度；workDir 是素材所在的工作目录（打包的 publicDir） */
+interface Env { serveUrl: string; tmp: string; ffmpeg: string }
+
+/** 一个镜头的文字对比度（两张静帧相减）；没有文字返回 null */
+async function contrastOf(env: Env, shot: Shot, name: string): Promise<{ contrast: number; polarity: 'light' | 'dark' } | null> {
+  const [a, b] = [join(env.tmp, `${name}-a.png`), join(env.tmp, `${name}-b.png`)];
+  await renderShot(env.serveUrl, shot, false, a);
+  await renderShot(env.serveUrl, shot, true, b);
+  return textContrast(await stillRgb(env.ffmpeg, a), await stillRgb(env.ffmpeg, b), CANVAS.width, CANVAS.seam);
+}
+
+/** 一个铺图卡片：量对比度；不达标且还不是铺图变体时，再量一次变体的对比度（局部重做据此选变体或取消底图） */
+async function measureShot(env: Env, shot: Shot, i: number): Promise<ShotContrast | null> {
+  const r = await contrastOf(env, shot, `${i}`);
+  if (!r || r.contrast >= MIN_CONTRAST || !shot.broll || shot.broll.legible) return r ? { shotIndex: i, ...r } : null;
+  const v = await contrastOf(env, { ...shot, broll: { ...shot.broll, legible: true } }, `${i}-v`);
+  return { shotIndex: i, ...r, ...(v ? { legible: v.contrast } : {}) };
+}
+
+/** 逐个铺图卡片渲染静帧并量对比度（一次打包）；workDir 是素材所在的工作目录（打包的 publicDir） */
 export async function measureReadability(o: { workDir: string; storyboard: Storyboard; ffmpeg: string; signal?: AbortSignal }): Promise<ShotContrast[]> {
   const targets = backedCards(o.storyboard);
   if (targets.length === 0) return [];
@@ -94,11 +112,8 @@ export async function measureReadability(o: { workDir: string; storyboard: Story
       const out: ShotContrast[] = [];
       for (const i of targets) {
         throwIfCancelled(o.signal);
-        const [a, b] = [join(tmp, `${i}-a.png`), join(tmp, `${i}-b.png`)];
-        await renderShot(serveUrl, o.storyboard.shots[i], false, a);
-        await renderShot(serveUrl, o.storyboard.shots[i], true, b);
-        const r = textContrast(await stillRgb(o.ffmpeg, a), await stillRgb(o.ffmpeg, b), CANVAS.width, CANVAS.seam);
-        if (r) out.push({ shotIndex: i, ...r });
+        const r = await measureShot({ serveUrl, tmp, ffmpeg: o.ffmpeg }, o.storyboard.shots[i], i);
+        if (r) out.push(r);
       }
       return out;
     });

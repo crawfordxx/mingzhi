@@ -293,9 +293,9 @@ export type Composed = SegmentedResult & { outroStartSec?: number };
 
 /**
  * 整片自检（args.qa 为 false 时跳过）：度量成片；redo 为 true 时不达标的指标做一轮局部重做，按新分镜重渲（分段缓存只重渲受影响的镜头）。
- * 返回最终分镜与最终一次渲染的结果
+ * metaDir 为素材记录所在目录（工作台传 base）。返回最终分镜与最终一次渲染的结果
  */
-export async function filmQaStage(args: PipelineArgs, input: ComposeInput, composed: Composed, complete: Complete, redo: boolean): Promise<{ storyboard: Storyboard; composed: Composed }> {
+export async function filmQaStage(args: PipelineArgs, input: ComposeInput, composed: Composed, complete: Complete, redo: boolean, metaDir?: string): Promise<{ storyboard: Storyboard; composed: Composed }> {
   if (args.qa === false) return { storyboard: input.storyboard, composed };
   let last = composed;
   const rerender = async (storyboard: Storyboard): Promise<FilmCut> => {
@@ -303,7 +303,7 @@ export async function filmQaStage(args: PipelineArgs, input: ComposeInput, compo
     complete('compose', `局部重做：重渲 ${last.rendered.length} 段 · 复用缓存 ${last.reused.length} 段`);
     return { video: input.output, storyboard, ...(last.outroStartSec === undefined ? {} : { outroStartSec: last.outroStartSec }) };
   };
-  const ctx = { cfg: args.cfg, workDir: args.workDir, redo, signal: args.signal, measure: args.qaDeps?.film };
+  const ctx = { cfg: args.cfg, workDir: args.workDir, redo, signal: args.signal, measure: args.qaDeps?.film, ...(metaDir ? { metaDir } : {}) };
   const cut: FilmCut = { video: input.output, storyboard: input.storyboard, ...(composed.outroStartSec === undefined ? {} : { outroStartSec: composed.outroStartSec }) };
   const res = await runQaFilm(ctx, cut, input.captions, rerender, complete);
   return { storyboard: res.cut.storyboard, composed: last };
