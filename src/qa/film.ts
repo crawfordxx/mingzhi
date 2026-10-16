@@ -92,22 +92,43 @@ export function diversityMetric(shots: Shot[], durationSec: number): FilmMetric 
   };
 }
 
-/** 一个镜头里摄影级画面（实拍、照片、生成图）占上半屏或全屏的秒数：素材铺满、画中画底、分屏铺图、浮层素材小窗、带图或视频的钩子与图片卡 */
-function photoShot(s: Shot): boolean {
+/** 底图整体压暗超过它（可读性台阶最深一级是 65%）就看不出是照片了，不算摄影级画面 */
+export const MAX_PHOTO_SHADE = 0.5;
+
+/** 镜头的 B-roll 按版式会铺进上半屏或全屏：素材铺满、画中画底、分屏铺图、浮层素材小窗 */
+function brollShown(s: Shot): boolean {
   const layout = visualLayout(s);
-  if (s.broll && (layout === 'broll' || layout === 'pip' || layout === 'split' || (layout === 'overlay' && !s.card))) return true;
+  return Boolean(s.broll) && (layout === 'broll' || layout === 'pip' || layout === 'split' || (layout === 'overlay' && !s.card));
+}
+
+const deepShaded = (s: Shot): boolean => (s.broll?.shade ?? 0) > MAX_PHOTO_SHADE + 1e-9;
+
+/** 一个镜头里摄影级画面（实拍、照片、生成图）占上半屏或全屏的秒数：压暗不超过 50% 的 B-roll、带图或视频的钩子与图片卡 */
+function photoShot(s: Shot): boolean {
+  if (brollShown(s) && !deepShaded(s)) return true;
+  const layout = visualLayout(s);
   const p = (s.card?.props ?? {}) as { image?: string; video?: string };
   return (s.card?.template === 'hook' || s.card?.template === 'photo') && layout !== 'full' && Boolean(p.image || p.video);
 }
 
 export const photoSeconds = (shots: Shot[]): number => shots.reduce((n, s) => n + (photoShot(s) ? s.end - s.start : 0), 0);
 
+/** 底图压暗超过 50%、因此不计入摄影级画面覆盖的镜头序号（只算本来会计入的） */
+export const deepShadedShots = (shots: Shot[]): number[] => shots.flatMap((s, i) => (brollShown(s) && deepShaded(s) && !photoShot(s) ? [i] : []));
+
+/** 写进 film.unfixed：哪些镜头的底图压得太暗、没算进覆盖 */
+export function deepShadeNotes(shots: Shot[]): string[] {
+  return deepShadedShots(shots).map((i) => `第 ${i + 1} 镜底图压暗 ${pct(shots[i].broll?.shade ?? 0)}（超过 ${pct(MAX_PHOTO_SHADE)}），不计入摄影级画面覆盖`);
+}
+
 /** B-roll 覆盖率：摄影级画面占片长 ≥ 25% */
 export function coverageMetric(shots: Shot[], durationSec: number): FilmMetric {
   const seconds = photoSeconds(shots);
   const ratio = durationSec > 0 ? seconds / durationSec : 0;
   const ok = ratio >= LIMITS.minCoverage - 1e-9;
-  return { id: 'coverage', label: '摄影级画面覆盖', value: Math.round(ratio * 1000) / 1000, limit: LIMITS.minCoverage, ok, shots: [], detail: `${fmt(seconds)} / ${fmt(durationSec)} 秒（${pct(ratio)}，至少 ${pct(LIMITS.minCoverage)}）` };
+  const dark = deepShadedShots(shots);
+  const excluded = dark.length > 0 ? `；第 ${dark.map((i) => i + 1).join('、')} 镜底图压暗超过 ${pct(MAX_PHOTO_SHADE)}，不计入` : '';
+  return { id: 'coverage', label: '摄影级画面覆盖', value: Math.round(ratio * 1000) / 1000, limit: LIMITS.minCoverage, ok, shots: [], detail: `${fmt(seconds)} / ${fmt(durationSec)} 秒（${pct(ratio)}，至少 ${pct(LIMITS.minCoverage)}${excluded}）` };
 }
 
 /** 镜头里用到的素材文件：卡片的图或视频、镜头 B-roll */

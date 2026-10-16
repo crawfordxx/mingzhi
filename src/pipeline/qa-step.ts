@@ -8,7 +8,7 @@ import type { LlmClient } from '../llm/kexiang.js';
 import { hardChecks as realHardChecks, type HardCheck } from '../qa/hard.js';
 import { defaultPalette } from '../qa/palette.js';
 import { qaCards as realQaCards, type CardQaEntry, type QaCardsOptions } from '../qa/visual.js';
-import { filmSummary, type FilmMetric, type FilmReport } from '../qa/film.js';
+import { deepShadeNotes, filmSummary, type FilmMetric, type FilmReport } from '../qa/film.js';
 import type { FacePerson } from '../qa/face-noise-measure.js';
 import { contentEnd, measureFilm } from '../qa/film-measure.js';
 import { planRedo, REPORT_ONLY, syncBeats, type FilmQa, type RedoAction } from '../qa/film-redo.js';
@@ -153,7 +153,7 @@ export async function runQaFilm(ctx: QaFilmContext, cut: FilmCut, captions: Time
   const plan = before.ok || !ctx.redo ? undefined : planRedo(cut.storyboard, before, captions, contentEnd(cut.storyboard));
   const head = filmSummary(before);
   if (!plan || plan.actions.length === 0) {
-    const unfixed = [...(plan?.unfixed ?? []), ...residualNotes(before, undefined, [], plan !== undefined, (plan?.unfixed.length ?? 0) > 0)];
+    const unfixed = [...(plan?.unfixed ?? []), ...residualNotes(before, undefined, [], plan !== undefined, (plan?.unfixed.length ?? 0) > 0), ...deepShadeNotes(cut.storyboard.shots)];
     const film: FilmQa = { before, actions: [], unfixed };
     complete('qa-film', [head, ...before.skipped, ...unfixed].join(' · '), { film });
     return { cut, film };
@@ -171,7 +171,7 @@ async function redoOnce(ctx: QaFilmContext, cut: FilmCut, film: FilmQa, storyboa
     rethrowIfBalance(err);
     rethrowIfCancelled(err);
     const reason = `局部重做渲染失败，已撤回（${actionText(film.actions)}）：${err instanceof Error ? err.message : String(err)}`;
-    const reverted: FilmQa = { ...film, actions: [], unfixed: [...film.unfixed, reason] };
+    const reverted: FilmQa = { ...film, actions: [], unfixed: [...film.unfixed, reason, ...deepShadeNotes(cut.storyboard.shots)] };
     complete('qa-film', reason, { film: reverted });
     return { cut, film: reverted };
   }
@@ -184,7 +184,7 @@ async function redoOnce(ctx: QaFilmContext, cut: FilmCut, film: FilmQa, storyboa
   } catch (err) {
     rethrowIfCancelled(err);
   }
-  const unfixed = [...film.unfixed, ...(after ? residualNotes(film.before, after, film.actions, true, true) : [])];
+  const unfixed = [...film.unfixed, ...(after ? residualNotes(film.before, after, film.actions, true, true) : []), ...deepShadeNotes(next.storyboard.shots)];
   const done: FilmQa = { ...film, unfixed, ...(after ? { after } : {}) };
   const tail = [...(after?.skipped ?? []), ...unfixed];
   const brollPatch = project?.broll && synced && synced.some((r, i) => r !== beats?.[i]) ? { broll: { ...project.broll, beats: synced } } : {};
