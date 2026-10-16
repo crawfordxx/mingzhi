@@ -2,6 +2,7 @@ import React from 'react';
 import { AbsoluteFill, Freeze, useCurrentFrame } from 'remotion';
 import { CANVAS, type TalkProps } from '../src/storyboard/schema.js';
 import { captionSec, grainOn, visualShots } from '../src/compose/layout.js';
+import { frameClock } from '../src/compose/frame-clock.js';
 import { PaletteContext } from './palette.js';
 import { DEFAULT_PALETTE } from '../src/compose/palette.js';
 import { PersonLayer } from './layers/PersonLayer.js';
@@ -28,17 +29,10 @@ export const Talk: React.FC<TalkProps> = (props) => {
   const styleId = props.captionStyle ?? DEFAULT_CAPTION_STYLE;
   useCaptionFont(CAPTION_STYLES[styleId].family, props.captionFontFile ?? '');
   const shots = React.useMemo(() => visualShots(props.shots), [props.shots]);
-  const lastEnd = props.shots.length > 0 ? props.shots[props.shots.length - 1].end : props.durationSec;
   // 镜头的末帧：之后卡片与素材定格（留白与片尾）；人像（口播内容）的末帧：之后人像定格并静音。
-  // 两者通常相同；提前到片尾前的 CTA 超出口播内容结尾时，人像先定格，CTA 继续动
-  const durationFrames = Math.round(props.durationSec * CANVAS.fps);
-  const shotFrames = Math.min(Math.round(lastEnd * CANVAS.fps), durationFrames);
-  const personFrames = Math.min(Math.round((props.contentSec ?? lastEnd) * CANVAS.fps), shotFrames);
-  const shotHeld = frame >= shotFrames;
-  const personHeld = frame >= personFrames;
+  // 两者通常相同；提前到片尾前的 CTA 超出口播内容结尾时，人像先定格，CTA 继续动（规则见 frameClock，分段哈希同口径）
+  const { shotFrames, personFrames, shotHeld, personHeld, visualSec, personSec } = frameClock(props, frame);
   // 留白与片尾期间画面层（人像、素材、卡片）整体定格在末帧，卡片与素材不瞬间消失，由片尾的底色淡入一起盖住
-  const visualSec = shotHeld ? (shotFrames - 1) / CANVAS.fps : sec;
-  const personSec = personHeld ? (personFrames - 1) / CANVAS.fps : sec;
   const palette = props.palette ?? DEFAULT_PALETTE;
   return (
     <PaletteContext.Provider value={palette}>
