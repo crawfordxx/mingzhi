@@ -289,6 +289,13 @@ README 里的图片由 `scripts/readme/` 生成：真实工作台截图 + HTML �
 | 模型 | 经[可想 AI][kexiang]：GPT-5.6、Gemini 3.5 Flash、GPT Image 2、Seedance |
 | 成片检查 | ffmpeg ebur128 响度与真峰值、黑帧检测、字幕安全区、WCAG 对比度 |
 
+## 发布
+
+推送 `v<版本>` 标签（与 `package.json` 的 `version` 一致）或在 Actions 页手动运行「发布」工作流：macOS（Apple 芯片、Intel）与 Windows 各自打应用本体包、编译启动器并做解包与渲染烟测，最后创建**草稿** Release，检查无误后手动发布。
+
+> [!NOTE]
+> 启动器从本仓库的 GitHub Releases 下载应用本体包。**仓库公开后，Release 里的文件才能被匿名下载**；私有仓库或草稿 Release 的下载地址会返回 404。
+
 ## 许可证
 
 [MIT][license]

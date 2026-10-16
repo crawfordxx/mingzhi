@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -34,6 +34,7 @@ const { browserOptions } = await import('../src/compose/browser.js');
 const render = await import('../src/compose/render.js');
 const { screenshotUrl } = await import('../src/broll/screenshot.js');
 
+const ROOT = join(import.meta.dirname, '..');
 const CHROME = '/opt/mingzhi/runtime/chrome-headless-shell/149.0.7790.0/mac-arm64/chrome-headless-shell';
 const props = { shots: [] } as never;
 
@@ -61,6 +62,22 @@ describe('browserOptions', () => {
   it('未设置或为空时不带任何字段（Remotion 照旧自己找浏览器）', () => {
     expect(browserOptions({})).toEqual({});
     expect(browserOptions({ MINGZHI_CHROME: '' })).toEqual({});
+  });
+});
+
+describe('源码扫描：以后新增的 Remotion 浏览器调用也必须带 browserOptions()', () => {
+  it('src/ 里每处 selectComposition / renderMedia / renderStill / renderFrames / getCompositions / ensureBrowser / openBrowser 调用都展开了 browserOptions()', () => {
+    const files = (readdirSync(join(ROOT, 'src'), { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
+    const calls: string[] = [];
+    for (const f of files) {
+      const text = readFileSync(join(ROOT, 'src', f), 'utf8');
+      for (const m of text.matchAll(/\b(selectComposition|renderMedia|renderStill|renderFrames|getCompositions|ensureBrowser|openBrowser)\(/g)) {
+        const head = text.slice(m.index, m.index + m[0].length + 30);
+        calls.push(`${f}: ${head.replace(/\s+/g, ' ')}`);
+        expect(head, `${f} 里的 ${m[1]} 调用没有 browserOptions()`).toContain('browserOptions()');
+      }
+    }
+    expect(calls.length).toBeGreaterThanOrEqual(15);
   });
 });
 

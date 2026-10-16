@@ -1,5 +1,7 @@
 // bundle-lib.mjs 的类型声明（供 tests 使用；脚本本身是纯 .mjs，不经 tsc）
 export const APP_ENTRIES: readonly string[];
+export const BUILD_OUTPUTS: readonly string[];
+export function trackedFiles(root: string, pathspecs: readonly string[]): string[];
 export const UNSAFE_CHARS: string;
 export const DEVICE_NAMES: readonly string[];
 export const UNPACK_RATIO: number;

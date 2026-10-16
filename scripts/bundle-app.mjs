@@ -1,6 +1,6 @@
 // 打应用本体包 dist/mingzhi-app-<platform>.tar.zst（启动器解到 app/<版本>/，用 `node --import tsx src/server/index.ts` 启动）。
 //   node scripts/bundle-app.mjs [--out-dir dist] [--level 19] [--keep-staging]
-// 先 `pnpm build:web`。只能打当前平台的包（原生模块随平台）：在临时目录里放 src/ render/ assets/ web/dist 等，
+// 先 `pnpm build:web`。只能打当前平台的包（原生模块随平台）：在临时目录里放 git 跟踪的 src/ render/ assets/ 等与 web/dist，
 // `pnpm install --prod --frozen-lockfile`（hoisted 布局，无符号链接），剪掉测试 / source map / 类型声明 / 文档 / 其它平台二进制，
 // 按启动器同一套严格文件名规则自检，最后写 tar.zst 并输出 sha256 与大小。
 import { execFileSync } from 'node:child_process';
@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { APP_ENTRIES, MAX_ENTRIES, collectEntries, currentPlatform, unpackBudget, writeTarZst } from './bundle-lib.mjs';
+import { APP_ENTRIES, BUILD_OUTPUTS, MAX_ENTRIES, collectEntries, currentPlatform, trackedFiles, unpackBudget, writeTarZst } from './bundle-lib.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { values: opts } = parseArgs({
@@ -21,21 +21,32 @@ const { values: opts } = parseArgs({
 const mb = (n) => `${(n / 1048576).toFixed(1)}MB`;
 const elapsed = (t) => `${((Date.now() - t) / 1000).toFixed(1)}s`;
 
-/** 把仓库里的应用文件复制到 staging（web/dist 必须已构建） */
+/** 把 git 跟踪的应用文件与前端构建产物复制到 staging（web/dist 必须已构建；工作区里未跟踪的草稿不会进包） */
 function assemble(staging) {
   if (!existsSync(join(ROOT, 'web', 'dist', 'index.html'))) throw new Error('web/dist 不存在，先运行 pnpm build:web');
-  for (const rel of APP_ENTRIES) {
-    const src = join(ROOT, rel);
-    if (!existsSync(src)) throw new Error(`缺少 ${rel}`);
-    cpSync(src, join(staging, rel), { recursive: true, filter: (p) => basename(p) !== '.DS_Store' });
+  const files = trackedFiles(ROOT, APP_ENTRIES);
+  if (!files.includes('src/server/index.ts')) throw new Error('git 跟踪的文件里没有 src/server/index.ts');
+  for (const rel of files) {
+    const dest = join(staging, ...rel.split('/'));
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(join(ROOT, ...rel.split('/')), dest);
   }
+  for (const rel of BUILD_OUTPUTS) {
+    cpSync(join(ROOT, rel), join(staging, rel), { recursive: true, filter: (p) => basename(p) !== '.DS_Store' });
+  }
+  return files.length;
 }
 
-/** 只装生产依赖；hoisted 布局让 node_modules 是普通目录（启动器在 Windows 上不解符号链接）；不跑安装脚本（各平台原生包自带二进制） */
+/**
+ * 只装生产依赖；hoisted 布局让 node_modules 是普通目录（启动器在 Windows 上不解符号链接）；不跑安装脚本（各平台原生包自带二进制）。
+ * store 用仓库自己的那个（Windows 上 pnpm 默认按盘符各建 store，临时目录与工作区不同盘时会重新联网下载、缓存也命中不了）。
+ */
 function installProd(staging) {
-  execFileSync('pnpm', ['install', '--prod', '--frozen-lockfile', '--ignore-scripts', '--config.node-linker=hoisted', '--config.confirmModulesPurge=false'], {
-    cwd: staging, stdio: 'inherit', shell: process.platform === 'win32',
-  });
+  const shell = process.platform === 'win32';
+  const store = execFileSync('pnpm', ['store', 'path'], { cwd: ROOT, encoding: 'utf8', shell }).trim();
+  execFileSync('pnpm', [
+    'install', '--prod', '--frozen-lockfile', '--ignore-scripts', '--config.node-linker=hoisted', '--config.confirmModulesPurge=false', `--store-dir=${store}`,
+  ], { cwd: staging, stdio: 'inherit', shell });
 }
 
 function printProblems(problems) {
@@ -69,11 +80,12 @@ async function main() {
   const outDir = resolve(opts['out-dir'] ?? join(ROOT, 'dist'));
   const out = join(outDir, `mingzhi-app-${platform}.tar.zst`);
   const level = Number(opts.level ?? 19);
-  const work = mkdtempSync(join(tmpdir(), 'mingzhi-bundle-'));
+  // CI 上放 RUNNER_TEMP（与工作区同盘）；本机用系统临时目录（在仓库外，Node 解析不会回落到仓库的 node_modules）
+  const work = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'mingzhi-bundle-'));
   const staging = join(work, 'app');
   mkdirSync(staging);
   try {
-    assemble(staging);
+    console.log(`复制了 ${assemble(staging)} 个 git 跟踪的文件 + ${BUILD_OUTPUTS.join(' ')}`);
     installProd(staging);
     const { entries, problems } = collectEntries(staging, platform);
     if (problems.length) {

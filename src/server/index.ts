@@ -1,4 +1,5 @@
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../config.js';
 import { DEFAULT_PORT, startApp } from './app.js';
 import { fakeAppOptions, FAKE_LLM_ENV, isFakeMode } from './fake.js';
@@ -22,7 +23,20 @@ async function main(): Promise<void> {
   process.on('SIGTERM', stop);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * 是否被直接运行（而不是被测试等 import）。比较真实路径：ESM 的 import.meta.url 已解析过符号链接，
+ * argv[1] 可能经过符号链接 / Windows junction，直接比字符串会静默不启动。
+ */
+export function isEntry(metaUrl: string, argv1: string | undefined): boolean {
+  if (!argv1) return false;
+  try {
+    return realpathSync(fileURLToPath(metaUrl)) === realpathSync(argv1);
+  } catch {
+    return false;
+  }
+}
+
+if (isEntry(import.meta.url, process.argv[1])) {
   main().catch((err: Error) => {
     console.error(`启动失败：${err.message}`);
     process.exit(1);

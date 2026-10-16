@@ -1,13 +1,21 @@
 // 应用本体打包（scripts/bundle-app.mjs）的纯逻辑：剪枝规则、严格文件名自检、tar.zst 写出。
 // 文件名规则与启动器 launcher/src/paths.rs 的 is_safe_component 完全一致（tests/bundle-app.test.ts 会比对源码）。
+import { execFileSync } from 'node:child_process';
 import { createWriteStream, lstatSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import * as zlib from 'node:zlib';
 
-/** 应用目录由仓库里的这些路径组成（再加上 pnpm install --prod 得到的 node_modules） */
-export const APP_ENTRIES = ['src', 'render', 'assets', 'web/dist', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'LICENSE'];
+/** 应用目录 = 这些路径下 git 跟踪的文件 + 构建产物 BUILD_OUTPUTS + pnpm install --prod 得到的 node_modules */
+export const APP_ENTRIES = ['src', 'render', 'assets', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'LICENSE'];
+export const BUILD_OUTPUTS = ['web/dist'];
+
+/** pathspecs 下 git 跟踪的文件（posix 相对路径）；未跟踪的草稿、本机文件不进包 */
+export function trackedFiles(root, pathspecs) {
+  const out = execFileSync('git', ['-c', 'core.quotePath=false', 'ls-files', '-z', '--', ...pathspecs], { cwd: root, encoding: 'utf8' });
+  return out.split('\0').filter(Boolean);
+}
 
 /** 与 paths.rs 相同：路径组件里不允许出现的字符 */
 export const UNSAFE_CHARS = ':<>"|?*';
@@ -90,6 +98,7 @@ export function keepPath(relPath, platform) {
   if (base === '.DS_Store') return false;
   if (parts[0] !== 'node_modules') return true;
   if (parts.includes('.bin') || parts.includes('__tests__')) return false;
+  if (parts[1] === '.pnpm') return false; // hoisted 布局下只剩 pnpm 自己的 lock.yaml 等元数据
   if (parts.length === 2 && NM_JUNK_FILES.has(base)) return false;
   if (/\.(map|tsbuildinfo)$/.test(base) || /\.d\.[cm]?ts$/.test(base)) return false;
   if (/\.(md|markdown)$/i.test(base) && !KEEP_DOC.test(base)) return false;

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as zlib from 'node:zlib';
 import {
-  APP_ENTRIES, DEVICE_NAMES, UNSAFE_CHARS, checkNames, collectEntries, currentPlatform, keepPath, nameProblem, unpackBudget, writeTarZst,
+  APP_ENTRIES, BUILD_OUTPUTS, DEVICE_NAMES, UNSAFE_CHARS, checkNames, collectEntries, currentPlatform, keepPath, nameProblem, trackedFiles, unpackBudget, writeTarZst,
 } from '../scripts/bundle-lib.mjs';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -68,6 +68,8 @@ describe('打包剪枝', () => {
     'node_modules/foo/CHANGELOG.md',
     'node_modules/foo/__tests__',
     'node_modules/.modules.yaml',
+    'node_modules/.pnpm',
+    'node_modules/.pnpm/lock.yaml',
     'node_modules/onnxruntime-node/bin/napi-v3/linux',
     'node_modules/onnxruntime-node/bin/napi-v3/win32',
     'node_modules/onnxruntime-node/bin/napi-v3/darwin/x64',
@@ -98,8 +100,22 @@ describe('打包剪枝', () => {
     expect(keepPath('node_modules/onnxruntime-node/bin/napi-v3/darwin/arm64', 'darwin-x64')).toBe(false);
   });
 
-  it('应用目录的组成：源码、渲染、素材、前端产物、依赖声明', () => {
-    expect(APP_ENTRIES).toEqual(['src', 'render', 'assets', 'web/dist', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'LICENSE']);
+  it('应用目录的组成：git 跟踪的源码、渲染、素材、依赖声明 + 前端构建产物', () => {
+    expect(APP_ENTRIES).toEqual(['src', 'render', 'assets', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'LICENSE']);
+    expect(BUILD_OUTPUTS).toEqual(['web/dist']);
+  });
+
+  it('trackedFiles 只列 git 跟踪的文件（未跟踪的草稿不进包）', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-git-'));
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+    git('init', '-q');
+    mkdirSync(join(dir, 'src', 'a'), { recursive: true });
+    writeFileSync(join(dir, 'src', 'a', '跟踪.ts'), 'x');
+    writeFileSync(join(dir, 'LICENSE'), 'MIT');
+    writeFileSync(join(dir, 'other.txt'), 'x');
+    git('add', '.');
+    writeFileSync(join(dir, 'src', 'draft.local.ts'), 'x');
+    expect(trackedFiles(dir, ['src', 'LICENSE']).sort()).toEqual(['LICENSE', 'src/a/跟踪.ts']);
   });
 
   it('当前平台名与清单一致', () => {
