@@ -1,3 +1,4 @@
+import { labelOf } from '../broll/assign.js';
 import { readAssetMeta, storyboardFiles, writeAssetMeta, writeStoryboardCredits, type AssetMeta } from '../broll/credit-store.js';
 import { existingFiles, type BrollAsset } from '../broll/fulfill.js';
 import { GENERATED_LICENSE, SCREENSHOT_LICENSE } from '../broll/paid.js';
@@ -24,16 +25,19 @@ export function recordCardAssets(workDir: string, assets: readonly BrollAsset[],
   }
 }
 
-const AI_LABEL = { kind: 'ai', text: 'AI 生成' } as const;
-
-/** 卡片自带的图或视频（钩子、图片卡）按授权记录加画面角标：AI 生成的标「AI 生成」（与镜头 B-roll 的角标同一视觉）；其余与已有角标原样 */
+/**
+ * 卡片自带的图或视频（钩子、图片卡）按授权记录加画面角标，与镜头 B-roll 的角标同一口径（labelOf）：
+ * AI 生成的标「AI 生成」，网页截图标「来源：<站点>」；图库素材不标（署名在 credits）；已有角标原样
+ */
 export function labelCardMedia(storyboard: Storyboard, workDir: string): Storyboard {
   const shots = storyboard.shots.map((s) => {
     const card = s.card;
     if (!card || (card.template !== 'hook' && card.template !== 'photo') || card.props.mediaLabel) return s;
     const file = card.props.video ?? card.props.image;
-    if (!file || !readAssetMeta(workDir, file)?.credit.aiGenerated) return s;
-    return { ...s, card: { ...card, props: { ...card.props, mediaLabel: AI_LABEL } } } as Storyboard['shots'][number];
+    const meta = file ? readAssetMeta(workDir, file) : undefined;
+    const label = meta ? labelOf(meta) : undefined;
+    if (!label) return s;
+    return { ...s, card: { ...card, props: { ...card.props, mediaLabel: label } } } as Storyboard['shots'][number];
   });
   return shots.some((s, i) => s !== storyboard.shots[i]) ? { ...storyboard, shots } : storyboard;
 }

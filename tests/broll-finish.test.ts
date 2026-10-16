@@ -17,7 +17,7 @@ const photoCard = (image: string): CardSpec => ({ template: 'photo', props: { im
 const sb = (shots: Shot[]): Storyboard => ({ shots, bgm: 'chill' });
 
 describe('卡片自带的图按授权记录加「AI 生成」角标', () => {
-  it('生成的钩子图、图片卡加角标；Pexels 兜底与截图不加；已有角标原样', () => {
+  it('生成的钩子图、图片卡加角标；Pexels 兜底不加；已有角标原样', () => {
     const dir = work();
     for (const f of ['gen.jpg', 'px.jpg', 'gen2.jpg']) writeFileSync(join(dir, 'broll', f), 'x');
     recordCardAssets(dir, [
@@ -40,6 +40,19 @@ describe('卡片自带的图按授权记录加「AI 生成」角标', () => {
     expect(keepExisting(sb(shots), dir, 12).shots[0].card).toMatchObject({ props: { mediaLabel: { kind: 'ai', text: 'AI 生成' } } });
     // Pexels 卡片兜底素材记下摄影师与作品页
     expect(readAssetMeta(dir, 'broll/px.jpg')?.credit).toMatchObject({ source: 'pexels', author: 'Ann Lee', authorUrl: 'https://www.pexels.com/@ann', page: 'https://www.pexels.com/photo/1/' });
+  });
+
+  it('图片卡与钩子用了网页截图：补「来源：<站点>」角标（与镜头 B-roll 的截图角标一致）', () => {
+    const dir = work();
+    writeFileSync(join(dir, 'broll', 'shot.png'), 'x');
+    recordCardAssets(dir, [{ key: 'shot', file: 'broll/shot.png', source: 'screenshot', url: 'https://www.example.gov.cn/news/1.html' }]);
+    const shots: Shot[] = [
+      { start: 0, end: 3, layout: 'split', card: photoCard('broll/shot.png') },
+      { start: 3, end: 6, layout: 'split', card: hook('broll/shot.png') },
+    ];
+    const out = labelCardMedia(sb(shots), dir).shots;
+    expect(out[0].card).toMatchObject({ props: { mediaLabel: { kind: 'source', text: '来源：example.gov.cn' } } });
+    expect(out[1].card).toMatchObject({ props: { mediaLabel: { kind: 'source', text: '来源：example.gov.cn' } } });
   });
 });
 
