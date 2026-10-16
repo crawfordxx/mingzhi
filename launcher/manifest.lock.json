@@ -195,6 +195,8 @@
       "size": 643854,
       "dest": "data/models/silero_vad.onnx",
       "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/models/silero_vad.onnx",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/models/silero_vad.onnx",
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
       ],
       "license": "MIT（Silero VAD）"
@@ -233,152 +235,277 @@
       "size": 14975696,
       "dest": "data/models/rvm_mobilenetv3_fp32.onnx",
       "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/models/rvm_mobilenetv3_fp32.onnx",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/models/rvm_mobilenetv3_fp32.onnx",
         "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx"
       ],
       "license": "GPL-3.0（RobustVideoMatting 权重）"
     },
     {
-      "id": "music-chill",
+      "id": "music-families",
       "kind": "asset",
       "platform": "any",
-      "sha256": "53ce04d6c124843235ccfbea94be3f8c6afb3cfd3c6924badc124a4ec0d49f37",
-      "size": 80890568,
-      "dest": "data/assets/music",
+      "sha256": "7d1124254c1b9163bf968226c4a69db3daf4a6a338d6ff612b1786a279ded1fb",
+      "size": 3456417,
+      "dest": "data/assets/music/families.mp3",
       "urls": [
-        "https://opengameart.org/sites/default/files/chill_beats.zip"
-      ],
-      "unpack": "zip",
-      "entries": [
-        {
-          "entry": "Chill Beats/03 HoliznaCC0 - Families.mp3",
-          "dest": "data/assets/music/families.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Chill Beats/05 HoliznaCC0 - Opinions.mp3",
-          "dest": "data/assets/music/opinions.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Chill Beats/06 HoliznaCC0 - Old Age.mp3",
-          "dest": "data/assets/music/old-age.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Chill Beats/08 HoliznaCC0 - Dream Pop.mp3",
-          "dest": "data/assets/music/dream-pop.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Chill Beats/28 HoliznaCC0 - Autumn.mp3",
-          "dest": "data/assets/music/autumn.mp3",
-          "transcode": "mp3"
-        }
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/families.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/families.mp3"
       ],
       "optional": true,
-      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
     },
     {
-      "id": "music-happy",
+      "id": "music-opinions",
       "kind": "asset",
       "platform": "any",
-      "sha256": "7d36a9172a030d5b2e9ec7df622095e468877cdd35d92904004bb8c13266f80b",
-      "size": 82114757,
-      "dest": "data/assets/music",
+      "sha256": "b2f4814a7cad4b14f69a5e8acfdf39257d06912c60d44c08a9366d88f99a7426",
+      "size": 4032574,
+      "dest": "data/assets/music/opinions.mp3",
       "urls": [
-        "https://opengameart.org/sites/default/files/happy_lo-fi_lofi_collection.zip"
-      ],
-      "unpack": "zip",
-      "entries": [
-        {
-          "entry": "Happy Lo-Fi (Lofi Collection)/01 HoliznaCC0 - Poor, But Happy.mp3",
-          "dest": "data/assets/music/poor-but-happy.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Lo-Fi (Lofi Collection)/03 HoliznaCC0 - Blue Skies.mp3.mp3",
-          "dest": "data/assets/music/blue-skies.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Lo-Fi (Lofi Collection)/16 HoliznaCC0 - Letting Go Of The Past.mp3",
-          "dest": "data/assets/music/letting-go.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Lo-Fi (Lofi Collection)/19 HoliznaCC0 - Puppy Love.mp3",
-          "dest": "data/assets/music/puppy-love.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Lo-Fi (Lofi Collection)/21 HoliznaCC0 - Clouds.mp3",
-          "dest": "data/assets/music/clouds.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Lo-Fi (Lofi Collection)/22 HoliznaCC0 - Happy, but a little off.mp3",
-          "dest": "data/assets/music/a-little-off.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Lo-Fi (Lofi Collection)/26 HoliznaCC0 - New Shoes.mp3",
-          "dest": "data/assets/music/new-shoes.mp3",
-          "transcode": "mp3"
-        }
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/opinions.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/opinions.mp3"
       ],
       "optional": true,
-      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
     },
     {
-      "id": "music-electronic",
+      "id": "music-old-age",
       "kind": "asset",
       "platform": "any",
-      "sha256": "b0c799be8b60620d01b8862d37103e58f6d30d33285141e9b645622c1d758449",
-      "size": 96171138,
-      "dest": "data/assets/music",
+      "sha256": "f0ea08ffe1c37f38484c77bf2067312a3196e54ea4f127a141af339004ce06f9",
+      "size": 5134731,
+      "dest": "data/assets/music/old-age.mp3",
       "urls": [
-        "https://opengameart.org/sites/default/files/happy_electronic.zip"
-      ],
-      "unpack": "zip",
-      "entries": [
-        {
-          "entry": "Happy Electronic/03 HoliznaCC0 - Back In The 80s.mp3",
-          "dest": "data/assets/music/back-in-the-80s.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Electronic/03 HoliznaCC0 - Earth.mp3",
-          "dest": "data/assets/music/earth.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Electronic/04 HoliznaCC0 - A Small Town On Pluto.mp3",
-          "dest": "data/assets/music/small-town-on-pluto.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Electronic/06 HoliznaCC0 - Happy Dance.mp3",
-          "dest": "data/assets/music/happy-dance.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Electronic/08 HoliznaCC0 - transcendental earth people.mp3",
-          "dest": "data/assets/music/earth-people.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Electronic/10 HoliznaCC0 - Bouncing.mp3",
-          "dest": "data/assets/music/bouncing.mp3",
-          "transcode": "mp3"
-        },
-        {
-          "entry": "Happy Electronic/11 HoliznaCC0 - Love Love Love.mp3",
-          "dest": "data/assets/music/love-love-love.mp3",
-          "transcode": "mp3"
-        }
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/old-age.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/old-age.mp3"
       ],
       "optional": true,
-      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-dream-pop",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "bb7b43384ac4843c1f263d9c8e98e34c42c2b1d24bf3fd042f6a69da92dd5e97",
+      "size": 5801796,
+      "dest": "data/assets/music/dream-pop.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/dream-pop.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/dream-pop.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-autumn",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "495329971d9ee1a6323f089e87fa87ac22517d9fbf617d0eb7c63769c1e7f1b4",
+      "size": 4077084,
+      "dest": "data/assets/music/autumn.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/autumn.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/autumn.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-poor-but-happy",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "7d35876d16f82443a8e07d58b664509408ab7fc983289ce930299181a96ce954",
+      "size": 3072111,
+      "dest": "data/assets/music/poor-but-happy.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/poor-but-happy.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/poor-but-happy.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-blue-skies",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "0452b64d443389d81333a7a9b32622ff8b9491eb4324e09a829fd3166044edb3",
+      "size": 4215015,
+      "dest": "data/assets/music/blue-skies.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/blue-skies.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/blue-skies.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-letting-go",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "3553abda66d40b74373c2240fa0b9950a471feace8fd7f4ace465bb9f50210e7",
+      "size": 4311576,
+      "dest": "data/assets/music/letting-go.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/letting-go.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/letting-go.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-puppy-love",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "cc0c39b0b60acb40a6360b12573a11351a4b19108a051d19358e18ab405dec93",
+      "size": 3600615,
+      "dest": "data/assets/music/puppy-love.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/puppy-love.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/puppy-love.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-clouds",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "53806c7dc3a658adb5bea976c691a64d848b191ec611a36866c773e97b9a8b5e",
+      "size": 5513401,
+      "dest": "data/assets/music/clouds.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/clouds.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/clouds.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-a-little-off",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "d915a461e8d17138ccbb30ae03d11ffd3f7051409ba116eb12581564a5e057a9",
+      "size": 2816328,
+      "dest": "data/assets/music/a-little-off.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/a-little-off.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/a-little-off.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-new-shoes",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "907fdd07c1d443ea24767bd56f89b75f78330fd9a46d067bd9fae8d89f3f39ec",
+      "size": 3744810,
+      "dest": "data/assets/music/new-shoes.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/new-shoes.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/new-shoes.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-back-in-the-80s",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "c55562654a83090d8101db1a604a2f7c2e06e063b097fed1ff02c5c8ecded9c3",
+      "size": 5760424,
+      "dest": "data/assets/music/back-in-the-80s.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/back-in-the-80s.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/back-in-the-80s.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-earth",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "ef9172f03793fbf3a2af0509b8f1d260e1d611f86fa27b19a1efc0f32541656b",
+      "size": 4794301,
+      "dest": "data/assets/music/earth.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/earth.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/earth.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-small-town-on-pluto",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "736a3280f20b341eadea51db9e3f8960aa56c6c8a3574566fb3fba35ed6c3367",
+      "size": 5572348,
+      "dest": "data/assets/music/small-town-on-pluto.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/small-town-on-pluto.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/small-town-on-pluto.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-happy-dance",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "8ef08431c67f9e35b28ccb506c863c6d5963d85d3192c67e7d12ab3aaab324a8",
+      "size": 3744812,
+      "dest": "data/assets/music/happy-dance.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/happy-dance.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/happy-dance.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-earth-people",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "e5624f12fc7164ceddc48c2501b8cc94aa6cd1877e1268ca6d7f76a9e95e9f02",
+      "size": 3677745,
+      "dest": "data/assets/music/earth-people.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/earth-people.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/earth-people.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-bouncing",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "34e0925f1eb6e1c55a7b3b27b0ca2b95c22b35879a89be6169fa0644df271fda",
+      "size": 2112260,
+      "dest": "data/assets/music/bouncing.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/bouncing.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/bouncing.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
+    },
+    {
+      "id": "music-love-love-love",
+      "kind": "asset",
+      "platform": "any",
+      "sha256": "0b535a806f0df8b97e9892f1f040b15667a5c277bc2a07aedb075d481ca3a596",
+      "size": 4207496,
+      "dest": "data/assets/music/love-love-love.mp3",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/music/love-love-love.mp3",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/music/love-love-love.mp3"
+      ],
+      "optional": true,
+      "license": "CC0 1.0（HoliznaCC0，OpenGameArt）；作者 HoliznaCC0，原曲见 OpenGameArt"
     },
     {
       "id": "font-noto-sans-sc",
@@ -388,6 +515,8 @@
       "size": 17772300,
       "dest": "data/assets/fonts/NotoSansSC-VF.ttf",
       "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/fonts/NotoSansSC-VF.ttf",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/fonts/NotoSansSC-VF.ttf",
         "https://cdn.jsdelivr.net/gh/google/fonts@1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
         "https://raw.githubusercontent.com/google/fonts/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
       ],
@@ -402,7 +531,6 @@
       "size": 25125512,
       "dest": "data/assets/fonts/NotoSerifSC-VF.ttf",
       "urls": [
-        "https://cdn.jsdelivr.net/gh/google/fonts@1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf",
         "https://raw.githubusercontent.com/google/fonts/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf"
       ],
       "optional": true,
@@ -416,6 +544,8 @@
       "size": 1514968,
       "dest": "data/assets/fonts/ZCOOLKuaiLe-Regular.ttf",
       "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/fonts/ZCOOLKuaiLe-Regular.ttf",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/fonts/ZCOOLKuaiLe-Regular.ttf",
         "https://cdn.jsdelivr.net/gh/google/fonts@1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf",
         "https://raw.githubusercontent.com/google/fonts/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf"
       ],
@@ -430,6 +560,8 @@
       "size": 8328684,
       "dest": "data/assets/fonts/ZCOOLQingKeHuangYou-Regular.ttf",
       "urls": [
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/fonts/ZCOOLQingKeHuangYou-Regular.ttf",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/fonts/ZCOOLQingKeHuangYou-Regular.ttf",
         "https://cdn.jsdelivr.net/gh/google/fonts@1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf",
         "https://raw.githubusercontent.com/google/fonts/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf"
       ],
@@ -453,18 +585,12 @@
       "id": "font-smiley-sans",
       "kind": "asset",
       "platform": "any",
-      "sha256": "299c0be6c960ae37361762eca76f7d0cd516615435bb96c0d4b98a1e70178a07",
-      "size": 5781344,
-      "dest": "data/assets/fonts",
+      "sha256": "b447d7e781f08bc95c4c9f23ba71ed2b8ebb639aa7184485c71c4ca5afcd25c4",
+      "size": 2629764,
+      "dest": "data/assets/fonts/SmileySans-Oblique.ttf",
       "urls": [
-        "https://github.com/atelier-anchor/smiley-sans/releases/download/v2.0.1/smiley-sans-v2.0.1.zip"
-      ],
-      "unpack": "zip",
-      "entries": [
-        {
-          "entry": "SmileySans-Oblique.ttf",
-          "dest": "data/assets/fonts/SmileySans-Oblique.ttf"
-        }
+        "https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/fonts/SmileySans-Oblique.ttf",
+        "https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/fonts/SmileySans-Oblique.ttf"
       ],
       "optional": true,
       "license": "SIL OFL 1.1"

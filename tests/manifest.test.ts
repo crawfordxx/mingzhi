@@ -144,8 +144,10 @@ describe('入库的锁定清单 launcher/manifest.lock.json', () => {
 
   it('GitHub 直链排在镜像之后；ffmpeg 和 ffprobe 都带可执行标记并落在 data/bin', () => {
     for (const i of lock.items) {
-      const firstGithub = i.urls.findIndex(isGithubUrl);
-      if (firstGithub >= 0) expect(i.urls.slice(firstGithub).every(isGithubUrl), i.id).toBe(true);
+      // 素材仓库的两个地址（jsDelivr -> raw）按约定排在最前，其余来源中 GitHub 直链排在镜像之后
+      const urls = i.urls.filter((u: string) => !u.includes('mingzhi-assets'));
+      const firstGithub = urls.findIndex(isGithubUrl);
+      if (firstGithub >= 0) expect(urls.slice(firstGithub).every(isGithubUrl), i.id).toBe(true);
     }
     for (const i of lock.items.filter((x: { id: string }) => /^ff(mpeg|probe)-/.test(x.id))) {
       expect(i.executable, i.id).toBe(true);
@@ -166,12 +168,20 @@ describe('入库的锁定清单 launcher/manifest.lock.json', () => {
     const assets = byKind('asset');
     for (const a of assets) expect(a.dest).toMatch(/^data\/assets\//);
     const fonts = readJson(join(ROOT, 'assets', 'fonts.json')).fonts;
-    for (const f of fonts) expect(assets.find((a: { id: string }) => a.id === `font-${f.id}`)?.sha256, f.id).toBe(f.sha256);
-    const zips = readJson(join(ROOT, 'assets', 'music.json')).zips;
-    for (const [k, z] of Object.entries<{ sha256: string; url: string }>(zips)) {
-      const a = assets.find((x: { id: string }) => x.id === `music-${k}`);
-      expect(a.sha256).toBe(z.sha256);
-      expect(a.urls).toContain(z.url);
+    // 得意黑在素材仓库里是解出的 ttf，sha256 不同于官方 zip；其余字体与 fonts.json 一致
+    for (const f of fonts.filter((x: { id: string }) => x.id !== 'smiley-sans')) expect(assets.find((a: { id: string }) => a.id === `font-${f.id}`)?.sha256, f.id).toBe(f.sha256);
+    expect(assets.find((a: { id: string }) => a.id === 'font-smiley-sans').sha256).toBe('b447d7e781f08bc95c4c9f23ba71ed2b8ebb639aa7184485c71c4ca5afcd25c4');
+  });
+
+  it('配乐逐首 mp3 条目：19 首，id 与 assets/music.json 一致，落在 data/assets/music/<id>.mp3', () => {
+    const tracks = readJson(join(ROOT, 'assets', 'music.json')).tracks;
+    const music = byKind('asset').filter((a: { id: string }) => a.id.startsWith('music-'));
+    expect(music.map((a: { id: string }) => a.id).sort()).toEqual(tracks.map((t: { id: string }) => `music-${t.id}`).sort());
+    for (const t of tracks) {
+      const a = music.find((x: { id: string }) => x.id === `music-${t.id}`);
+      expect(a.dest).toBe(`data/assets/music/${t.id}.mp3`);
+      expect(a.unpack).toBeUndefined();
+      expect(a.license).toMatch(/CC0/);
     }
   });
 
@@ -193,17 +203,27 @@ describe('入库的锁定清单 launcher/manifest.lock.json', () => {
     for (const i of lock.items.filter((x: { id: string }) => /^ff(mpeg|probe)-/.test(x.id))) expect(i.license, i.id).toMatch(/GPL/);
   });
 
-  it('配乐转码依赖 ffmpeg：transcode 的输出是 data/assets/music/<id>.mp3，且同平台必有 data/bin/ffmpeg 条目、排在素材之前', () => {
-    const transcoding = lock.items.filter((i: ManifestItem) => i.entries?.some((e: { transcode?: string }) => e.transcode));
-    expect(transcoding.length).toBeGreaterThan(0);
-    for (const i of transcoding) {
-      for (const e of i.entries) expect(e.dest, i.id).toMatch(/^data\/assets\/music\/[\w.-]+\.mp3$/);
+  it('配乐已在素材仓库转好，不再依赖 ffmpeg 转码：没有任何条目带 transcode', () => {
+    expect(lock.items.filter((i: ManifestItem) => i.entries?.some((e: { transcode?: string }) => e.transcode))).toEqual([]);
+  });
+
+  it('公开素材仓库：jsDelivr(@v1) -> raw(v1) -> 原始来源；仓库里的文件都 <= 20MB，配乐、4 款字体、2 个模型都在', () => {
+    const hosted = lock.items.filter((i: ManifestItem) => i.urls.some((u: string) => u.includes('mingzhi-assets')));
+    const rel = (u: string) => u.split('@v1/')[1];
+    for (const i of hosted) {
+      const path = rel(i.urls[0]);
+      expect(i.urls[0], i.id).toBe(`https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@v1/${path}`);
+      expect(i.urls[1], i.id).toBe(`https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/v1/${path}`);
+      expect(i.urls.slice(2).some((u: string) => u.includes('mingzhi-assets')), i.id).toBe(false);
+      expect(i.size, i.id).toBeLessThanOrEqual(20 * 1024 * 1024);
     }
-    const m = buildManifest(lock, { appVersion: '0.1.0', appItems: [] });
-    for (const platform of PLATFORMS.filter((p: string) => p !== 'any')) {
-      const ffmpegIdx = m.items.findIndex((i: ManifestItem) => i.dest === `data/bin/ffmpeg${platform === 'win32-x64' ? '.exe' : ''}` && i.platform === platform);
-      expect(ffmpegIdx, platform).toBeGreaterThanOrEqual(0);
-      expect(ffmpegIdx).toBeLessThan(m.items.findIndex((i: ManifestItem) => transcoding.some((t: ManifestItem) => t.id === i.id)));
+    expect(hosted).toHaveLength(19 + 4 + 2);
+    // 超过 20MB 或许可需另行核对的保持原始来源
+    const ids = new Set(hosted.map((i: ManifestItem) => i.id));
+    for (const id of ['font-lxgw-wenkai', 'font-noto-serif-sc', 'model-sensevoice-int8', 'model-sensevoice-tokens']) expect(ids.has(id), id).toBe(false);
+    // 模型和字体保留原始来源作兜底（得意黑在仓库里是解出的 ttf，没有等价的原始文件）
+    for (const id of ['model-silero-vad', 'model-rvm', 'font-noto-sans-sc', 'font-zcool-kuaile', 'font-zcool-huangyou']) {
+      expect(lock.items.find((i: ManifestItem) => i.id === id).urls.length, id).toBeGreaterThan(2);
     }
   });
 

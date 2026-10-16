@@ -1,6 +1,7 @@
 // 下载清单的来源定义：版本、url 与目录。--update-lock 时据此下载并算出 sha256/size，写入 launcher/manifest.lock.json。
 // url 顺序即下载优先级：国内镜像在前，官方源其次，GitHub 直链最后（启动器会为 github.com / raw.githubusercontent.com 的 url 额外插入用户配置的代理前缀）。
 // 模型与素材的来源、目录、sha256 取自 assets/music.json、assets/fonts.json 与 scripts/fetch-models.mjs，保持 data/models、data/assets 布局不变。
+// 配乐、字体（<= 20MB）与两个模型优先从公开素材仓库 crawfordxx/mingzhi-assets@v1 下载（jsDelivr -> raw.githubusercontent），其后才是原始来源。
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,13 @@ export const FFMPEG_STATIC_TAG = 'b6.1.1';
 /** HuggingFace 仓库固定到提交，避免 main 分支内容漂移 */
 const HF_SENSEVOICE = 'csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17';
 const HF_SENSEVOICE_REV = '2365baeacb507f821a0c8120fcee3d484dba7a07';
+
+/** 公开素材仓库 crawfordxx/mingzhi-assets（标签 v1 永不移动）：单文件 <= 20MB（jsDelivr 限制），许可明确允许再分发 */
+export const ASSETS_TAG = 'v1';
+export const hostedUrls = (path) => [
+  `https://cdn.jsdelivr.net/gh/crawfordxx/mingzhi-assets@${ASSETS_TAG}/${path}`,
+  `https://raw.githubusercontent.com/crawfordxx/mingzhi-assets/${ASSETS_TAG}/${path}`,
+];
 
 const NODE_PLATFORMS = {
   'darwin-arm64': { file: `node-v${NODE_VERSION}-darwin-arm64.tar.gz`, unpack: 'tar.gz' },
@@ -103,7 +111,7 @@ function modelItems() {
       // 与 scripts/fetch-models.mjs 下载的同一个文件。HuggingFace 的 csukuangfj/vad 里同名文件是另一个版本（sha 不同），不能当镜像用
       sha256: '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6',
       dest: 'data/models/silero_vad.onnx',
-      urls: ['https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx'],
+      urls: [...hostedUrls('models/silero_vad.onnx'), 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx'],
       license: 'MIT（Silero VAD）',
     },
     {
@@ -129,7 +137,7 @@ function modelItems() {
       // sha256 来自 scripts/fetch-models.mjs 的 RVM_SHA256
       sha256: '88d4531297118f595bf2fd60f6f566aec2e559393802d1f436c380f0cbbd2828',
       dest: 'data/models/rvm_mobilenetv3_fp32.onnx',
-      urls: ['https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx'],
+      urls: [...hostedUrls('models/rvm_mobilenetv3_fp32.onnx'), 'https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx'],
       license: 'GPL-3.0（RobustVideoMatting 权重）',
     },
   ];
@@ -139,43 +147,43 @@ function modelItems() {
 // 两处都固定到提交，不引用分支名：上游挪文件或改内容后，已发布的清单依然下得到
 const GOOGLE_FONTS_COMMIT = '1d0e46c7933245c8180fe83e47917961c913bbdb';
 const GOOGLE_FONTS_RAW = 'https://raw.githubusercontent.com/google/fonts/main/';
-function fontUrls(url) {
+// 超过 20MB 的文件 jsDelivr 恒返回 403（Noto Serif SC 24MB），所以只给素材仓库里有的（<= 20MB）字体保留 jsDelivr 兜底
+function fontUrls(url, { jsdelivr }) {
   if (!url.startsWith(GOOGLE_FONTS_RAW)) return [url];
   const path = url.slice(GOOGLE_FONTS_RAW.length);
-  return [`https://cdn.jsdelivr.net/gh/google/fonts@${GOOGLE_FONTS_COMMIT}/${path}`, `https://raw.githubusercontent.com/google/fonts/${GOOGLE_FONTS_COMMIT}/${path}`];
+  const raw = `https://raw.githubusercontent.com/google/fonts/${GOOGLE_FONTS_COMMIT}/${path}`;
+  return jsdelivr ? [`https://cdn.jsdelivr.net/gh/google/fonts@${GOOGLE_FONTS_COMMIT}/${path}`, raw] : [raw];
 }
 
-function assetItems() {
+/** 素材仓库里有的字体（<= 20MB）。得意黑在仓库里是解出的 ttf，不再走官方 zip，因此 sha256 是 ttf 的 */
+const HOSTED_FONTS = { 'noto-sans-sc': 'NotoSansSC-VF.ttf', 'zcool-kuaile': 'ZCOOLKuaiLe-Regular.ttf', 'zcool-huangyou': 'ZCOOLQingKeHuangYou-Regular.ttf', 'smiley-sans': 'SmileySans-Oblique.ttf' };
+const SMILEY_TTF_SHA256 = 'b447d7e781f08bc95c4c9f23ba71ed2b8ebb639aa7184485c71c4ca5afcd25c4';
+
+function musicItems() {
   const music = readAssets('music.json');
-  const fonts = readAssets('fonts.json');
-  const musicItems = Object.entries(music.zips).map(([key, zip]) => ({
-    id: `music-${key}`,
+  // 配乐已在素材仓库里转好 mp3（立体声 44.1kHz 192kbps），逐首下载，不再需要 zip + 转码
+  return music.tracks.map((t) => ({
+    id: `music-${t.id}`,
     kind: 'asset',
     platform: 'any',
     optional: true, // 没有配乐也能出片（降级为不配乐），下载失败不阻塞启动
-    sha256: zip.sha256,
-    dest: 'data/assets/music',
-    unpack: 'zip',
-    // 取出清单里的 mp3 并转码为 128k 立体声 44.1kHz（与 scripts/fetch-assets.mjs 一致），压缩包不落在 data 里
-    entries: music.tracks.filter((t) => t.zip === key).map((t) => ({ entry: t.entry, dest: `data/assets/music/${t.id}.mp3`, transcode: 'mp3' })),
-    urls: [zip.url],
-    license: music.license,
+    dest: `data/assets/music/${t.id}.mp3`,
+    urls: hostedUrls(`music/${t.id}.mp3`),
+    license: `${music.license}；作者 HoliznaCC0，原曲见 OpenGameArt`,
   }));
-  const fontItems = fonts.fonts.map((f) => ({
-    id: `font-${f.id}`,
-    kind: 'asset',
-    platform: 'any',
-    optional: true, // 没有这些字体时降级为系统字体，下载失败不阻塞启动
-    sha256: f.sha256,
-    dest: f.zipEntry ? 'data/assets/fonts' : `data/assets/fonts/${f.file}`,
-    ...(f.zipEntry ? { unpack: 'zip', entries: [{ entry: f.zipEntry, dest: `data/assets/fonts/${f.file}` }] } : {}),
-    urls: fontUrls(f.url),
-    license: fonts.license,
-  }));
-  return [...musicItems, ...fontItems];
+}
+
+function fontItems() {
+  return readAssets('fonts.json').fonts.map((f) => {
+    const hostedFile = HOSTED_FONTS[f.id];
+    const base = { id: `font-${f.id}`, kind: 'asset', platform: 'any', optional: true /* 缺字体时降级为系统字体 */, license: 'SIL OFL 1.1' };
+    const file = `data/assets/fonts/${f.file}`;
+    if (f.id === 'smiley-sans') return { ...base, sha256: SMILEY_TTF_SHA256, dest: file, urls: hostedUrls(`fonts/${hostedFile}`) };
+    return { ...base, sha256: f.sha256, dest: file, urls: [...(hostedFile ? hostedUrls(`fonts/${hostedFile}`) : []), ...fontUrls(f.url, { jsdelivr: Boolean(hostedFile) })] };
+  });
 }
 
 /** 全部来源条目（尚无 size；sha256 仅在已有清单提供时预填） */
 export function sourceItems() {
-  return [...nodeItems(), ...ffmpegItems(), ...chromeItems(), ...modelItems(), ...assetItems()];
+  return [...nodeItems(), ...ffmpegItems(), ...chromeItems(), ...modelItems(), ...musicItems(), ...fontItems()];
 }
