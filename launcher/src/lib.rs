@@ -21,6 +21,7 @@ pub mod run;
 pub mod sched;
 pub mod server;
 pub mod settings;
+pub mod signal;
 pub mod single;
 pub mod state;
 pub mod sysinfo;

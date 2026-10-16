@@ -6,9 +6,11 @@ import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const SCRIPT = join(ROOT, 'scripts', 'macos-sign.sh');
-const APP_NAME = '明知AI剪辑.app';
+const DIR_NAME = '明知AI剪辑';
+const COMMAND_NAME = '明知AI剪辑.command';
+const ZIP_NAME = 'Mingzhi-macos.zip';
 
-// 脚本只在 macOS 上有意义（ditto / plutil / codesign）
+// 脚本只在 macOS 上有意义（ditto / lipo / codesign）
 const mac = process.platform === 'darwin';
 
 let work: string;
@@ -49,7 +51,7 @@ function run(args: string[], env: Record<string, string> = {}, opts: { stubs?: b
   return { ...r, out: args.includes('--out') ? args[args.indexOf('--out') + 1] : out, text: `${r.stdout}\n${r.stderr}` };
 }
 
-const baseArgs = () => ['--bin', launcher, '--version', '0.1.0', '--arch', 'arm64'];
+const baseArgs = () => ['--bin', launcher];
 const calls = () => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []);
 const FULL = {
   APPLE_SIGN_IDENTITY: 'Developer ID Application: Test (TEAM123456)',
@@ -58,74 +60,104 @@ const FULL = {
   APPLE_APP_PASSWORD: 'abcd-efgh-ijkl-mnop',
 };
 
+function unzip(zip: string) {
+  const dir = mkdtempSync(join(work, 'x-'));
+  execFileSync('/usr/bin/ditto', ['-x', '-k', zip, dir]);
+  return join(dir, DIR_NAME);
+}
+
 describe.skipIf(!mac)('scripts/macos-sign.sh', () => {
   beforeAll(() => {
     work = mkdtempSync(join(tmpdir(), 'mz-sign-'));
     fakeBin = join(work, 'stubs');
     installStubs(fakeBin);
     log = join(work, 'calls.log');
-    // 用系统自带的 Mach-O 程序充当启动器二进制，这样真实 codesign 也能签
+    // 用系统自带的 Mach-O 程序充当启动器二进制，这样真实 codesign / lipo 也能处理
     launcher = join(work, 'mingzhi-launcher');
     copyFileSync('/bin/echo', launcher);
     chmodSync(launcher, 0o755);
   });
   afterAll(() => rmSync(work, { recursive: true, force: true }));
 
-  it('缺参数、版本号格式不对时退出码 2，并给出中文用法', () => {
+  it('缺参数、二进制不存在、给了三个二进制时退出码 2，并给出中文用法', () => {
     const noArgs = run([]);
     expect(noArgs.status).toBe(2);
     expect(noArgs.text).toContain('用法');
-    const badVer = run(['--bin', launcher, '--version', 'abc', '--arch', 'arm64']);
-    expect(badVer.status).toBe(2);
-    expect(badVer.text).toContain('版本号');
-    const badArch = run(['--bin', launcher, '--version', '0.1.0', '--arch', 'ppc']);
-    expect(badArch.status).toBe(2);
-    const noBin = run(['--bin', join(work, 'nope'), '--version', '0.1.0', '--arch', 'arm64']);
+    const noBin = run(['--bin', join(work, 'nope')]);
     expect(noBin.status).toBe(2);
     expect(noBin.text).toContain('找不到');
+    const three = run(['--bin', launcher, '--bin', launcher, '--bin', launcher]);
+    expect(three.status).toBe(2);
+    expect(three.text).toContain('最多');
+    expect(run(['--bogus']).status).toBe(2);
+  });
+
+  it('--help 退出码 0，不触发任何构建', () => {
+    const r = run(['--help'], {}, { stubs: true });
+    expect(r.status).toBe(0);
+    expect(r.text).toContain('用法');
+    expect(existsSync(log) ? readFileSync(log, 'utf8') : '').toBe('');
   });
 
   describe('没有任何签名环境变量（CI 上没配 secrets）', () => {
-    it('打印中文说明、退出码 0，仍产出 zip 与 sha256（ad-hoc 签名，真实 codesign 校验通过）', () => {
+    it('打印中文说明、退出码 0，仍产出 zip 与 sha256；zip 里是 .command 与启动器，可执行位在，ad-hoc 验签通过', () => {
       const r = run(baseArgs());
       expect(r.status, r.text).toBe(0);
       expect(r.text).toContain('跳过');
       expect(r.text).toContain('APPLE_SIGN_IDENTITY');
-      const zip = join(r.out, 'Mingzhi-macos-arm64.zip');
+      const zip = join(r.out, ZIP_NAME);
       expect(existsSync(zip)).toBe(true);
       const sha = readFileSync(`${zip}.sha256`, 'utf8');
       const expected = execFileSync('/usr/bin/shasum', ['-a', '256', zip], { encoding: 'utf8' }).split(/\s+/)[0];
-      expect(sha).toBe(`${expected}  Mingzhi-macos-arm64.zip\n`);
+      expect(sha).toBe(`${expected}  ${ZIP_NAME}\n`);
 
-      // 解开后是 .app，可执行位还在，Info.plist 版本与标识正确
-      const dir = mkdtempSync(join(work, 'x-'));
-      execFileSync('/usr/bin/ditto', ['-x', '-k', zip, dir]);
-      const app = join(dir, APP_NAME);
-      const exe = join(app, 'Contents', 'MacOS', 'mingzhi-launcher');
-      expect(statSync(exe).mode & 0o111).toBe(0o111);
-      const plist = join(app, 'Contents', 'Info.plist');
-      const get = (k: string) => execFileSync('/usr/bin/plutil', ['-extract', k, 'raw', '-o', '-', plist], { encoding: 'utf8' }).trim();
-      expect(get('CFBundleIdentifier')).toBe('com.crawfordxx.mingzhi');
-      expect(get('CFBundleShortVersionString')).toBe('0.1.0');
-      expect(get('CFBundleName')).toBe('明知AI剪辑');
-      expect(existsSync(join(app, 'Contents', 'Resources', 'AppIcon.icns'))).toBe(true);
-      expect(readFileSync(plist, 'utf8')).not.toContain('@VERSION@');
-      // zip 里没有 AppleDouble（._ 开头）杂项
+      const dir = unzip(zip);
+      for (const f of [COMMAND_NAME, 'mingzhi-launcher']) expect(statSync(join(dir, f)).mode & 0o111, f).toBe(0o111);
+      // 不再有 .app 相关内容
       const names = execFileSync('/usr/bin/zipinfo', ['-1', zip], { encoding: 'utf8' });
+      expect(names).not.toMatch(/\.app|Info\.plist|\.icns/);
       expect(names).not.toMatch(/(^|\/)\._/m);
-      const verify = spawnSync('/usr/bin/codesign', ['--verify', '--strict', app], { encoding: 'utf8' });
+      const verify = spawnSync('/usr/bin/codesign', ['--verify', '--strict', join(dir, 'mingzhi-launcher')], { encoding: 'utf8' });
       expect(verify.status, verify.stderr).toBe(0);
     });
 
-    it('--help 不触发任何构建', () => {
-      const r = run(['--help'], {}, { stubs: true });
-      expect(r.status).toBe(0);
-      expect(r.text).toContain('用法');
+    it('.command：提示语、切到自己所在目录运行启动器、退出后提示可关窗口，并把启动器退出码带回', () => {
+      const r = run(baseArgs());
+      const dir = unzip(join(r.out, ZIP_NAME));
+      const cmd = readFileSync(join(dir, COMMAND_NAME), 'utf8');
+      expect(cmd.startsWith('#!/bin/bash')).toBe(true);
+      expect(cmd).toContain('明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出');
+      expect(cmd).toContain('com.apple.quarantine');
+
+      // 把启动器换成会汇报「我在哪个目录」的脚本，从别的目录运行 .command
+      const marker = join(work, 'cwd.txt');
+      writeFileSync(join(dir, 'mingzhi-launcher'), `#!/bin/bash\npwd > "${marker}"\nexit 7\n`);
+      chmodSync(join(dir, 'mingzhi-launcher'), 0o755);
+      const other = mkdtempSync(join(work, 'cwd-'));
+      const ran = spawnSync('/bin/bash', [join(dir, COMMAND_NAME)], { cwd: other, encoding: 'utf8' });
+      expect(ran.status).toBe(7);
+      expect(ran.stdout).toContain('明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出');
+      expect(ran.stdout).toContain('已退出，可以关闭这个窗口');
+      const real = (p: string) => execFileSync('/bin/realpath', [p], { encoding: 'utf8' }).trim();
+      expect(real(readFileSync(marker, 'utf8').trim())).toBe(real(dir));
+    });
+
+    it('给两个二进制时用 lipo 合成通用二进制（两个架构都在）', () => {
+      const x64 = join(work, 'launcher-x64');
+      const arm = join(work, 'launcher-arm');
+      execFileSync('/usr/bin/lipo', ['/bin/echo', '-thin', 'x86_64', '-output', x64]);
+      execFileSync('/usr/bin/lipo', ['/bin/echo', '-thin', 'arm64e', '-output', arm]);
+      const r = run(['--bin', arm, '--bin', x64]);
+      expect(r.status, r.text).toBe(0);
+      const dir = unzip(join(r.out, ZIP_NAME));
+      const archs = execFileSync('/usr/bin/lipo', ['-archs', join(dir, 'mingzhi-launcher')], { encoding: 'utf8' });
+      expect(archs).toContain('x86_64');
+      expect(archs).toContain('arm64e');
     });
   });
 
   describe('有 Developer ID 身份', () => {
-    it('身份在、公证凭据不全：签名（hardened runtime + 时间戳 + entitlements），说明缺哪几项，不调 notarytool', () => {
+    it('身份在、公证凭据不全：只签名启动器二进制（hardened runtime + 时间戳 + entitlements），说明缺哪几项，不调 notarytool', () => {
       writeFileSync(log, '');
       const r = run(baseArgs(), { APPLE_SIGN_IDENTITY: FULL.APPLE_SIGN_IDENTITY, APPLE_ID: FULL.APPLE_ID }, { stubs: true });
       expect(r.status, r.text).toBe(0);
@@ -139,12 +171,14 @@ describe.skipIf(!mac)('scripts/macos-sign.sh', () => {
       expect(sign).toContain('--timestamp');
       expect(sign).toContain(`--entitlements ${join(ROOT, 'launcher', 'macos', 'entitlements.plist')}`);
       expect(sign).toContain(`--sign ${FULL.APPLE_SIGN_IDENTITY}`);
-      expect(sign!.endsWith(APP_NAME)).toBe(true);
+      expect(sign!.endsWith('mingzhi-launcher')).toBe(true);
+      // .command 是脚本，不签名；codesign 只碰二进制
+      expect(c.every((l) => !l.includes('.command'))).toBe(true);
       expect(c.some((l) => l.includes('notarytool'))).toBe(false);
-      expect(existsSync(join(r.out, 'Mingzhi-macos-arm64.zip.sha256'))).toBe(true);
+      expect(existsSync(join(r.out, `${ZIP_NAME}.sha256`))).toBe(true);
     });
 
-    it('四个变量齐全：签名 → 校验 → 提交公证并等待 → 钉合 → 再打包，顺序固定，密码不出现在输出里', () => {
+    it('四个变量齐全：签名 → 校验 → 提交 zip 公证并等待，顺序固定；不调 stapler（zip 与裸二进制无法钉合）；密码不出现在输出里', () => {
       writeFileSync(log, '');
       const r = run(baseArgs(), FULL, { stubs: true });
       expect(r.status, r.text).toBe(0);
@@ -153,22 +187,20 @@ describe.skipIf(!mac)('scripts/macos-sign.sh', () => {
       const iSign = idx(/^codesign .*--sign/);
       const iVerify = idx(/^codesign .*--verify/);
       const iSubmit = idx(/^xcrun notarytool submit /);
-      const iStaple = idx(/^xcrun stapler staple /);
-      const iValidate = idx(/^xcrun stapler validate /);
-      expect([iSign, iVerify, iSubmit, iStaple, iValidate].every((i) => i >= 0)).toBe(true);
+      expect([iSign, iVerify, iSubmit].every((i) => i >= 0)).toBe(true);
       expect(iSign).toBeLessThan(iVerify);
       expect(iVerify).toBeLessThan(iSubmit);
-      expect(iSubmit).toBeLessThan(iStaple);
-      expect(iStaple).toBeLessThan(iValidate);
       const submit = c[iSubmit];
+      expect(submit).toMatch(/submit \S+\.zip /);
       expect(submit).toContain('--wait');
       expect(submit).toContain('--apple-id dev@example.com');
       expect(submit).toContain('--team-id TEAM123456');
       expect(submit).toContain('--password abcd-efgh-ijkl-mnop');
       expect(submit).toContain('--output-format json');
-      expect(c[iStaple].endsWith(APP_NAME)).toBe(true);
+      expect(c.some((l) => l.includes('stapler'))).toBe(false);
       expect(r.text).not.toContain(FULL.APPLE_APP_PASSWORD);
       expect(r.text).toContain('公证通过');
+      expect(existsSync(join(r.out, ZIP_NAME))).toBe(true);
     });
 
     it('MINGZHI_NOTARY_PROFILE 优先：用 --keychain-profile，不传密码', () => {
@@ -185,24 +217,22 @@ describe.skipIf(!mac)('scripts/macos-sign.sh', () => {
       expect(submit).not.toContain('--apple-id');
     });
 
-    it('--sign-only：凭据齐全也不公证（本机演练用）', () => {
+    it('--sign-only：凭据齐全也不公证（本机用 Apple Development 证书演练时用）', () => {
       writeFileSync(log, '');
       const r = run([...baseArgs(), '--sign-only'], FULL, { stubs: true });
       expect(r.status, r.text).toBe(0);
-      expect(calls().some((l) => l.includes('notarytool') || l.includes('stapler'))).toBe(false);
+      expect(calls().some((l) => l.includes('notarytool'))).toBe(false);
       expect(r.text).toContain('仅签名');
     });
 
-    it('公证被拒（status 不是 Accepted）：取日志、退出码非 0、不钉合、不产出 zip', () => {
+    it('公证被拒（status 不是 Accepted）：取日志、退出码非 0、不产出 zip', () => {
       writeFileSync(log, '');
       const r = run(baseArgs(), { ...FULL, FAKE_NOTARY_STATUS: 'Invalid' }, { stubs: true });
       expect(r.status).toBe(1);
       expect(r.text).toContain('公证失败');
       expect(r.text).toContain('公证日志：某某问题');
-      const c = calls();
-      expect(c.some((l) => l.startsWith('xcrun notarytool log 0000-test'))).toBe(true);
-      expect(c.some((l) => l.includes('stapler'))).toBe(false);
-      expect(existsSync(join(r.out, 'Mingzhi-macos-arm64.zip'))).toBe(false);
+      expect(calls().some((l) => l.startsWith('xcrun notarytool log 0000-test'))).toBe(true);
+      expect(existsSync(join(r.out, ZIP_NAME))).toBe(false);
     });
   });
 });

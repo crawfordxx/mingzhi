@@ -144,7 +144,7 @@ Every run also makes **two covers, 3:4 and 4:3**, in one of 10 styles. The speak
 
 No Node, no commands to type:
 
-1. **Download the launcher** from [Releases][releases]. On macOS pick the zip for your chip (Apple silicon / Intel), unzip it and double-click the launcher inside; on Windows double-click `Mingzhi.exe`. The system blocks it the first time; see [First launch](#first-launch) for how to let it through.
+1. **Download the launcher** from [Releases][releases]. On macOS download `Mingzhi-macos.zip` (Apple silicon and Intel in one), unzip it and double-click "明知AI剪辑.command" inside; on Windows double-click `Mingzhi.exe`. A Terminal / command-line window appears; close it to quit. The system blocks it the first time; see [First launch](#first-launch) for how to let it through.
 2. **A terminal (command-line) window appears and your browser opens a progress page.** That window *is* Mingzhi; keep it open while you work.
 3. **The first run downloads the runtime and local models**: the Node runtime, ffmpeg, Chrome for rendering, the speech and matting models, and the app itself. About **490 MB** on Apple silicon, **510 MB** on Intel Macs and **530 MB** on Windows; music and fonts are filled in afterwards in the background, so you can start right away. Every download resumes where it stopped and is checked against a sha256; if the network drops, click "Retry" to pick up from there.
 4. **When it is done the page jumps to the workbench.** Paste your [Kexiang AI][kexiang] key (no invite code needed) and make a cut.
@@ -246,22 +246,29 @@ Background presets: `study`, `studio`, `cafe`, `night-window`, `tech-dark`, `jap
 
 ## First launch
 
-The launcher has no code-signing certificate on Windows, and on macOS it is not notarized until the signing pipeline is configured, so **the system will stop you the first time you open it**. This is the generic warning for software the system hasn't seen before. Allow it once and later launches open straight away.
+The launcher has no code signature on Windows, and on macOS the entry point "明知AI剪辑.command" is a script, which cannot be signed. So **the system will stop you the first time you open it**. This is the generic warning for software the system hasn't seen before. Allow it once and later launches open straight away.
+
+Both systems work the same way: **a Terminal / command-line window appears and the browser opens the workbench by itself; close that window to quit** (Ctrl+C in the window works too).
 
 <!-- Screenshots go here: docs/readme/first-open-macos.webp (the "Open Anyway" button in System Settings → Privacy & Security) and docs/readme/first-open-windows.webp (SmartScreen "More info" and "Run anyway"). Keep personal accounts and paths out of the shots. -->
 
 #### macOS
 
-Download the zip and double-click it to get "明知AI剪辑"; drag it into Applications (anywhere works).
+1. Download `Mingzhi-macos.zip` and double-click it to unzip. You get a folder "明知AI剪辑" containing "明知AI剪辑.command".
+2. Double-click "明知AI剪辑.command". If the system says it can't be opened or the developer can't be verified:
+   - **macOS 14 and earlier**: **right-click** it → Open, then click Open in the dialog.
+   - **macOS 15 (Sequoia) and later**: click Done, open System Settings → Privacy & Security, scroll to Security, find "“明知AI剪辑.command” was blocked", click **Open Anyway** next to it, enter your login password, then click Open.
+3. A Terminal window appears, and a few seconds later the browser opens the workbench. Close the Terminal window to quit (if Terminal asks whether to terminate the process, choose Terminate).
 
-- **macOS 15 (Sequoia) and later**: double-click it; the system says it can't verify the app and blocked it. Click Done, open System Settings → Privacy & Security, scroll to Security, find "“明知AI剪辑” was blocked", click **Open Anyway** next to it, enter your login password, then click Open.
-- **macOS 14 and earlier**: **right-click** "明知AI剪辑" → Open, then click Open in the dialog.
+If it says the file **"is damaged"**: open Terminal, type `xattr -dr com.apple.quarantine ` (with a trailing space), drag the unzipped "明知AI剪辑" folder into the Terminal window, press Return, then double-click again.
 
-A notarized build opens with a plain double-click and shows none of this.
+In a notarized build the launcher binary itself is no longer blocked; the ".command" script cannot be signed, so it still needs the steps above.
 
 #### Windows
 
-Download `Mingzhi.exe` and double-click it. When the blue "Windows protected your PC" window appears, click **More info**, then **Run anyway**.
+1. Download `Mingzhi.exe` and double-click it.
+2. When the blue "Windows protected your PC" window appears, click **More info**, then **Run anyway**.
+3. A command-line window appears, and a few seconds later the browser opens the workbench. Close that window to quit.
 
 If the browser warns that the download isn't commonly downloaded: in Edge, click "…" on the download bar → Keep → Keep anyway; in Chrome, click Keep in the downloads list.
 

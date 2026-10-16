@@ -1,6 +1,6 @@
 //! 主流程（控制线程）：装必需项 → 起服务 → 进度页跳转 → 后台补可选项；
 //! 失败停在「出错」等用户点重试，服务崩溃停在「已退出」等用户点重新启动；
-//! 服务以退出码 0 退出（用户在工作台里主动退出）时结束，启动器随之退出。
+//! 服务以退出码 0 退出（用户在工作台里主动退出）或收到 Quit（终端信号）时结束，启动器随之退出。
 
 use crate::app::{Command, Plan, Shared, Stage};
 use crate::errmap::{friendly, Friendly, Kind};
@@ -120,6 +120,11 @@ fn watch(
                 service.stop();
                 return Flow::Again;
             }
+            Ok(Command::Quit) => {
+                eprintln!("收到退出信号，正在停止工作台服务……");
+                service.stop();
+                return Flow::Exit;
+            }
             Ok(Command::Retry | Command::SettingsChanged) => {
                 let _ = kick.send(());
             }
@@ -151,6 +156,9 @@ fn crash_problem(reason: &str) -> Friendly {
 /// 通道断开（进程退出中）返回 Exit。
 fn wait_for(rx: &Receiver<Command>, wanted: &[Command]) -> Flow<()> {
     while let Ok(cmd) = rx.recv() {
+        if cmd == Command::Quit {
+            return Flow::Exit;
+        }
         if wanted.contains(&cmd) {
             while rx.try_recv().is_ok() {}
             return Flow::Next(());

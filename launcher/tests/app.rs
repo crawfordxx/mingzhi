@@ -247,3 +247,29 @@ fn 连点两次重新启动只重启一次() {
     std::thread::sleep(Duration::from_millis(150));
     assert_eq!(fx.shared.view()["epoch"].as_u64().unwrap(), running_epoch);
 }
+
+#[test]
+fn 收到退出命令时停掉服务并结束主流程() {
+    let fx = launch("ok", true);
+    wait_until("服务就绪", || fx.shared.stage() == Stage::Running);
+    assert!(fx.shared.accepts(Command::Quit));
+    fx.shared.send(Command::Quit);
+    wait_until("主流程结束", || fx.done.is_finished());
+    assert_eq!(fx.shared.stage(), Stage::Running, "不应进入「意外退出」");
+}
+
+#[test]
+fn 服务已崩溃等待重启时收到退出命令也结束() {
+    let fx = launch("crash-later", true);
+    wait_until("进入已退出", || fx.shared.stage() == Stage::Crashed);
+    fx.shared.send(Command::Quit);
+    wait_until("主流程结束", || fx.done.is_finished());
+}
+
+#[test]
+fn 必需项失败等待重试时收到退出命令也结束() {
+    let fx = launch("ok", false);
+    wait_until("进入出错", || fx.shared.stage() == Stage::Failed);
+    fx.shared.send(Command::Quit);
+    wait_until("主流程结束", || fx.done.is_finished());
+}

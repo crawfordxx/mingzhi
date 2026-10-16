@@ -1,25 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf8');
 const pkgVersion: string = JSON.parse(read('package.json')).version;
 
-describe('启动器图标（scripts/make-icons.sh 的产物）', () => {
-  it('AppIcon.icns：icns 魔数，长度字段与文件一致，含 16～512 及 @2x 各档', () => {
-    const d = readFileSync(join(ROOT, 'launcher', 'macos', 'AppIcon.icns'));
-    expect(d.subarray(0, 4).toString('ascii')).toBe('icns');
-    expect(d.readUInt32BE(4)).toBe(d.length);
-    const types: string[] = [];
-    for (let off = 8; off < d.length; ) {
-      types.push(d.subarray(off, off + 4).toString('ascii'));
-      off += d.readUInt32BE(off + 4);
-    }
-    // ic07=128 ic08=256 ic09=512 ic10=1024(512@2x) ic11=32(16@2x) ic12=64(32@2x) ic13=256(128@2x) ic14=512(256@2x)
-    for (const t of ['ic07', 'ic08', 'ic09', 'ic10', 'ic11', 'ic12', 'ic13', 'ic14']) expect(types).toContain(t);
-  });
-
+describe('Windows 启动器图标（scripts/make-icons.sh 的产物）', () => {
   it('mingzhi.ico：16/24/32/48/64/128/256 七档，每档都是合法 PNG', () => {
     const d = readFileSync(join(ROOT, 'launcher', 'windows', 'mingzhi.ico'));
     expect(d.readUInt16LE(0)).toBe(0);
@@ -41,13 +28,20 @@ describe('启动器图标（scripts/make-icons.sh 的产物）', () => {
 });
 
 describe('macOS 打包资源', () => {
-  it('Info.plist 模板：标识、中文名、版本占位、不设 LSUIElement（Dock 里要有图标）', () => {
-    const p = read('launcher', 'macos', 'Info.plist');
-    expect(p).toContain('<string>com.crawfordxx.mingzhi</string>');
-    expect(p).toContain('<key>CFBundleName</key>\n  <string>明知AI剪辑</string>');
-    expect(p).toContain('<string>mingzhi-launcher</string>');
-    expect(p).toContain('<string>@VERSION@</string>');
-    expect(p).not.toContain('<key>LSUIElement</key>');
+  it('没有 .app 相关文件（Info.plist、图标）：macOS 只发 .command + 命令行二进制', () => {
+    expect(existsSync(join(ROOT, 'launcher', 'macos', 'Info.plist'))).toBe(false);
+    expect(existsSync(join(ROOT, 'launcher', 'macos', 'AppIcon.icns'))).toBe(false);
+  });
+
+  it('start.command：可执行、切到自身目录、前台运行启动器、打印中文说明、清隔离标记', () => {
+    const path = join(ROOT, 'launcher', 'macos', 'start.command');
+    expect(statSync(path).mode & 0o111).toBe(0o111);
+    const c = readFileSync(path, 'utf8');
+    expect(c.startsWith('#!/bin/bash')).toBe(true);
+    expect(c).toContain('cd "$(dirname "$0")"');
+    expect(c).toContain('明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出。');
+    expect(c).toContain('./mingzhi-launcher');
+    expect(c).toContain('xattr -dr com.apple.quarantine');
   });
 
   it('entitlements 为空：启动器不需要任何 hardened runtime 豁免', () => {
@@ -87,24 +81,37 @@ describe('Windows 资源与构建', () => {
     expect(read('launcher', 'Cargo.toml')).toMatch(/^embed-resource = "=\d+\.\d+\.\d+"$/m);
   });
 
-  it('启动器是 GUI 子系统（双击不弹控制台）', () => {
-    expect(read('launcher', 'src', 'main.rs')).toContain('#![cfg_attr(windows, windows_subsystem = "windows")]');
+  it('启动器是控制台子系统：双击 Mingzhi.exe 会有控制台窗口，关闭窗口即退出（不能再声明 windows_subsystem）', () => {
+    const main = read('launcher', 'src', 'main.rs');
+    expect(main).not.toMatch(/^\s*#!\[.*windows_subsystem/m);
+    // 控制台里显示的启动说明（macOS 的 .command 自己打印同一句）
+    expect(main).toContain('明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出。');
+    // 关闭窗口 / Ctrl+C 走 signal 模块优雅退出
+    expect(main).toContain('signal::install()');
+    expect(read('launcher', 'src', 'signal.rs')).toContain('SetConsoleCtrlHandler');
   });
 });
 
 describe('发布流水线对打包脚本与产物名的引用', () => {
   const wf = read('.github', 'workflows', 'release.yml');
-  it('macOS 调 macos-sign.sh，Windows 产出 Mingzhi.exe，都带 sha256，Release 上传包含这些文件', () => {
-    expect(wf).toContain('scripts/macos-sign.sh');
+  it('macOS 单独一个 job：下载两个架构的启动器，调 macos-sign.sh 合成通用二进制；Windows 产出 Mingzhi.exe；都带 sha256', () => {
+    expect(wf).toContain('package-macos:');
+    expect(wf).toMatch(/macos-sign\.sh[\s\S]*--bin .*darwin-arm64[\s\S]*--bin .*darwin-x64/);
     expect(wf).toContain('out/Mingzhi.exe');
     expect(wf).toContain('sha256sum Mingzhi.exe > Mingzhi.exe.sha256');
-    expect(wf).toContain('mingzhi-* Mingzhi* manifest.json');
     expect(wf).toContain('sha256sum -c');
+    expect(wf).toContain('Mingzhi-macos.zip');
+    expect(wf).not.toContain('.app');
   });
 
   it('签名相关 secrets 只在配齐时才传给脚本（缺失时走跳过分支，不让 CI 失败）', () => {
     for (const k of ['APPLE_SIGN_IDENTITY', 'APPLE_ID', 'APPLE_TEAM_ID', 'APPLE_APP_PASSWORD']) {
       expect(wf).toContain(`${k}: \${{ steps.sign.outputs.enabled == 'true' && secrets.${k} || '' }}`);
     }
+  });
+
+  it('Release 上传包含新产物名，且中间产物（原始启动器二进制）不会被当成发布文件', () => {
+    expect(wf).toContain('mingzhi-* Mingzhi* manifest.json');
+    expect(wf).toContain('name: launcher-bin-');
   });
 });

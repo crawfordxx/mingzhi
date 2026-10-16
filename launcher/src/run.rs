@@ -129,7 +129,7 @@ impl Service {
         for (k, v) in &spec.env {
             cmd.env(k, v);
         }
-        hide_console(&mut cmd);
+        detach_from_terminal(&mut cmd);
         let mut child = cmd
             .spawn()
             .map_err(|e| Error::new(format!("无法启动 Node（{}）：{e}", spec.node.display())))?;
@@ -334,12 +334,19 @@ pub fn parse_ready(line: &str) -> Option<String> {
     Some(url.to_string())
 }
 
+/// 启动器现在跑在终端 / 控制台窗口里（关窗口 = 退出），服务不能直接吃到终端信号：
+/// 由启动器收信号后走 stdin 看门狗优雅停止，这样 Ctrl+C 与关窗口都只有一条退出路径。
+/// - Windows：不继承控制台（不另开窗口，也收不到 Ctrl+C / 关窗口事件）
+/// - Unix：放进独立进程组（收不到终端发给前台进程组的 SIGINT / SIGHUP）
 #[cfg(windows)]
-fn hide_console(cmd: &mut Command) {
+fn detach_from_terminal(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     cmd.creation_flags(CREATE_NO_WINDOW);
 }
 
-#[cfg(not(windows))]
-fn hide_console(_cmd: &mut Command) {}
+#[cfg(unix)]
+fn detach_from_terminal(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
+}

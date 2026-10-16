@@ -33,11 +33,16 @@ serde_json = "=1.0.154"
 # 进度页的本机 HTTP 服务（只听 127.0.0.1）
 tiny_http = "=0.12.0"
 
+# 终端信号（Ctrl+C、关闭终端窗口）→ 优雅退出
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.190"
+
 # Windows：Job Object（子进程树随启动器退出）与启动失败时的弹窗
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.59.0", features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_System_Console",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",

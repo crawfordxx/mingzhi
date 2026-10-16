@@ -1,36 +1,21 @@
 #!/usr/bin/env bash
-# 从 assets/brand/logo.svg 生成启动器图标：
-#   launcher/macos/AppIcon.icns   macOS 应用图标（圆角方块，四周留白，符合系统图标网格）
-#   launcher/windows/mingzhi.ico  Windows 图标（16～256 像素，各尺寸都是 PNG）
-# 生成结果已入库，CI 不需要重新生成；改了 logo 之后在 macOS 上手动运行一次再提交。
-# 依赖：rsvg-convert（brew install librsvg）、ImageMagick（brew install imagemagick）、iconutil（macOS 自带）、node
+# 从 assets/brand/logo.svg 生成 Windows 启动器图标：
+#   launcher/windows/mingzhi.ico  16～256 像素，各尺寸都是 PNG
+# （macOS 只发 .command 与命令行二进制，没有图标。）
+# 生成结果已入库，CI 不需要重新生成；改了 logo 之后手动运行一次再提交。
+# 依赖：rsvg-convert（brew install librsvg）、node
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SVG="$ROOT/assets/brand/logo.svg"
-ICNS="$ROOT/launcher/macos/AppIcon.icns"
 ICO="$ROOT/launcher/windows/mingzhi.ico"
 
-for tool in rsvg-convert magick iconutil node; do
+for tool in rsvg-convert node; do
   command -v "$tool" >/dev/null || { echo "缺少 ${tool}，见脚本头部的依赖说明" >&2; exit 1; }
 done
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-
-# ---- macOS：1024 画布，824 的圆角方块居中（Apple 图标网格），圆角半径约 22.4%
-rsvg-convert -w 824 -h 824 "$SVG" -o "$TMP/body.png"
-magick -size 824x824 xc:none -fill white -draw "roundrectangle 0,0 823,823 185,185" "$TMP/mask.png"
-magick "$TMP/body.png" "$TMP/mask.png" -alpha off -compose CopyOpacity -composite "$TMP/rounded.png"
-magick -size 1024x1024 xc:none "$TMP/rounded.png" -gravity center -composite "$TMP/icon-1024.png"
-
-SET="$TMP/AppIcon.iconset"
-mkdir "$SET"
-for size in 16 32 128 256 512; do
-  magick "$TMP/icon-1024.png" -filter Lanczos -resize "${size}x${size}" "$SET/icon_${size}x${size}.png"
-  magick "$TMP/icon-1024.png" -filter Lanczos -resize "$((size * 2))x$((size * 2))" "$SET/icon_${size}x${size}@2x.png"
-done
-iconutil -c icns "$SET" -o "$ICNS"
 
 # ---- Windows：直接用 logo 的方形满版，各尺寸分别从矢量渲染（小尺寸更清晰），每个尺寸以 PNG 存入 ico
 PNGS=()
@@ -61,4 +46,4 @@ images.forEach((png, i) => {
 writeFileSync(out, Buffer.concat([head, ...images]));
 JS
 
-ls -l "$ICNS" "$ICO"
+ls -l "$ICO"

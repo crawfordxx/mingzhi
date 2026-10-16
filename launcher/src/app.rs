@@ -38,6 +38,8 @@ pub enum Command {
     Retry,
     Restart,
     SettingsChanged,
+    /// 终端信号（Ctrl+C、关闭终端窗口）：停掉服务，结束主流程
+    Quit,
 }
 
 #[derive(Debug, Clone)]
@@ -148,7 +150,7 @@ impl Shared {
                 Command::Retry,
                 Stage::Failed | Stage::Crashed | Stage::Running
             ) | (Command::Restart, Stage::Crashed)
-                | (Command::SettingsChanged, _)
+                | (Command::SettingsChanged | Command::Quit, _)
         )
     }
 

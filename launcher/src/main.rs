@@ -5,7 +5,9 @@
 //! - MINGZHI_MANIFEST：用这个清单文件代替编译进来的清单
 //! - MINGZHI_APP_DIR：用现成目录当应用本体（不下载 app 项）
 //! - MINGZHI_NO_BROWSER=1：不自动打开浏览器，也不弹出错误对话框（只打印）
-#![cfg_attr(windows, windows_subsystem = "windows")]
+//!
+//! 运行方式：macOS 由「明知AI剪辑.command」在终端里前台运行，Windows 是控制台程序（控制台子系统），
+//! 窗口本身就是「运行中」的标志：关闭窗口（或 Ctrl+C）= 退出，由 `signal` 模块优雅收尾。
 
 use mingzhi_launcher::app::{self, Info, Plan, Shared};
 use mingzhi_launcher::browser;
@@ -20,6 +22,7 @@ use mingzhi_launcher::paths::AppRoot;
 use mingzhi_launcher::progress::Progress;
 use mingzhi_launcher::proxy::ProxyConfig;
 use mingzhi_launcher::server;
+use mingzhi_launcher::signal;
 use mingzhi_launcher::state::State;
 use mingzhi_launcher::sysinfo::{low_spec_note, SystemSpec};
 use std::path::PathBuf;
@@ -65,7 +68,14 @@ fn primary_or_hand_off(root: &AppRoot) -> Result<Option<InstanceGuard>> {
     }
 }
 
+/// 启动提示（macOS 的 .command 自己先打印同一句，所以只有 Windows 在这里打印）。
+const BANNER: &str = "明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出。";
+
 fn run() -> Result<()> {
+    signal::install();
+    if cfg!(windows) {
+        eprintln!("{BANNER}");
+    }
     let root = AppRoot::resolve()?;
     let Some(guard) = primary_or_hand_off(&root)? else {
         return Ok(());
@@ -101,7 +111,9 @@ fn run() -> Result<()> {
     open_page(&ui.url());
 
     // 主流程常驻；启动器退出时工作台服务随之退出
+    signal::spawn_watcher(shared.clone());
     app::run(shared, plan, rx);
+    signal::mark_finished();
     drop(guard);
     Ok(())
 }
