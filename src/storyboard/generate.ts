@@ -38,6 +38,7 @@ coverTitle 是封面标题：title 必填、不超过 ${COVER_TITLE_MAX} 字，�
 9. 钩子必须有画面：写 visual（生图或视频需求）或 stat（口播里的数字）至少一个；口播提到出处时写 source（来源背书小标签 ≤24 字，如「GitHub 3.5 万星项目」），没有出处不要写。
 10. 持续演进：evidenceList、strikeList、compareBars、flow 可以跨 2-4 句字幕（仍不超过 ${MAX_SHOT_SEC} 秒），写 reveal：每一条出现的时刻（秒，取对应字幕的开始时间，和条目一一对应、递增，第一条写镜头开始时间），让条目随口播逐条出现或点亮。
 11. image、video 只能填「可用素材」列表里的文件名，不要编造文件名；需要新素材时不写文件名，改在 visual 里写需求（截图 screenshot、生图 generate、视频 video，各模板允许的来源见目录；生图与视频提示词用英文）。素材优先级：能截官方网页就用 screenshot，其次 generate；video 只用于开头最关键的那张 hook，全片最多 1 个。photo 必须带 image、video、visual 之一，列表为「无」时只能写 visual；browser 不带 image 时可以写 screenshot 类 visual。
+12. 卡片标题（title、hook 的 headline、evidenceList / flow 的 title）必须是完整的意思：以句末或完整短语结束，不能话说一半，如「第三个习惯：每天睡前」这种停在时间状语、连词或冒号上的写法不行；放不下就换更短的完整说法（如「睡前列出明天的清单」），或直接用字幕里的整句。
 
 模板目录：
 ${catalogText}`;
@@ -72,8 +73,8 @@ const cardShots = (res: NormalizeResult): Shot[] => res.storyboard.shots.filter(
 const tooManyDropped = (res: NormalizeResult, rawCount: number): boolean => res.dropped > rawCount * MAX_DROPPED_RATIO;
 const tooFewCards = (res: NormalizeResult): boolean => cardShots(res).length < MIN_CARD_SHOTS;
 
-const fixCount = (res: NormalizeResult): number => res.ruleFixes?.length ?? 0;
-const brokeRules = (res: NormalizeResult): boolean => fixCount(res) > 0;
+const fixCount = (res: NormalizeResult): number => (res.ruleFixes?.length ?? 0) + (res.titleIssues?.length ?? 0);
+const brokeRules = (res: NormalizeResult): boolean => fixCount(res) > 0 || (res.titleIssues?.length ?? 0) > 0;
 
 /** 更好的结果：dropped 更少；相同则违反多样性规则更少；再相同则带卡片镜头更多；仍相同保留首次 */
 const better = <T extends NormalizeResult>(a: T, b: T): T => {
@@ -90,7 +91,8 @@ function retryHint(res: NormalizeResult, raw: unknown): string {
   const parts = [
     ...(tooManyDropped(res, rawShotCount(raw)) ? [`上一次有 ${res.dropped} 个镜头不合格${detail}`] : []),
     ...(tooFewCards(res) ? [`上一次可用的带卡片的镜头只有 ${cardShots(res).length} 个，至少需要 ${MIN_CARD_SHOTS} 个${detail}`] : []),
-    ...(brokeRules(res) ? [`上一次违反了分镜多样性规则：${res.ruleFixes?.slice(0, MAX_ERROR_SAMPLES).join('；')}`] : []),
+    ...(res.ruleFixes?.length ? [`上一次违反了分镜多样性规则：${res.ruleFixes.slice(0, MAX_ERROR_SAMPLES).join('；')}`] : []),
+    ...(res.titleIssues?.length ? [`上一次有卡片标题话没说完：${res.titleIssues.slice(0, MAX_ERROR_SAMPLES).join('；')}`] : []),
   ];
   return `\n\n${parts.join('。')}。请严格遵守字段长度上限、图片规则与多样性规则后重新输出。`;
 }
@@ -116,7 +118,7 @@ export async function generateStoryboard(
   const source = captions.map((c) => c.text).join(' ');
   const check = (raw: unknown): Checked => {
     const facts = checkStoryboardFacts(raw, source);
-    const res = normalizeStoryboard(facts.raw, durationSec, availableImages, { fromModel: true });
+    const res = normalizeStoryboard(facts.raw, durationSec, availableImages, { fromModel: true, captions });
     return { ...res, storyboard: { ...res.storyboard, shots: fillReveal(res.storyboard.shots, captions) }, unsupported: facts.removed };
   };
 

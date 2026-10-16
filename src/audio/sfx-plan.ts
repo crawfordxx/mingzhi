@@ -1,7 +1,7 @@
 import { cardLead } from '../compose/card-carry.js';
 import { visualLayout, visualShots } from '../compose/layout.js';
 import { OUTRO_LOGO_SEC } from '../compose/ending.js';
-import { HOOK_HIT_SEC } from '../../render/templates/timing.js';
+import { BROLL_HOOK_HIT_SEC, HOOK_HIT_SEC } from '../../render/templates/timing.js';
 import type { CardSpec, Shot } from '../storyboard/schema.js';
 import { ANCHOR_SEC, assignVariants, type SfxCue, type SfxIntent, type SfxKind } from './sfx-map.js';
 
@@ -24,6 +24,7 @@ const round3 = (n: number): number => Math.round(n * 1000) / 1000;
  * - 卡片内部时钟提前：compose/card-carry 的 cardLead（从人物全屏切进分屏时提前 FRESH_LEAD_SEC，内部触发点同步提前）
  * - 卡片入场：render/layers/CardLayer.tsx 的 spring 从镜头第 0 帧起，pop 对准镜头开始
  * - 钩子 hit：render/templates/timing.ts 的 HOOK_HIT_SEC（Hook.tsx 第一行高亮刷开完成的时刻，同一常量驱动动画）
+ * - 开头全屏素材上的钩子文字 hit：timing.ts 的 BROLL_HOOK_HIT_SEC（BrollHook 高亮条刷开完成的时刻）
  */
 const EXIT_SEC = 0.25;
 const TOGGLE_FIRST = 0.6;
@@ -115,6 +116,12 @@ function brollIntents(shots: Shot[]): SfxIntent[] {
   });
 }
 
+/** 开头全屏素材带钩子文字（broll.hook）：文字落定（高亮条刷开完成）时一下 hit；时间轴为画面时间轴（BrollLayer 的镜头内秒数从它起算） */
+function brollHookIntents(shots: Shot[]): SfxIntent[] {
+  const visual = visualShots(shots);
+  return shots.flatMap((shot, i): SfxIntent[] => (shot.broll?.hook && visualLayout(shot) === 'broll' ? [intent(visual[i].start + BROLL_HOOK_HIT_SEC, 'hit', VOLUME.hit)] : []));
+}
+
 /** 按时间排序，±DEDUP_SEC 内只保留更响的一个，音量相同保留更早的 */
 function dedupe(intents: SfxIntent[]): SfxIntent[] {
   const sorted = [...intents].sort((a, b) => a.at - b.at);
@@ -147,6 +154,6 @@ export interface SfxPlanOptions {
 export function sfxCues(shots: Shot[], opts: SfxPlanOptions = {}): SfxCue[] {
   const logo = opts.outroStartSec === undefined ? [] : [intent(opts.outroStartSec + OUTRO_LOGO_SEC, 'logo', VOLUME.logo)];
   const visual = visualShots(shots);
-  const all = dedupe([...shots.flatMap((shot, i) => cardIntents(shot, cardLead(visual, i))), ...brollIntents(shots), ...logo].map((c) => ({ ...c, at: round3(c.at) })));
+  const all = dedupe([...shots.flatMap((shot, i) => cardIntents(shot, cardLead(visual, i))), ...brollIntents(shots), ...brollHookIntents(shots), ...logo].map((c) => ({ ...c, at: round3(c.at) })));
   return assignVariants([...all, ...riserIntent(shots)]);
 }

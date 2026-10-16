@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { limitTailLoudness } from '../src/audio/loudness.js';
 import { run } from '../src/media/exec.js';
-import { TAIL_MAX_LUFS, checkOutroLoudness, measureTailLufs } from '../src/qa/hard.js';
+import { TAIL_MAX_LUFS, checkOutroLoudness, measureTailLufs, tailFrom } from '../src/qa/hard.js';
 
 const cfg = loadConfig({});
 
@@ -51,3 +51,12 @@ async function measureWindow(file: string, from: number, to: number): Promise<nu
   const { stderr } = await run(cfg.ffmpeg, ['-hide_banner', '-nostats', '-i', file, '-vn', '-af', `atrim=${from}:${to},asetpts=N/SR/TB,ebur128`, '-f', 'null', '-']);
   return Number(/I:\s*(-?[\d.]+)\s*LUFS/.exec(stderr.slice(stderr.lastIndexOf('Summary:')))?.[1]);
 }
+
+describe('tailFrom：片尾响度的量取起点', () => {
+  it('片尾比 3 秒长：最后 3 秒；片尾更短（短片 1 秒出头）：从片尾开始，不把口播和 CTA 量进去', () => {
+    expect(tailFrom(60, 55)).toBeCloseTo(57, 9);
+    expect(tailFrom(60, 57.5)).toBeCloseTo(57.5, 9);
+    expect(tailFrom(14.133, 13.1)).toBeCloseTo(13.1, 9);
+    expect(tailFrom(10, undefined)).toBeCloseTo(7, 9);
+  });
+});

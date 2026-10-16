@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SfxId, Track } from '../src/assets/catalog.js';
 import { DUCK_DB, OPEN_DB, OUTRO_DB, PURE_NUMBER, TIMING, bgmEnvelope, dbAt, pickTrack, sfxCues } from '../src/audio/plan.js';
 import { HOOK_HIT_SEC } from '../src/audio/sfx-plan.js';
-import { HOOK_MARK_SEC, HOOK_MARK_START } from '../render/templates/timing.js';
+import { BROLL_HOOK_HIT_SEC, BROLL_HOOK_MARK_SEC, BROLL_HOOK_MARK_START, HOOK_MARK_SEC, HOOK_MARK_START } from '../render/templates/timing.js';
 import { SFX, sfxPath } from '../src/assets/catalog.js';
 import { lastLoudSec, onsetSec, readWav, rmsPeakSec } from './helpers/wav.js';
 // @ts-expect-error 合成脚本是 .mjs，没有类型声明
@@ -187,6 +187,15 @@ describe('钩子、全屏 B-roll、片尾的音效', () => {
   const broll = (start: number, end: number, layout: Shot['layout'] = 'broll'): Shot => ({ start, end, layout, broll: { file: 'broll/a.mp4', kind: 'video', focal: { x: 0.5, y: 0.5 } } });
   const FRAME = 1 / 30;
 
+  it('开头全屏素材上的钩子文字：hit 落在高亮条刷开完成的时刻（BROLL_HOOK_HIT_SEC，BrollHook 与它共用同一常量）；没有钩子文字时不响', () => {
+    const withHook: Shot = { ...broll(0, 3), broll: { ...broll(0, 3).broll as NonNullable<Shot['broll']>, hook: '怎么用 AI 剪口播' } };
+    const rest: Shot = { start: 3, end: 6, layout: 'full' };
+    const hits = kindOf([withHook, rest], 'hit');
+    expect(BROLL_HOOK_HIT_SEC).toBeCloseTo(BROLL_HOOK_MARK_START + BROLL_HOOK_MARK_SEC, 9);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].sec + ANCHOR_SEC[hits[0].sfx]).toBeCloseTo(BROLL_HOOK_HIT_SEC, 3);
+    expect(kindOf([broll(0, 3), rest], 'hit')).toHaveLength(0);
+  });
   it('第一张钩子：riser 的高潮落在 hit 上，hit 在标题高亮刷开完成（HOOK_HIT_SEC，Hook.tsx 与它共用同一常量）；之后的钩子只有 hit', () => {
     const cues = sfxCues([split(2, 5, hook(1)), split(5, 8, hook(2)), split(8, 11, hook(3))]);
     const risers = cues.filter((c) => sfxKind(c.sfx) === 'riser');

@@ -107,7 +107,7 @@ export function checkContrast(palette: Palette[]): HardCheck {
   return { id: 'contrast', ok: low.length === 0, detail };
 }
 
-/** 品牌片尾（成片最后 TAIL_SEC 秒）的响度上限：比口播安静，logo 音与配乐淡出收束 */
+/** 品牌片尾（成片最后 TAIL_SEC 秒，片尾不足 TAIL_SEC 时只量片尾本身）的响度上限：比口播安静，logo 音与配乐淡出收束 */
 export const TAIL_MAX_LUFS = -18;
 export const TAIL_SEC = 3;
 
@@ -117,11 +117,15 @@ export async function measureTailLufs(video: string, fromSec: number, cfg: AppCo
   return parseEbur128(stderr).lufs;
 }
 
-/** 片尾（最后 3 秒）响度不高于 -18 LUFS；没有片尾（outroStartSec 未给）时不检查 */
-export async function checkOutroLoudness(video: string, durationSec: number, cfg: AppConfig): Promise<HardCheck> {
+/** 量片尾响度的起点：最后 TAIL_SEC 秒，片尾更短（短片 1 秒出头）时从片尾开始，不把口播和 CTA 量进去 */
+export const tailFrom = (durationSec: number, outroStartSec?: number): number => Math.max(durationSec - TAIL_SEC, outroStartSec ?? 0);
+
+/** 片尾响度不高于 -18 LUFS；没有片尾（outroStartSec 未给）时不检查 */
+export async function checkOutroLoudness(video: string, durationSec: number, cfg: AppConfig, outroStartSec?: number): Promise<HardCheck> {
   try {
-    const lufs = await measureTailLufs(video, durationSec - TAIL_SEC, cfg);
-    return { id: 'outroLoudness', ok: lufs <= TAIL_MAX_LUFS, detail: `片尾 ${TAIL_SEC} 秒响度 ${fmt(lufs)} LUFS（要求 ≤ ${TAIL_MAX_LUFS}）` };
+    const from = tailFrom(durationSec, outroStartSec);
+    const lufs = await measureTailLufs(video, from, cfg);
+    return { id: 'outroLoudness', ok: lufs <= TAIL_MAX_LUFS, detail: `片尾 ${(durationSec - from).toFixed(1)} 秒响度 ${fmt(lufs)} LUFS（要求 ≤ ${TAIL_MAX_LUFS}）` };
   } catch (err) {
     return { id: 'outroLoudness', ok: false, detail: `片尾响度测量失败：${(err as Error).message.split('\n')[0]}` };
   }
@@ -136,7 +140,7 @@ export async function hardChecks(video: string, layout: CaptionLayout, palette: 
     checkSize(info.width, info.height),
     checkFps(info.fps),
     ...loudness,
-    ...(outroStartSec === undefined ? [] : [await checkOutroLoudness(video, info.durationSec, cfg)]),
+    ...(outroStartSec === undefined ? [] : [await checkOutroLoudness(video, info.durationSec, cfg, outroStartSec)]),
     await checkBlack(video, info.durationSec, cfg),
     checkSafeArea(layout),
     checkContrast(palette),

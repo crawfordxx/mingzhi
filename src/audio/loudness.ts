@@ -4,7 +4,7 @@ import type { AppConfig } from '../config.js';
 import { finalVideoArgs } from '../media/encode.js';
 import { run } from '../media/exec.js';
 import { probe } from '../media/probe.js';
-import { TAIL_MAX_LUFS, TAIL_SEC, measureTailLufs } from '../qa/hard.js';
+import { TAIL_MAX_LUFS, measureTailLufs, tailFrom } from '../qa/hard.js';
 
 /** 成片响度目标：-14 LUFS 积分响度，真峰值 ≤ -1.5 dBTP，响度范围 11 LU */
 export const TARGET = { I: -14, TP: -1.5, LRA: 11 } as const;
@@ -148,12 +148,12 @@ export interface TailResult {
 }
 
 /**
- * 响度统一之后测成片最后 TAIL_SEC 秒，高于 TAIL_MAX_LUFS 就只对片尾（outroStartSec 起）做渐入式衰减，直到达标：
+ * 响度统一之后测成片最后 TAIL_SEC 秒（片尾更短时只测片尾，见 tailFrom），高于 TAIL_MAX_LUFS 就只对片尾（outroStartSec 起）做渐入式衰减，直到达标：
  * 口播不动；每次从衰减前的成片重新编码，最多 TAIL_MAX_TRIES 次，仍不达标则保留最后一次（after 如实返回）。
  * 成片没有音轨、或片尾没有声音（-70）时原样返回。durationSec 是成片时长
  */
 export async function limitTailLoudness(video: string, durationSec: number, outroStartSec: number, cfg: AppConfig): Promise<TailResult> {
-  const from = durationSec - TAIL_SEC;
+  const from = tailFrom(durationSec, outroStartSec);
   const before = await measureTailLufs(video, from, cfg);
   if (!(before > TAIL_MAX_LUFS)) return { before, after: before, attenuatedDb: 0 };
   const src = `${video}.pre-tail.mp4`;

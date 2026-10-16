@@ -10,6 +10,7 @@ import { PRESETS } from '../background/presets.js';
 import { resolveBackground, type BackgroundSpec, type ResolvedBackground } from '../background/resolve.js';
 import { rethrowIfCancelled } from '../cancel.js';
 import { outroProps, placeCta, planEnding, resolveOutro } from '../compose/ending.js';
+import { withOpeningHook } from '../compose/opening-hook.js';
 import { renderSegmented, type SegmentedResult } from '../compose/segments.js';
 import { stageOutroLogo } from '../compose/stage-assets.js';
 import { COVER_YUAN } from '../cost/estimate.js';
@@ -35,9 +36,9 @@ import { mediaOf } from './media-deps.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
 import type { FacePerson } from '../qa/face-noise-measure.js';
 import { runQaCards, runQaFilm, runQaFinal, type FilmCut } from './qa-step.js';
+import type { FilmQa } from '../qa/film-redo.js';
 import type { PipelineArgs, PipelineStep, ProgressEvent } from './run.js';
 
-import type { FilmQa } from '../qa/film-redo.js';
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
 export type Complete = (step: PipelineStep, message: string, patch?: ProjectPatch) => ProjectFile;
 export interface Analysis { media: MediaInfo; transcript: Transcript; cuts: Cut[]; plan: EditPlan }
@@ -265,8 +266,9 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
   const contentSec = Math.min(c.outputDurationSec, baseInfo.durationSec);
   // 结尾：最后一句后留白、接品牌片尾（CTA 已在分镜阶段提前，见 placeEnding）；末镜头截到人像实际时长，不改镜头数量与顺序
   const outroOptions = resolveOutro(args.outro);
-  const ending = planEnding(c.captions, contentSec, outroOptions.enabled);
-  const shots = clampLastShot(c.storyboard.shots, contentSec);
+  const ending = planEnding(c.captions, contentSec, outroOptions.enabled, c.storyboard.shots);
+  // 第一个镜头是全屏素材时叠开头钩子文字（渲染用的镜头，分镜里不存）
+  const shots = withOpeningHook(clampLastShot(c.storyboard.shots, contentSec), c.captions, c.storyboard.coverTitle);
   const outro = ending.hasOutro ? outroProps(ending, outroOptions, await stageOutroLogo(workDir)) : undefined;
   const audioArgs = { workDir, cfg, input: args.input, audio: args.audio, captionStyle: args.captionStyle };
   const audio = await prepareAudio(audioArgs, { ...c.storyboard, shots }, c.captions, ending.durationSec, outro?.startSec);
@@ -278,7 +280,7 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
     onProgress: (done, total) => progress(total > 0 ? done / total : 1),
     props: {
       person: relative(workDir, c.person), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: c.subject,
-      captions: c.captions, shots, durationSec: ending.durationSec, ...(c.storyboard.palette ? { palette: c.storyboard.palette } : {}), ...(outro ? { outro } : {}), ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
+      captions: c.captions, shots, durationSec: ending.durationSec, contentSec, ...(c.storyboard.palette ? { palette: c.storyboard.palette } : {}), ...(outro ? { outro } : {}), ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
     },
   }).catch((err: unknown) => {
     rethrowIfCancelled(err);
@@ -291,10 +293,12 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
   return { ...res, ...(outro ? { outroStartSec: outro.startSec } : {}) };
 }
 
-/** 末镜头不超出人像视频的实际时长（编码后可能比方案略短）；只改末镜头的结束时间 */
+/** 末镜头不超出人像视频的实际时长（编码后可能比方案略短）；只改末镜头的结束时间（提前到片尾前的 CTA 除外） */
 function clampLastShot(shots: Shot[], contentSec: number): Shot[] {
   const last = shots[shots.length - 1];
-  return last && last.end > contentSec && last.start < contentSec ? [...shots.slice(0, -1), { ...last, end: contentSec }] : shots;
+  // 提前到片尾前的 CTA（placed）可以超出内容结尾，不截
+  const placedCta = last?.card?.template === 'cta' && last.card.props.placed === true;
+  return last && !placedCta && last.end > contentSec && last.start < contentSec ? [...shots.slice(0, -1), { ...last, end: contentSec }] : shots;
 }
 
 /** 响度统一后测片尾：高于上限就只衰减片尾并写进度；失败不让成片失败 */

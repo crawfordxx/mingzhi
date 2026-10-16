@@ -4,6 +4,7 @@ import { kenBurnsAt, kenBurnsRects, shotAt, underlayAt, visualLayout } from '../
 import type { Broll, Shot } from '../../src/storyboard/schema.js';
 import { shotStartFrame } from '../templates/ShotVideo.js';
 import { MediaBadge } from '../templates/MediaBadge.js';
+import { BrollHook } from './BrollHook.js';
 
 /** 素材底色：极深的暖黑（素材加载前或透明处不露米色） */
 export const BROLL_BG = '#0B0B0A';
@@ -64,7 +65,7 @@ function layerShot(shots: Shot[], sec: number, place: 'over' | 'under'): { broll
 
 /**
  * 全屏素材层：place=over 画全屏插入（盖在人像之上，人声继续），place=under 画画中画的底（人像小窗在其上）。
- * shots 为画面时间轴（visualShots 之后，全屏插入已晚 2 帧切入）；带字幕区柔和压暗
+ * shots 为画面时间轴（visualShots 之后，全屏插入已晚 2 帧切入）；带字幕区柔和压暗；全屏插入带 hook（开头钩子文字）时叠一行钩子标题
  */
 export const BrollLayer: React.FC<{ shots: Shot[]; sec: number; place: 'over' | 'under' }> = ({ shots, sec, place }) => {
   const m = layerShot(shots, sec, place);
@@ -73,6 +74,7 @@ export const BrollLayer: React.FC<{ shots: Shot[]; sec: number; place: 'over' | 
     <AbsoluteFill>
       <BrollMedia broll={m.broll} local={m.local} dur={m.dur} />
       <AbsoluteFill style={{ background: CAPTION_SHADE }} />
+      {place === 'over' && m.broll.hook ? <BrollHook text={m.broll.hook} local={m.local} dur={m.dur} /> : null}
     </AbsoluteFill>
   );
 };

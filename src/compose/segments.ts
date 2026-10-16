@@ -74,7 +74,9 @@ export function shotHash(shot: Shot, props: Omit<TalkProps, 'shots'>, _index: nu
   const { shots, range } = ctx;
   const { shots: hit, frames } = frameFingerprints(props, shots, range, ctx.layer);
   const head = { v: 1, range, shot, hit, salt: ctx.salt ?? '', person: props.person, w: props.personWidth, h: props.personHeight, subject: props.subject,
-    style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '', ...(grainOn({ ...props, shots }) ? { grain: true } : {}), ...(props.palette ? { palette: props.palette } : {}), ...(props.outro && range.end > secToFrame(props.outro.startSec) ? { outro: props.outro } : {}) };
+    style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '', ...(grainOn({ ...props, shots }) ? { grain: true } : {}), ...(props.palette ? { palette: props.palette } : {}), ...(props.outro && range.end > secToFrame(props.outro.startSec) ? { outro: props.outro } : {}),
+    // 人像在口播内容结尾定格：CTA 超出内容结尾时，定格点影响包含它的段
+    ...(props.contentSec !== undefined && range.end > secToFrame(props.contentSec) ? { contentSec: props.contentSec } : {}) };
   return sha1(`${JSON.stringify(head)}\n${frames.join('\n')}`);
 }
 

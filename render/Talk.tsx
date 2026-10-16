@@ -28,24 +28,31 @@ export const Talk: React.FC<TalkProps> = (props) => {
   const styleId = props.captionStyle ?? DEFAULT_CAPTION_STYLE;
   useCaptionFont(CAPTION_STYLES[styleId].family, props.captionFontFile ?? '');
   const shots = React.useMemo(() => visualShots(props.shots), [props.shots]);
-  // 口播内容的末帧：之后人像定格在这一帧（留白与片尾）
   const lastEnd = props.shots.length > 0 ? props.shots[props.shots.length - 1].end : props.durationSec;
-  const contentFrames = Math.min(Math.round(lastEnd * CANVAS.fps), Math.round(props.durationSec * CANVAS.fps));
-  const held = frame >= contentFrames;
-  // 留白与片尾期间画面层（人像、素材、卡片）整体定格在内容末帧，卡片与素材不瞬间消失，由片尾的米色底淡入一起盖住
-  const visualSec = held ? (contentFrames - 1) / CANVAS.fps : sec;
+  // 镜头的末帧：之后卡片与素材定格（留白与片尾）；人像（口播内容）的末帧：之后人像定格并静音。
+  // 两者通常相同；提前到片尾前的 CTA 超出口播内容结尾时，人像先定格，CTA 继续动
+  const durationFrames = Math.round(props.durationSec * CANVAS.fps);
+  const shotFrames = Math.min(Math.round(lastEnd * CANVAS.fps), durationFrames);
+  const personFrames = Math.min(Math.round((props.contentSec ?? lastEnd) * CANVAS.fps), shotFrames);
+  const shotHeld = frame >= shotFrames;
+  const personHeld = frame >= personFrames;
+  // 留白与片尾期间画面层（人像、素材、卡片）整体定格在末帧，卡片与素材不瞬间消失，由片尾的底色淡入一起盖住
+  const visualSec = shotHeld ? (shotFrames - 1) / CANVAS.fps : sec;
+  const personSec = personHeld ? (personFrames - 1) / CANVAS.fps : sec;
   const palette = props.palette ?? DEFAULT_PALETTE;
   return (
     <PaletteContext.Provider value={palette}>
     <AbsoluteFill style={{ background: palette.stage }}>
-      <Freeze frame={Math.max(0, contentFrames - 1)} active={held}>
-        <BrollLayer shots={shots} sec={visualSec} place="under" />
-        <PersonLayer {...props} shots={shots} sec={visualSec} muted={held} />
-        <BrollLayer shots={shots} sec={visualSec} place="over" />
+      <Freeze frame={Math.max(0, personFrames - 1)} active={personHeld}>
+        <BrollLayer shots={shots} sec={personSec} place="under" />
+        <PersonLayer {...props} shots={shots} sec={personSec} muted={personHeld} />
+        <BrollLayer shots={shots} sec={personSec} place="over" />
+      </Freeze>
+      <Freeze frame={Math.max(0, shotFrames - 1)} active={shotHeld}>
         <CardLayer shots={shots} sec={visualSec} />
       </Freeze>
       {props.outro ? <Outro outro={props.outro} sec={sec} /> : null}
-      {grainOn(props) ? <GrainLayer region={personRegionAt({ ...props, shots }, visualSec)} /> : null}
+      {grainOn(props) ? <GrainLayer region={personRegionAt({ ...props, shots }, personSec)} /> : null}
       <CaptionLayer captions={props.captions} shots={shots} sec={captionSec(props.shots, sec)} styleId={styleId} />
       <AudioLayer bgm={props.bgm} sfx={props.sfx} />
     </AbsoluteFill>

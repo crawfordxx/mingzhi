@@ -1,4 +1,4 @@
-// 片尾真实渲染（约 6 秒样片）：最后一句后留白、品牌片尾画面、片尾 3 秒响度 ≤ -18 LUFS、留白里人像定格不出声。
+// 片尾真实渲染（约 6 秒样片）：最后一句后留白、品牌片尾画面、片尾响度（最后 3 秒，片尾更短时只量片尾） ≤ -18 LUFS、留白里人像定格不出声。
 // 走 composeStage 全程（结尾规划 → 配乐与音效 → 分段渲染 → 响度统一）；人像取 fixtures/talk.mp4 的前 3 秒真人口播，配乐用 ffmpeg 合成的 -14 LUFS 和弦
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync } from 'node:fs';
@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { loadTracks, trackPath } from '../src/assets/catalog.js';
-import { HOLD_SEC, OUTRO_SEC } from '../src/compose/ending.js';
+import { HOLD_SEC, OUTRO_MAX_SEC, OUTRO_MIN_SEC } from '../src/compose/ending.js';
 import { run, runBuffer } from '../src/media/exec.js';
 import { probe } from '../src/media/probe.js';
 import type { Complete } from '../src/pipeline/stages.js';
@@ -76,21 +76,22 @@ describe('品牌片尾真实渲染', () => {
       '-filter_complex', '[0][1][2]amix=inputs=3,loudnorm=I=-14', '-c:a', 'libmp3lame', trackPath(cfg, track)]);
   });
 
-  it('留白 ≥ 0.6 秒、片尾 2–3 秒、片尾 3 秒响度 ≤ -18 LUFS，整片响度仍在目标附近，片尾画面是品牌 logo', async () => {
+  it('留白 ≥ 0.6 秒、片尾 1–2.5 秒（短样片取下限 1 秒）、片尾响度（最后 3 秒，片尾更短时只量片尾） ≤ -18 LUFS，整片响度仍在目标附近，片尾画面是品牌 logo', async () => {
     const { output } = await renderSample('track');
     const info = await probe(output, cfg);
     expect(outroStart - LAST_CAPTION_END).toBeGreaterThanOrEqual(HOLD_SEC - 1e-9);
-    expect(info.durationSec - outroStart).toBeGreaterThanOrEqual(OUTRO_SEC - 0.15);
-    expect(info.durationSec - outroStart).toBeLessThanOrEqual(3 + 0.15);
+    expect(info.durationSec - outroStart).toBeGreaterThanOrEqual(OUTRO_MIN_SEC - 0.15);
+    expect(info.durationSec - outroStart).toBeLessThanOrEqual(OUTRO_MAX_SEC + 0.15);
 
-    const tail = await lufsOf(cfg.ffmpeg, output, info.durationSec - TAIL_SEC, info.durationSec);
+    const tail = await lufsOf(cfg.ffmpeg, output, Math.max(info.durationSec - TAIL_SEC, outroStart), info.durationSec);
     expect(tail).toBeLessThanOrEqual(MAX_TAIL_LUFS);
     expect(tail).toBeGreaterThan(-45);
     const whole = await lufsOf(cfg.ffmpeg, output, 0, info.durationSec);
     expect(Math.abs(whole - -14)).toBeLessThanOrEqual(1.5);
 
     // 画面：片尾末帧是品牌米色底 + 蓝色 logo；留白帧还是定格的人像，不是米色底
-    const lastFrame = Math.round((outroStart + OUTRO_SEC) * 30) - 3;
+    // 样片很短，片尾取下限 OUTRO_MIN_SEC；取片尾倒数第 3 帧（视频帧数比容器时长略少，不按 info.durationSec 算）
+    const lastFrame = Math.round((outroStart + OUTRO_MIN_SEC) * 30) - 3;
     const [bg0, bg1, bg2] = await pixel(cfg.ffmpeg, output, lastFrame, 40, 40);
     expect(Math.abs(bg0 - 0xef) + Math.abs(bg1 - 0xeb) + Math.abs(bg2 - 0xe5)).toBeLessThan(24);
     const [r, , b] = await pixel(cfg.ffmpeg, output, lastFrame, 440, 800);
@@ -110,7 +111,7 @@ describe('品牌片尾真实渲染', () => {
   it('安静的人声（约 -28 LUFS，手机录音常见电平）：片尾仍 ≤ -18 LUFS，校正只动片尾（口播不动）并写进度', async () => {
     const quiet = await renderSample('track', { voiceDb: -9 });
     const info = await probe(quiet.output, cfg);
-    const tail = await lufsOf(cfg.ffmpeg, quiet.output, info.durationSec - TAIL_SEC, info.durationSec);
+    const tail = await lufsOf(cfg.ffmpeg, quiet.output, Math.max(info.durationSec - TAIL_SEC, outroStart), info.durationSec);
     expect(tail).toBeLessThanOrEqual(MAX_TAIL_LUFS);
     // 口播响度仍统一在 -14 附近（校正没有拉低整片）
     const speech = await lufsOf(cfg.ffmpeg, quiet.output, 0.2, SPEECH_SEC - 0.1);

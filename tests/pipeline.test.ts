@@ -1,4 +1,4 @@
-import { HOLD_SEC, OUTRO_SEC } from '../src/compose/ending.js';
+import { HOLD_SEC, OUTRO_MIN_SEC, outroSecFor } from '../src/compose/ending.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -83,8 +83,8 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, qaDeps: { ...fakeQa().deps, film: undefined }, onProgress });
     const src = await probe(input, cfg);
     const out = await probe(res.output, cfg);
-    // 成片 = 剪后口播 + 最后一句后的留白 + 品牌片尾（OUTRO_SEC）；扣掉片尾后仍比原片短（留白不足 1 秒）
-    expect(out.durationSec - OUTRO_SEC).toBeLessThan(src.durationSec - 1.0);
+    // 成片 = 剪后口播 + 最后一句后的留白 + 品牌片尾（样片很短，片尾取下限 OUTRO_MIN_SEC）；扣掉片尾后仍比原片短（留白不足 1 秒）
+    expect(out.durationSec - OUTRO_MIN_SEC).toBeLessThan(src.durationSec - 1.0);
     // 渲染进度事件（compose）会连续出现多次，按相邻去重后比较
     // 整片自检不达标时会局部重做一轮（再渲染一次、再测一次），所以中段可能重复出现 compose、loudness、qa-film
     const order = events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]);
@@ -132,8 +132,10 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     // 成片 = 人像视频（剪切结果）+ 最后一句后的留白（不足 HOLD_SEC，最多补到 0.6 秒）+ 品牌片尾；
     // 留白补出的部分不超过 HOLD_SEC，所以扣掉片尾后不超过人像时长 + HOLD_SEC
     const cutSec = (await probe(join(work, 'cut.mp4'), cfg)).durationSec;
-    expect(final.durationSec - OUTRO_SEC).toBeLessThanOrEqual(cutSec + HOLD_SEC + 0.15);
-    expect(final.durationSec - OUTRO_SEC).toBeGreaterThanOrEqual(cutSec - 0.15);
+    // 片尾 = clamp(内容长 × 8%, 1, 2.5)：内容长约等于成片时长 / 1.08
+    const outroSec = outroSecFor(final.durationSec / 1.08);
+    expect(final.durationSec - outroSec).toBeLessThanOrEqual(cutSec + HOLD_SEC + 0.15);
+    expect(final.durationSec - outroSec).toBeGreaterThanOrEqual(cutSec - 0.15);
     expect(existsSync(join(work, 'cut.mp4'))).toBe(true);
     expect(events.find((e) => e.step === 'captions')?.message).toContain('改用自动分行');
     expect(events.find((e) => e.step === 'cuts')?.message).toContain('丢弃 1 条');
@@ -176,8 +178,6 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     expect(covers[0].meter).toBeInstanceOf(CostMeter); // 未传 meter 时封面也用流程内的本地 meter
     expect((await probe(output, cfg)).hasAudio).toBe(true);
   }, 240_000);
-});
-
 
   it('封面一步余额不足（假封面抛 InsufficientBalanceError）：成片照常交付，runPipeline 不抛错，结果带封面缺失原因，project.json 记 coverError 且保留自检结果', async () => {
     const cfg = { ...loadConfig({}), dataDir: mkdtempSync(join(tmpdir(), 'mz-empty-')) };
@@ -198,6 +198,8 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     expect(res.film).toEqual(project.film);
     expect(project.artifacts.final).toBe(output);
   }, 240_000);
+});
+
 describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR 与 RVM 模型）', () => {
   it('剪切后抠像换背景再渲染成片；project.json 记录背景、取景框与 person 中间文件；进度含 background、matte', async () => {
     const cfg = loadConfig({});

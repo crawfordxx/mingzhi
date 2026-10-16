@@ -1,6 +1,7 @@
 import type { TimedCaption } from '../captions/lines.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { CardScore } from '../qa/visual.js';
+import { cardTitleComplete } from './card-title.js';
 import { CATALOG } from './catalog.js';
 import { checkCardFacts } from './facts.js';
 import { STORYBOARD_MODEL } from './generate.js';
@@ -67,7 +68,7 @@ export async function reviseCard(
   const parsed = CardSpecSchema.safeParse((raw as { card?: unknown } | null)?.card);
   if (!parsed.success || parsed.data.template === 'cta') return null;
   const checked = checkCardFacts(parsed.data, allCaptions.map((c) => c.text).join(' ')).card;
-  if (!checked || (checked.template === 'hook') !== (old.template === 'hook')) return null;
+  if (!checked || (checked.template === 'hook') !== (old.template === 'hook') || !cardTitleComplete(checked)) return null;
   const clean = sanitize(withoutVisual(checked), shot.end - shot.start, availableImages);
   return clean ? keepHookNumbering(localReveal(clean, shot), old) : null;
 }

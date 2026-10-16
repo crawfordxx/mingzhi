@@ -1,4 +1,6 @@
 import type { Mood } from '../assets/catalog.js';
+import type { TimedCaption } from '../captions/lines.js';
+import { completeCardTitles } from './card-title.js';
 import { unifyListNumbering } from './numbering.js';
 import { PaletteSchema, type Palette } from '../compose/palette.js';
 import { visualLayout } from '../compose/layout.js';
@@ -16,6 +18,9 @@ export interface NormalizeResult {
   capped: number;
   /** 模型分镜违反的多样性规则（已按规则修正，见 rules.ts）；只在 fromModel 时检查 */
   ruleFixes?: string[];
+  /** 给了字幕且是模型分镜时：话说一半的卡片标题已改成完整的（记录），以及改不了的（供重试提示用） */
+  titleFixes?: string[];
+  titleIssues?: string[];
 }
 
 const MAX_HOOKS = 3;
@@ -97,8 +102,10 @@ function clampAndResolve(shots: Shot[], durationSec: number): { placed: Shot[]; 
   let dropped = 0;
   let cursor = 0;
   for (const s of sorted) {
-    const start = Math.max(round(Math.min(s.start, durationSec)), cursor);
-    const end = round(Math.min(s.end, durationSec));
+    // 提前到片尾前的 cta（placed）可以超出口播内容结尾，不裁
+    const free = isPlacedCta(s);
+    const start = Math.max(round(free ? s.start : Math.min(s.start, durationSec)), cursor);
+    const end = round(free ? s.end : Math.min(s.end, durationSec));
     if (end <= start) {
       dropped += 1;
       continue;
@@ -187,7 +194,7 @@ function mergePlain(shots: Shot[]): Shot[] {
 function ensureCtaRoom(shots: Shot[]): Shot[] {
   const last = shots[shots.length - 1];
   const prev = shots[shots.length - 2];
-  if (!prev || last.card?.template !== 'cta' || round(last.end - last.start) >= CTA_MIN_SEC) return shots;
+  if (!prev || last.card?.template !== 'cta' || isPlacedCta(last) || round(last.end - last.start) >= CTA_MIN_SEC) return shots;
   // 向下取整到帧，帧对齐后仍不短于 CTA_MIN_SEC
   const wanted = Math.floor(round(last.end - CTA_MIN_SEC) * CANVAS.fps) / CANVAS.fps;
   // 前一个是空镜头且借完不足 1 秒：整个并入 cta，再继续向更早的镜头借（镜头数递减，必然终止）
@@ -201,7 +208,13 @@ const snap = (sec: number): number => Math.round(sec * CANVAS.fps) / CANVAS.fps;
 /** 内部边界对齐到帧（1/30 秒），片头 0、片尾保持片长；对齐后为零长的镜头去掉（前后仍首尾相接） */
 function snapToFrames(shots: Shot[], durationSec: number): Shot[] {
   const end = round(durationSec);
-  const at = (sec: number, i: number): number => (i === 0 ? 0 : i === shots.length ? end : Math.min(snap(sec), end));
+  // 超出口播内容结尾的 placed cta（末镜头）起止都只对齐到帧，不压回片长
+  const tail = shots.length > 0 && isPlacedCta(shots[shots.length - 1]) && shots[shots.length - 1].end > end ? shots.length - 1 : -1;
+  const at = (sec: number, i: number): number => {
+    if (i === 0) return 0;
+    if (i === tail || i === tail + 1) return round(snap(sec));
+    return i === shots.length ? end : Math.min(snap(sec), end);
+  };
   return shots.map((s, i): Shot => ({ ...s, start: at(s.start, i), end: at(s.end, i + 1) })).filter((s) => s.end > s.start);
 }
 
@@ -257,7 +270,7 @@ function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle' | 'pale
  * 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜；同一组列表卡的编号统一（要么都编号要么都不编号）。
  * fromModel：输入是模型刚给的分镜时，再按多样性规则修正（rules.ts），reveal 从成片秒数换算成镜头内秒数；已归一化的分镜再整理时不要传（reveal 已是镜头内秒数，只按镜头时长再校验）
  */
-export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[], opts: { fromModel?: boolean } = {}): NormalizeResult {
+export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[], opts: { fromModel?: boolean; captions?: TimedCaption[] } = {}): NormalizeResult {
   if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error(`分镜归一化失败：片长无效（${durationSec}）`);
   const items = (raw as { shots?: unknown } | null)?.shots;
   const extras = readExtras(raw);
@@ -270,7 +283,9 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
   const { shots: capped, capped: cappedCount } = capLongShots(extendCta(placed, durationSec));
   const placedRules = applyPlacementRules(mergeShort(fillGaps(capped, durationSec)));
   const ruled = opts.fromModel ? applyStoryboardRules(placedRules, durationSec) : { shots: placedRules, fixes: [] };
-  const snapped = unifyListNumbering(snapToFrames(ensureCtaRoom(mergePlain(ruled.shots)), durationSec));
+  // 卡片标题要是完整意思（话说一半的按字幕改写）；需要字幕，只检查模型刚给的分镜
+  const titles = opts.fromModel && opts.captions ? completeCardTitles(ruled.shots, opts.captions) : undefined;
+  const snapped = unifyListNumbering(snapToFrames(ensureCtaRoom(mergePlain(titles?.shots ?? ruled.shots)), durationSec));
   const shots = opts.fromModel ? revealToLocal(snapped) : fitRevealToShots(snapped);
 
   return {
@@ -279,5 +294,6 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
     demoted: countCards(placed) - countCards(shots),
     capped: cappedCount,
     ...(opts.fromModel ? { ruleFixes: ruled.fixes } : {}),
+    ...(titles ? { titleFixes: titles.fixes, titleIssues: titles.unfixed } : {}),
   };
 }

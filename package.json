@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "vitest run --exclude \"tests/{compose,templates,caption-band,cover,segments,runner-e2e,broll-process,layouts-render,outro-render,storyboard-render,qa-film-render,grain-render}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts tests/cover.test.ts tests/segments.test.ts tests/runner-e2e.test.ts tests/broll-process.test.ts tests/layouts-render.test.ts tests/outro-render.test.ts tests/storyboard-render.test.ts tests/qa-film-render.test.ts tests/grain-render.test.ts --no-file-parallelism",
+    "test": "vitest run --exclude \"tests/{compose,templates,caption-band,cover,segments,runner-e2e,broll-process,layouts-render,outro-render,storyboard-render,qa-film-render,grain-render,card-wipe-render,cta-hook-render}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts tests/cover.test.ts tests/segments.test.ts tests/runner-e2e.test.ts tests/broll-process.test.ts tests/layouts-render.test.ts tests/outro-render.test.ts tests/storyboard-render.test.ts tests/qa-film-render.test.ts tests/grain-render.test.ts tests/card-wipe-render.test.ts tests/cta-hook-render.test.ts --no-file-parallelism",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "fetch-models": "node scripts/fetch-models.mjs",
     "fetch-assets": "node scripts/fetch-assets.mjs",

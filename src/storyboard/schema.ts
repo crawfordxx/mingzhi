@@ -105,6 +105,8 @@ export const BrollSchema = z.object({
   shade: z.number().min(0).max(MAX_SHADE).optional(),
   /** 换文字位置：卡片文字排在上半屏（缺省贴底排），压暗渐变同步翻转，让文字落在更暗的一端 */
   textTop: z.boolean().optional(),
+  /** 开头钩子文字：第一个镜头是全屏素材时叠一行钩子标题或数字（出片时由 compose/opening-hook 写入），前 3 秒画面与冲突同时在 */
+  hook: z.string().trim().min(1).max(30).optional(),
 }).refine((b) => (BROLL_EXTS[b.kind] as readonly string[]).includes(extOf(b.file)), '素材扩展名与类型不符');
 export type Broll = z.infer<typeof BrollSchema>;
 
@@ -126,5 +128,5 @@ export type CoverTitle = z.infer<typeof CoverTitleSchema>;
  * palette 为分镜阶段从人物背景推导的片色（compose/palette），随分镜落盘，旧分镜没有时用原配色 */
 export interface Storyboard { shots: Shot[]; bgm?: Mood; coverTitle?: CoverTitle; palette?: Palette }
 
-/** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名；grain 为颗粒质感层开关（缺省见 compose/layout 的 grainOn）；palette 为片色（缺省原配色）；durationSec 是整片时长，有 outro 时包含最后一句后的留白与片尾，镜头只覆盖口播内容 */
-export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number; bgm?: { file: string; keys: VolumeKey[]; durationSec: number }; sfx?: SfxCue[]; captionStyle?: CaptionStyleId; captionFontFile?: string; grain?: boolean; outro?: OutroProps; palette?: Palette };
+/** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名；grain 为颗粒质感层开关（缺省见 compose/layout 的 grainOn）；palette 为片色（缺省原配色）；durationSec 是整片时长，有 outro 时包含最后一句后的留白与片尾，镜头只覆盖口播内容（提前到片尾前的 CTA 例外，它可以超出内容结尾）；contentSec 是人像视频（口播内容）的时长，其后人像定格、静音，缺省取末镜头结束 */
+export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number; bgm?: { file: string; keys: VolumeKey[]; durationSec: number }; sfx?: SfxCue[]; captionStyle?: CaptionStyleId; captionFontFile?: string; grain?: boolean; outro?: OutroProps; palette?: Palette; contentSec?: number };
