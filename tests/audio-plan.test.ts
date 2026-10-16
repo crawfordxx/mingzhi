@@ -9,6 +9,7 @@ import { lastLoudSec, onsetSec, readWav, rmsPeakSec } from './helpers/wav.js';
 import { SPECS } from '../scripts/make-sfx.mjs';
 import { ANCHOR_SEC, MAX_PER_SFX, MIN_KINDS, sfxKind, sfxStats, type SfxCue } from '../src/audio/sfx-map.js';
 import { visualShots } from '../src/compose/layout.js';
+import { FRESH_LEAD_SEC, cardLead } from '../src/compose/card-carry.js';
 import { OUTRO_LOGO_SEC } from '../src/compose/ending.js';
 import type { CardSpec, Shot } from '../src/storyboard/schema.js';
 import { COUNT_SEC, COUNT_START, PURE_NUMBER as TEMPLATE_PURE_NUMBER } from '../render/templates/BigNumber.js';
@@ -286,11 +287,19 @@ describe('音效分配规则（整片）', () => {
     near(times('logo'), [46 + OUTRO_LOGO_SEC], 'logo');
     // riser 的高潮、钩子 hit：Hook.tsx 第一行高亮刷开完成；数字 hit：BigNumber 滚完
     near(times('riser'), [0 + HOOK_MARK_START + HOOK_MARK_SEC], 'riser');
-    near(times('hit'), [0, 3, 6].map((t) => t + HOOK_MARK_START + HOOK_MARK_SEC).concat([15, 36].map((t) => t + COUNT_START + COUNT_SEC)), 'hit');
+    // 数字 hit：BigNumber 滚完；从人物全屏 / 素材切进分屏的镜头（15 秒那张）卡片内部时钟提前 cardLead，hit 同步提前
+    const numberAt = (start: number): number => start + COUNT_START + COUNT_SEC - cardLead(vis, shots.findIndex((x) => x.start === start));
+    expect(cardLead(vis, shots.findIndex((x) => x.start === 15))).toBeGreaterThan(0);
+    near(times('hit'), [0, 3, 6].map((t) => t + HOOK_MARK_START + HOOK_MARK_SEC).concat([15, 36].map(numberAt)), 'hit');
     // pop：卡片入场（CardLayer 的 spring 从镜头第 0 帧起）
     near(times('pop'), shots.filter((s) => s.card && s.layout === 'split' && s.card.template !== 'hook').map((s) => s.start), 'pop');
-    // tick：数字滚动窗口内
-    times('tick').forEach((t) => { const rel = t - (t < 20 ? 15 : 36); expect(rel).toBeGreaterThan(COUNT_START); expect(rel).toBeLessThan(COUNT_START + COUNT_SEC + 1e-9); });
+    // tick：数字滚动窗口内（同样扣掉提前量）
+    times('tick').forEach((t) => {
+      const start = t < 20 ? 15 : 36;
+      const lo = start + COUNT_START - cardLead(vis, shots.findIndex((x) => x.start === start));
+      expect(t).toBeGreaterThan(lo);
+      expect(t).toBeLessThan(lo + COUNT_SEC + 1e-9);
+    });
   });
   it('sfxStats：统计种类数、各音效次数与最大重复', () => {
     const stats = sfxStats([{ sec: 0, sfx: 'pop', volume: 1 }, { sec: 1, sfx: 'pop2', volume: 1 }, { sec: 2, sfx: 'pop', volume: 1 }, { sec: 3, sfx: 'hit', volume: 1 }]);
@@ -358,5 +367,49 @@ describe('bgmEnvelope：品牌片尾', () => {
     expect(bgmEnvelope([], 10, 99)).toEqual(bgmEnvelope([], 10));
     const noCaptions = bgmEnvelope([], 8, 5);
     expect(noCaptions[noCaptions.length - 1]).toEqual({ sec: 8, db: -60 });
+  });
+});
+
+describe('从人物全屏切进分屏：卡片内部音效随 cardLead 提前', () => {
+  const full = (start: number, end: number): Shot => ({ start, end, layout: 'full' });
+  const chips: CardSpec = { template: 'chips', props: { groups: [{ label: 'g', items: [{ text: 'a', mark: 'yes' }, { text: 'b', mark: 'yes' }, { text: 'c', mark: 'yes' }, { text: 'd', mark: 'yes' }] }] } };
+  const toggles: CardSpec = { template: 'toggles', props: { rows: [{ label: 'a', on: true }, { label: 'b', on: true }] } };
+  const num: CardSpec = { template: 'bigNumber', props: { value: '650', label: '条' } };
+
+  it('提前量来自 cardLead：无卡镜头 → 分屏为 FRESH_LEAD_SEC，分屏 → 分屏与首个镜头为 0', () => {
+    const shots = [full(0, 3), split(3, 8, chips), split(8, 12, chips)];
+    expect(FRESH_LEAD_SEC).toBeCloseTo(0.4, 9);
+    expect([0, 1, 2].map((i) => cardLead(visualShots(shots), i))).toEqual([0, FRESH_LEAD_SEC, 0]);
+  });
+  it('标签弹入：触发点比镜头内秒数早 lead；扣掉后早于镜头开始的（第 0 帧已就位）不响；与模板时间点对拍 ≤ 2 帧', () => {
+    const fresh = kindOf([full(0, 3), split(3, 9, chips)], 'confirm').map((c) => c.sec);
+    const plain = kindOf([split(3, 9, chips)], 'confirm').map((c) => c.sec);
+    // 标签 i 在模板时间 FIRST_POP + i * STAGGER 弹入，镜头内秒数 = 模板时间 - lead
+    const want = [0, 1, 2, 3].map((i) => 3 + FIRST_POP + i * STAGGER - FRESH_LEAD_SEC).filter((t) => t >= 3 - 1e-9);
+    expect(plain).toHaveLength(4);
+    expect(fresh).toHaveLength(want.length);
+    fresh.forEach((t, i) => expect(Math.abs(t - want[i])).toBeLessThanOrEqual(2 / 30 + 1e-9));
+    expect(fresh.every((t) => t >= 3)).toBe(true);
+  });
+  it('开关点击：按模板看到的镜头时长（dur + lead）算节奏，再整体提前 lead', () => {
+    const fresh = kindOf([full(0, 3), split(3, 8, toggles)], 'toggle').map((c) => c.sec);
+    const want = clickTimes(2, 5 + FRESH_LEAD_SEC).map((t) => 3 + t - FRESH_LEAD_SEC);
+    expect(fresh).toHaveLength(2);
+    fresh.forEach((t, i) => expect(Math.abs(t - want[i])).toBeLessThanOrEqual(2 / 30 + 1e-9));
+    // 同一张卡跟在分屏后面（没有提前）：照旧
+    expect(kindOf([split(0, 3, chips), split(3, 8, toggles)], 'toggle').map((c) => c.sec)).toEqual(clickTimes(2, 5).map((t) => 3 + t));
+  });
+  it('数字卡：ticks 与最后一下 hit 同步提前；入场 pop 仍在镜头第 0 帧', () => {
+    const cues = sfxCues([full(0, 3), split(3, 9, num)]);
+    const hit = cues.find((c) => sfxKind(c.sfx) === 'hit');
+    expect(hit?.sec).toBeCloseTo(3 + COUNT_START + COUNT_SEC - FRESH_LEAD_SEC, 3);
+    cues.filter((c) => sfxKind(c.sfx) === 'tick').forEach((c) => expect(c.sec).toBeGreaterThanOrEqual(3));
+    expect(cues.find((c) => sfxKind(c.sfx) === 'pop')?.sec).toBe(3);
+  });
+  it('从全屏 B-roll 切进分屏同样提前：4 个标签只剩最后一个（模板时间 0.51 秒 - 0.4）还在镜头内', () => {
+    const broll: Shot = { start: 1, end: 3, layout: 'broll', broll: { file: 'broll/a.mp4', kind: 'video', focal: { x: 0.5, y: 0.5 } } };
+    const after = kindOf([split(0, 1, chips), broll, split(3, 9, chips)], 'confirm').map((c) => c.sec).filter((t) => t >= 3);
+    expect(after).toHaveLength(1);
+    expect(Math.abs(after[0] - (3 + FIRST_POP + 3 * STAGGER - FRESH_LEAD_SEC))).toBeLessThanOrEqual(2 / 30 + 1e-9);
   });
 });

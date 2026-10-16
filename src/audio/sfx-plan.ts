@@ -1,3 +1,4 @@
+import { cardLead } from '../compose/card-carry.js';
 import { visualLayout, visualShots } from '../compose/layout.js';
 import { OUTRO_LOGO_SEC } from '../compose/ending.js';
 import { HOOK_HIT_SEC } from '../../render/templates/timing.js';
@@ -20,6 +21,7 @@ const round3 = (n: number): number => Math.round(n * 1000) / 1000;
  * - CTA 点击：render/templates/Cta.tsx 的 ctaClickTimes（按函数结果对拍）
  * - 标签弹入：render/templates/Chips.tsx 的 FIRST_POP + 序号 * STAGGER（对拍 TIMING.chips*）
  * - 数字滚动：render/templates/BigNumber.tsx 的 PURE_NUMBER 与 COUNT_START/COUNT_SEC（tick 落在窗内，滚完落 hit）
+ * - 卡片内部时钟提前：compose/card-carry 的 cardLead（从人物全屏切进分屏时提前 FRESH_LEAD_SEC，内部触发点同步提前）
  * - 卡片入场：render/layers/CardLayer.tsx 的 spring 从镜头第 0 帧起，pop 对准镜头开始
  * - 钩子 hit：render/templates/timing.ts 的 HOOK_HIT_SEC（Hook.tsx 第一行高亮刷开完成的时刻，同一常量驱动动画）
  */
@@ -89,11 +91,16 @@ function startIntents(shot: Shot & { card: CardSpec }): SfxIntent[] {
   return shot.layout === 'split' || shot.layout === 'overlay' ? [intent(0, 'pop', VOLUME.pop)] : [];
 }
 
-/** 卡片内的音效意图（整片时间轴）；晚于镜头结束的点丢弃 */
-function cardIntents(shot: Shot): SfxIntent[] {
+/**
+ * 卡片内的音效意图（整片时间轴）；晚于镜头结束的点丢弃。
+ * 从人物全屏切进分屏时卡片内部时钟提前 lead 秒（cardLead）：内部动作的触发点同步提前，扣掉 lead 后早于镜头开始的（第 0 帧已就位的内容）不响；
+ * 内部动作的节奏按模板实际看到的镜头时长（dur + lead）算
+ */
+function cardIntents(shot: Shot, lead: number): SfxIntent[] {
   if (!shot.card) return [];
   const dur = shot.end - shot.start;
-  return [...startIntents({ ...shot, card: shot.card }), ...innerIntents(shot.card, dur)]
+  const inner = innerIntents(shot.card, dur + lead).map((c) => ({ ...c, at: c.at - lead })).filter((c) => c.at >= -EPS);
+  return [...startIntents({ ...shot, card: shot.card }), ...inner]
     .filter((c) => c.at < dur)
     .map((c) => ({ ...c, at: shot.start + c.at }));
 }
@@ -139,6 +146,7 @@ export interface SfxPlanOptions {
  */
 export function sfxCues(shots: Shot[], opts: SfxPlanOptions = {}): SfxCue[] {
   const logo = opts.outroStartSec === undefined ? [] : [intent(opts.outroStartSec + OUTRO_LOGO_SEC, 'logo', VOLUME.logo)];
-  const all = dedupe([...shots.flatMap(cardIntents), ...brollIntents(shots), ...logo].map((c) => ({ ...c, at: round3(c.at) })));
+  const visual = visualShots(shots);
+  const all = dedupe([...shots.flatMap((shot, i) => cardIntents(shot, cardLead(visual, i))), ...brollIntents(shots), ...logo].map((c) => ({ ...c, at: round3(c.at) })));
   return assignVariants([...all, ...riserIntent(shots)]);
 }
