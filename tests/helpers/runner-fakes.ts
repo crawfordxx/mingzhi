@@ -11,6 +11,7 @@ import { RVM_FILE } from '../../src/matting/rvm.js';
 import type { CoverDeps } from '../../src/pipeline/finish-step.js';
 import type { MediaDeps } from '../../src/pipeline/media-deps.js';
 import type { QaDeps } from '../../src/pipeline/qa-step.js';
+import { DEFAULT_OUTRO } from '../../src/compose/ending.js';
 import { EventBus, type WorkEvent } from '../../src/workspace/events.js';
 import type { RunnerCtx } from '../../src/workspace/runner.js';
 import { SpaceStore, type SpaceSettings } from '../../src/workspace/store.js';
@@ -31,8 +32,8 @@ const STORYBOARD = { bgm: 'tech', coverTitle: { title: '怎么存钱', subtitle:
 ] };
 
 export interface Calls {
-  llm: string[]; renderCut: unknown[][]; matte: string[]; composite: { bg: string; keep: unknown; cut: string; fgr: string; matte: string }[]; segments: string[]; concat: string[][]; cutInputs: string[]; audio: number;
-  qaOnly: (number[] | undefined)[]; qaKeep: (number[] | undefined)[]; hard: string[]; covers: { style: string; workDir: string }[]; images: string[]; videos: string[];
+  llm: string[]; renderCut: unknown[][]; matte: string[]; composite: { bg: string; keep: unknown; cut: string; fgr: string; matte: string }[]; segments: string[]; grain: (boolean | undefined)[]; concat: string[][]; cutInputs: string[]; audio: number;
+  qaOnly: (number[] | undefined)[]; qaKeep: (number[] | undefined)[]; hard: string[]; film: string[]; filmMetaDir: (string | undefined)[]; meanColor: string[]; covers: { style: string; workDir: string }[]; images: string[]; videos: string[];
 }
 
 const json = (file: string): Record<string, unknown> => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
@@ -59,6 +60,7 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
     extractWav: async (_i, wav) => { writeFileSync(wav, 'wav'); },
     transcribe: () => ({ durationSec: SOURCE_SEC, segments: SEGMENTS, tokens: TOKENS }),
     renderCut: async (input, keep, output) => { calls.cutInputs.push(input); calls.renderCut.push(keep); writeFileSync(output, JSON.stringify({ kind: 'cut', keep, durationSec: keepSec(keep) })); },
+    subject: async () => hooks.subject ?? null,
     matte: async (o) => {
       calls.matte.push(o.input);
       const src = json(o.input);
@@ -75,7 +77,7 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
     },
     segments: {
       withBundle: (_dir, fn) => fn('fake://bundle'),
-      renderVideo: async (o) => { calls.segments.push(`${o.startFrame}-${o.endFrame}`); await hooks.onSegment?.(); writeFileSync(o.output, `${o.startFrame}-${o.endFrame}`); },
+      renderVideo: async (o) => { calls.segments.push(`${o.startFrame}-${o.endFrame}`); calls.grain.push(o.props.grain); await hooks.onSegment?.(); writeFileSync(o.output, `${o.startFrame}-${o.endFrame}`); },
       renderAudio: async (o) => { calls.audio += 1; writeFileSync(o.output, 'aac'); },
       concat: async (o) => { writeFileSync(o.output, JSON.stringify({ kind: 'final', files: o.files.length, durationSec: o.durationSec })); },
     },
@@ -85,6 +87,8 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
       writeFileSync(o.output, JSON.stringify({ kind: 'source', clips: o.clips.map((c) => c.path), durationSec: layoutClips(o.clips.map((c) => c.durationSec)).totalSec }));
     },
     loudness: async (input, output) => { copyFileSync(input, output); return { before: -20, after: -14, truePeak: -2, mode: 'linear' }; },
+    // 人物背景平均色：偏暖的固定值（素材加工会据此做白平衡微调）
+    meanColor: async (_ffmpeg, file) => { calls.meanColor.push(file); return { r: 0.72, g: 0.52, b: 0.3 }; },
   };
 }
 
@@ -97,6 +101,8 @@ const fakeQa = (calls: Calls): QaDeps => ({
     return { storyboard: o.storyboard, report: targets.map((shotIndex) => ({ shotIndex, scores: [score], revised: 0, passed: true })) };
   },
   hardChecks: async (video) => { calls.hard.push(video); return [{ id: 'fps', ok: true, detail: '30 fps' }]; },
+  // 整片自检：假成片不是真视频，度量一律达标（不触发局部重做）；记下被检查的成片
+  film: async (o) => { calls.film.push(o.video); calls.filmMetaDir.push(o.metaDir); return { ok: true, durationSec: 0, metrics: [], templates: [], skipped: [] }; },
 });
 
 const fakeCover = (calls: Calls): CoverDeps => ({
@@ -115,17 +121,18 @@ const fakeCover = (calls: Calls): CoverDeps => ({
 const fakeBroll = (calls: Calls) => (meter: CostMeter): BrollDeps => ({
   screenshot: async () => { throw new Error('不应截图'); },
   search: async () => [],
-  image: async (prompt, out) => { calls.images.push(prompt); writeFileSync(out, 'jpg'); meter.addTask('img', 0.2, '生图'); return { cost: 0.2 }; },
-  video: async (prompt, out) => { calls.videos.push(prompt); writeFileSync(out, 'mp4'); meter.addTask('video', 2.4, '视频'); return { cost: 2.4 }; },
+  image: async (prompt, out) => { calls.images.push(prompt); writeFileSync(out, 'jpg'); meter.addTask('img', 0.2, '生图'); return { cost: 0.2, url: 'https://img.example/gen.jpg' }; },
+  video: async (prompt, _imageUrl, out) => { calls.videos.push(prompt); writeFileSync(out, 'mp4'); meter.addTask('video', 2.4, '视频'); return { cost: 2.4 }; },
 });
 
-export interface Hooks { onSegment?: () => Promise<void> | void; beforeComposite?: () => Promise<void> | void; /** 多段口播时假模型给出的段落顺序 */ order?: number[] }
+export interface Hooks { /** 不换背景时假的人物取景结果 */ subject?: { top: number; bottom: number; left: number; right: number } | null; onSegment?: () => Promise<void> | void; beforeComposite?: () => Promise<void> | void; /** 多段口播时假模型给出的段落顺序 */ order?: number[] }
 
 export interface Fixture { ctx: RunnerCtx; store: SpaceStore; spaceId: string; calls: Calls; events: WorkEvent[]; hooks: Hooks; reset: () => void; cfg: AppConfig }
 
-export const DEFAULT_SETTINGS: SpaceSettings = { background: { kind: 'preset', id: 'study' }, captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 1 };
+// 和新建项目一样带片尾设置；测旧项目（没有片尾字段）时传 { outro: undefined }
+export const DEFAULT_SETTINGS: SpaceSettings = { background: { kind: 'preset', id: 'study' }, captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 1, outro: { ...DEFAULT_OUTRO } };
 
-const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], concat: [], cutInputs: [], audio: 0, qaOnly: [], qaKeep: [], hard: [], covers: [], images: [], videos: [] });
+const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], grain: [], concat: [], cutInputs: [], audio: 0, qaOnly: [], qaKeep: [], hard: [], film: [], filmMetaDir: [], meanColor: [], covers: [], images: [], videos: [] });
 
 /** 建一个临时项目与全部假依赖；reset() 清空调用记录（在 v1 跑完之后调用，只看修改版本做了什么） */
 export function makeFixture(settings: Partial<SpaceSettings> = {}, inputSecs: number[] = [SOURCE_SEC]): Fixture {

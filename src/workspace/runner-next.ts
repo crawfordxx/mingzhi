@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateBackground } from '../background/resolve.js';
 import type { TimedCaption } from '../captions/lines.js';
@@ -10,19 +10,25 @@ import { validateBroll } from '../pipeline/broll-step.js';
 import { validateStyles } from '../pipeline/finish-step.js';
 import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
-import { brollStage, composeStage, finalQaStage, qaCardsStage } from '../pipeline/stages.js';
+import { brollStage, composeStage, filmQaStage, finalQaStage, paletteOf, placeEnding, qaCardsStage, whiteBalanceOf, type BrollStageExtra } from '../pipeline/stages.js';
+import type { BrollMark } from '../pipeline/broll-redo.js';
+import type { BeatRecord } from '../pipeline/broll-beats.js';
+import { writeStoryboardCredits } from '../broll/credit-store.js';
+import { DEFAULT_OUTRO } from '../compose/ending.js';
 import type { SegmentedResult } from '../compose/segments.js';
 import type { CardQaEntry } from '../qa/visual.js';
 import type { CardSpec, Storyboard } from '../storyboard/schema.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
-import { ANALYSIS_FILE, COVER_FILES, FINAL_FILE, linkBroll, linkFile, linkIfExists, readJson, STATE_FILE, type BaseAnalysis } from './runner-files.js';
-import { makeCover } from './runner-cover.js';
+import { ANALYSIS_FILE, COVER_FILES, FINAL_FILE, MARKS_FILE, linkBroll, linkFile, linkIfExists, readJson, STATE_FILE, type BaseAnalysis } from './runner-files.js';
+import { coverWarnings, makeCover } from './runner-cover.js';
+import type { CoverResult } from '../pipeline/finish-step.js';
 import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, resolveBg, reusePerson, sameBackground, type Person } from './runner-media.js';
 import { recut, retime, writeAss } from './runner-retime.js';
 
-interface Change { next: VersionState; ops: EditOp[]; dropped: string[]; stages: Set<Stage>; newCover: boolean }
-interface Parent { n: number; dir: string; state: VersionState; project: ProjectFile | null; hashes?: string[] }
-interface Made extends Person { plan: CutPlan; captions: TimedCaption[]; storyboard: Storyboard }
+/** legacyEnding：P7 之前的旧项目（项目设置与父版本都没有片尾字段），修改版本不加品牌片尾、CTA 不按新规则挪位 */
+interface Change { next: VersionState; ops: EditOp[]; dropped: string[]; stages: Set<Stage>; newCover: boolean; legacyEnding: boolean }
+interface Parent { n: number; dir: string; state: VersionState; project: ProjectFile | null; hashes?: string[]; contents?: string[] }
+interface Made extends Person { plan: CutPlan; captions: TimedCaption[]; storyboard: Storyboard; brollBeats?: BeatRecord[] }
 
 const STAGE_LABEL: Record<Stage, string> = { cut: '剪切', matte: '换背景', captions: '字幕', storyboard: '分镜', broll: '素材', compose: '成片' };
 
@@ -33,7 +39,7 @@ function readParent(env: VersionEnv, n: number): Parent {
   if (meta.status !== 'done' || !existsSync(join(dir, STATE_FILE))) throw new Error(`v${n} 还没有完成，不能在它上面修改`);
   const project = existsSync(join(dir, 'project.json')) ? readJson<ProjectFile>(join(dir, 'project.json'), `v${n} 的工程文件`) : null;
   const state = readJson<VersionState>(join(dir, STATE_FILE), `v${n} 的版本状态`);
-  return { n, dir, state, project, ...(meta.shotHashes ? { hashes: meta.shotHashes } : {}) };
+  return { n, dir, state, project, ...(meta.shotHashes ? { hashes: meta.shotHashes } : {}), ...(meta.contentHashes ? { contents: meta.contentHashes } : {}) };
 }
 
 /** 校验并应用修改；付费开关与预算以项目当前设置为准 */
@@ -41,9 +47,10 @@ function planChange(env: VersionEnv, parent: VersionState, raw: EditOp[]): Chang
   const { ops, dropped } = validateOps(raw, parent);
   if (raw.length > 0 && ops.length === 0) throw new Error(`没有可执行的修改：${dropped.join('；')}`);
   const applied = applyOps(parent, ops);
-  const { budgetYuan, broll, maxVideos } = env.space.settings;
-  const next = { ...applied, settings: { ...applied.settings, budgetYuan, broll, maxVideos } };
-  return { next, ops, dropped, stages: stagesFor(ops), newCover: next.coverStyle !== parent.coverStyle };
+  const { budgetYuan, broll, maxVideos, grain, outro } = env.space.settings;
+  const next = { ...applied, settings: { ...applied.settings, budgetYuan, broll, maxVideos, ...(grain === undefined ? {} : { grain }), ...(outro === undefined ? {} : { outro }) } };
+  const legacyEnding = outro === undefined && parent.settings.outro === undefined;
+  return { next, ops, dropped, stages: stagesFor(ops), newCover: next.coverStyle !== parent.coverStyle, legacyEnding };
 }
 
 function editMessage(summary: string, c: Change): string {
@@ -60,7 +67,7 @@ function editMessage(summary: string, c: Change): string {
 /** project.json 先沿用父版本的分析与制作结果（本版重跑的步骤会覆盖），账目、自检、封面、素材记录与文件路径不沿用 */
 function seedProject(env: VersionEnv, p: ProjectFile | null): void {
   if (!p) return;
-  const { version: _v, input: _i, createdAt: _c, artifacts: _a, costs: _co, qa: _q, cover: _cv, broll: _b, ...rest } = p;
+  const { version: _v, input: _i, createdAt: _c, artifacts: _a, costs: _co, qa: _q, cover: _cv, coverError: _ce, broll: _b, ...rest } = p;
   env.record(rest);
 }
 
@@ -76,10 +83,23 @@ function validateNext(args: PipelineArgs, c: Change, parent: VersionState): void
 /** 人像：没背景用剪切结果；没重剪也没换背景整版沿用；否则从 base 的整条抠像图层按本版剪辑方案合成（不再跑抠像推理，除非图层还不存在） */
 async function nextPerson(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, plan: CutPlan): Promise<Person> {
   const spec = c.next.settings.background;
-  if (!spec) return cutAsPerson(env, join(env.dir, 'cut.mp4'));
+  if (!spec) return cutAsPerson(env, args, join(env.dir, 'cut.mp4'));
   if (!c.stages.has('cut') && !c.stages.has('matte')) return reusePerson(env, p.dir, p.project);
   const bgPath = await resolveBg(env, args, spec, p.project, p.dir);
   return compositePerson(env, args, plan.keep, bgPath);
+}
+
+/**
+ * 片色跟随背景（与 CLI 同口径：人物背景图，没背景时用人像第一帧）：背景换了（含去掉背景）就重新取样，写进分镜随版本落盘；
+ * 取样失败时去掉片色（按默认配色），不沿用和新背景不配的旧片色。背景没变原样返回
+ */
+async function repaint(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, person: Person, storyboard: Storyboard): Promise<Storyboard> {
+  if (sameBackground(c.next.settings.background, p.state.settings.background)) return storyboard;
+  // 去掉背景时工程文件里还留着父版本的背景记录，只认本版的设置
+  const bg = c.next.settings.background ? env.record({}).background?.path : undefined;
+  const palette = await paletteOf(args, bg ?? person.person);
+  const { palette: _old, ...rest } = storyboard;
+  return palette ? { ...rest, palette } : rest;
 }
 
 /** 剪切 → 人像 → 字幕与分镜（剪辑类修改时平移）→ 素材；不需要重跑的从父版本引用 */
@@ -91,12 +111,43 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
   const person = await nextPerson(env, args, p, c, plan);
   const timed = recutting ? retime(env, a, p.state, c.next, plan) : { captions: c.next.captions, storyboard: c.next.storyboard };
   if (!recutting) env.record({ artifacts: { ass: writeAss(env, a, timed.captions) } });
+  // CTA 提前（幂等：剪辑改了时间线或片尾设置变了会重新放置；已提前的 CTA 先还原再放；旧项目不挪）；换了背景就按新背景重算片色
+  const ended = c.legacyEnding ? timed.storyboard : placeEnding(args, timed.storyboard, timed.captions, plan.outputDurationSec);
+  const placed = await repaint(env, args, p, c, person, ended);
   // 素材名额先让给没改动的卡片（它们的视频已经付过费），改动过的卡片排在后面
-  const storyboard = c.stages.has('broll')
-    ? await brollStage(args, timed.storyboard, plan.outputDurationSec, env.base, env.complete, changedShots(p.state, timed.storyboard))
-    : timed.storyboard;
+  const storyboard = c.stages.has('broll') ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, {
+    captions: timed.captions, deferShots: changedShots(p.state, placed), edit: brollEdit(p, c),
+    whiteBalance: await whiteBalanceOf(args, env.record({}).background?.path ?? person.person),
+  }) : placed;
   linkBroll(storyboard, env.base, env.dir);
-  return { ...person, plan, captions: timed.captions, storyboard };
+  // 节拍记录：素材步骤跑了用它更新后的，否则沿用父版本
+  const brollBeats = c.stages.has('broll') ? env.record({}).broll?.beats : parentBeats(p);
+  return { ...person, plan, captions: timed.captions, storyboard, ...(brollBeats ? { brollBeats } : {}) };
+}
+
+/**
+ * 修改版本的 B-roll 重做请求：「换一张 B-roll」指向的镜头（按镜头中点的成片秒数定位，素材步骤前的 CTA 放置不影响）、
+ * 上一版素材面板的标记（remove 去掉、replace 换一张）与上一版的节拍记录。不重新规划节拍
+ */
+function brollEdit(p: Parent, c: Change): NonNullable<BrollStageExtra['edit']> {
+  const shots = c.next.storyboard.shots;
+  const redoAt = c.ops.flatMap((o) => (o.type === 'replaceBroll' && shots[o.shotIndex] ? [(shots[o.shotIndex].start + shots[o.shotIndex].end) / 2] : []));
+  return { redoAt, marks: readMarks(p.dir), records: parentBeats(p) ?? [] };
+}
+
+/** 父版本的节拍记录：版本状态里的为准，旧版本退回 project.json */
+const parentBeats = (p: Parent): BeatRecord[] | undefined => p.state.brollBeats ?? p.project?.broll?.beats;
+
+/** 上一版素材面板的标记（credits-marks.json，键是素材相对路径）；没有或损坏当作没有标记 */
+function readMarks(dir: string): Record<string, BrollMark> {
+  const file = join(dir, MARKS_FILE);
+  if (!existsSync(file)) return {};
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, { action?: unknown }>;
+    return Object.fromEntries(Object.entries(raw).flatMap(([k, v]) => (v?.action === 'replace' || v?.action === 'remove' ? [[k, v.action]] : [])));
+  } catch {
+    return {};
+  }
 }
 
 /** 键排序后序列化：同一张卡片不因字段顺序不同被当成改过 */
@@ -145,11 +196,16 @@ function checkChanged(env: VersionEnv, args: PipelineArgs, parent: VersionState,
   return qaCardsStage(args, env.meter, m.storyboard, m.captions, env.complete, changed, userCards(c.ops, m.storyboard, changed));
 }
 
-interface Rendered { changed: number[]; hashes?: string[] }
+interface Rendered { changed: number[]; rerendered: number[]; hashes?: string[]; contents?: string[]; outroStartSec?: number }
 
-/** 画面和父版本比：父版本没记哈希（旧数据）时退回实际重渲的镜头 */
-function diffWithParent(parentHashes: string[] | undefined, res: SegmentedResult): number[] {
-  return parentHashes ? changedAgainst(parentHashes, res.hashes) : res.rendered;
+/** 实际重渲的镜头（含交叉淡出波及的）：和父版本的渲染哈希比；父版本没记哈希（旧数据）时退回本次实际重渲的镜头 */
+function rerenderedAgainst(p: Parent, res: SegmentedResult): number[] {
+  return p.hashes ? changedAgainst(p.hashes, res.hashes) : res.rendered;
+}
+
+/** 用户可见的改动：和父版本的内容哈希比（不含仅因上一张卡淡出而重渲的镜头）；父版本没有内容哈希（旧数据）时退回渲染哈希的比较 */
+function changedAgainstParent(p: Parent, res: SegmentedResult): number[] {
+  return p.contents ? changedAgainst(p.contents, res.contents) : rerenderedAgainst(p, res);
 }
 
 /** 有阶段要跑才渲染（未改动的镜头命中分段缓存）；只换封面或回退时直接引用父版本成片，画面与父版本相同 */
@@ -158,7 +214,7 @@ async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change,
   if (c.stages.size === 0) {
     linkFile(join(p.dir, FINAL_FILE), final);
     env.record({ artifacts: { output: final, final } });
-    return { changed: [], ...(p.hashes ? { hashes: p.hashes } : {}) };
+    return { changed: [], rerendered: [], ...(p.hashes ? { hashes: p.hashes } : {}), ...(p.contents ? { contents: p.contents } : {}) };
   }
   const input = {
     person: m.person, subject: m.subject, captions: m.captions, storyboard: m.storyboard, outputDurationSec: m.plan.outputDurationSec,
@@ -166,33 +222,41 @@ async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change,
   };
   const res = await composeStage(args, input, env.complete);
   env.complete('compose', `分段渲染：重渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
-  return { changed: diffWithParent(p.hashes, res), hashes: res.hashes };
+  // 修改版本只做整片自检、不局部重做：用户点名的改动不被自检改掉
+  await filmQaStage(args, input, res, env.complete, false, env.base);
+  return { changed: changedAgainstParent(p, res), rerendered: rerenderedAgainst(p, res), hashes: res.hashes, contents: res.contents, ...(res.outroStartSec === undefined ? {} : { outroStartSec: res.outroStartSec }) };
 }
 
 /** 封面只在换了封面风格时重做，否则引用父版本的封面 */
-async function cover(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, m: Made): Promise<void> {
+async function cover(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, m: Made): Promise<CoverResult> {
   if (c.newCover) return makeCover(env, args, c.next.coverStyle, m.storyboard, m.captions, m.person);
   const [cover34, cover43] = COVER_FILES.map((f) => join(env.dir, f));
   const linked = COVER_FILES.filter((f) => linkIfExists(join(p.dir, f), join(env.dir, f)));
   if (linked.length === COVER_FILES.length) env.record({ artifacts: { cover34, cover43 }, ...(p.project?.cover ? { cover: p.project.cover } : {}) });
+  // 父版本没有封面（当时没生成成功）：这一版同样没有，沿用它的原因
+  return linked.length < COVER_FILES.length && p.project?.coverError ? { missing: p.project.coverError } : {};
 }
 
-/** 修改版本：校验应用 → 只重跑受影响的阶段 → 只检查改动过的卡片 → 渲染（复用缓存）→ 成片检查（每版都做）→ 封面 */
+/** 修改版本：校验应用 → 只重跑受影响的阶段 → 只检查改动过的卡片 → 渲染（复用缓存）→ 整片自检（只检查）→ 成片检查（每版都做）→ 封面 */
 export async function produceNext(env: VersionEnv, input: string, parentN: number, raw: EditOp[], summary: string): Promise<VersionOutcome> {
   const p = readParent(env, parentN);
   const c = planChange(env, p.state, raw);
   seedProject(env, p.project);
   env.complete('edit', editMessage(summary, c));
-  const args = pipelineArgs(env, input, c.next, c.newCover ? { style: c.next.coverStyle } : false);
+  const base = pipelineArgs(env, input, c.next, c.newCover ? { style: c.next.coverStyle } : false);
+  // 旧项目保持原行为：不加品牌片尾（CTA 也不挪，见 remake）
+  const args = c.legacyEnding ? { ...base, outro: { ...DEFAULT_OUTRO, enabled: false } } : base;
   validateNext(args, c, p.state);
   const made = await remake(env, args, p, c);
   const { storyboard, cards } = await checkChanged(env, args, p.state, c, made);
   const m = { ...made, storyboard };
   const rendered = await render(env, args, p, c, m);
-  await finalQaStage(args, join(env.dir, FINAL_FILE), storyboard, cards, env.complete);
-  await cover(env, args, p, c, m);
+  await finalQaStage(args, join(env.dir, FINAL_FILE), storyboard, cards, env.complete, rendered.outroStartSec);
+  const coverResult = await cover(env, args, p, c, m);
   env.record({ plan: m.plan, captions: m.captions, storyboard });
   const qaScore = qaScoreOf(cards) ?? env.space.versions.find((v) => v.n === parentN)?.qaScore;
-  const state = { ...c.next, plan: m.plan, captions: m.captions, storyboard };
-  return { state, changedShots: rendered.changed, ...(rendered.hashes ? { shotHashes: rendered.hashes } : {}), ...(qaScore !== undefined ? { qaScore } : {}) };
+  // 授权记录按卡片自检之后的最终分镜写
+  writeStoryboardCredits(storyboard, env.base, env.dir);
+  const state = { ...c.next, plan: m.plan, captions: m.captions, storyboard, ...(m.brollBeats ? { brollBeats: m.brollBeats } : {}) };
+  return { state, changedShots: rendered.changed, rerenderedShots: rendered.rerendered, ...(rendered.hashes ? { shotHashes: rendered.hashes } : {}), ...(rendered.contents ? { contentHashes: rendered.contents } : {}), ...(qaScore !== undefined ? { qaScore } : {}), ...coverWarnings(coverResult) };
 }

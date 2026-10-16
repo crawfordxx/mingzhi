@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_PALETTE } from '../src/compose/palette.js';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -206,6 +207,14 @@ describe('qaCards', () => {
     expect(withBundle).toHaveBeenCalledTimes(1);
     expect(made.files).toHaveLength(2);
     expect(made.files.some((f) => existsSync(f))).toBe(false);
+  });
+  it('三联图按这条片的片色渲染（暗色片打分的是深色玻璃卡）；没有片色时不传', async () => {
+    const palette = { ...DEFAULT_PALETTE, tone: 'dark' as const, stage: '#101418' };
+    await run(fake([sc(9), sc(9)]).client, meter(), { ...storyboard, palette });
+    expect(vi.mocked(renderCardFrames).mock.calls.map((c) => c[5])).toEqual([palette, palette]);
+    vi.mocked(renderCardFrames).mockClear();
+    await run(fake([sc(9), sc(9)]).client);
+    expect(vi.mocked(renderCardFrames).mock.calls.map((c) => c[5])).toEqual([undefined, undefined]);
   });
   it('打包失败：不抛出，分镜原样返回，每个目标镜头标注并 passed=false', async () => {
     vi.mocked(withBundle).mockRejectedValueOnce(new Error('webpack 炸了'));

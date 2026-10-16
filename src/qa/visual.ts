@@ -95,7 +95,8 @@ const captionsIn = (captions: TimedCaption[], shot: Shot): TimedCaption[] => cap
 
 /** 评分一个版本：复用打包渲染三帧再打分，打完分就删掉三联图 */
 async function evaluate(opts: QaCardsOptions, serveUrl: string, shot: Shot, card: CardSpec): Promise<Version> {
-  const strip = await renderCardFrames(opts.workDir, card, shot.end - shot.start, opts.ffmpeg, serveUrl);
+  // 按这条片的片色渲染（暗色片是深色玻璃卡），模型打分的画面与成片一致
+  const strip = await renderCardFrames(opts.workDir, card, shot.end - shot.start, opts.ffmpeg, serveUrl, opts.storyboard.palette);
   try {
     return { card, score: await scoreCard(opts.client, strip, card, shot.end - shot.start) };
   } finally {

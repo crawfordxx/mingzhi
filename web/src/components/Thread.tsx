@@ -3,7 +3,8 @@
  * 版本（服务端时间）与对话（本机记录）按时间先后排在一起。
  * 首版 = 没有父版本的版本（首版失败或取消后重开时可能是 v2）；失败的首版尝试在直播卡上方折叠成一行。
  */
-import { useEffect, type RefObject } from 'react';
+import { AnimatePresence } from 'motion/react';
+import { useCallback, useEffect, useState, type RefObject } from 'react';
 import type { Options, Space, VersionMeta, VersionState } from '../api';
 import type { ShotInfo } from '../lib/liveModel';
 import { splitMessage } from '../lib/shots';
@@ -13,7 +14,9 @@ import { isFirst } from '../lib/versions';
 import type { Replay } from '../live';
 import type { Conversation } from '../useConversation';
 import type { Runs } from '../useRuns';
+import type { Notify } from '../useWorkbench';
 import { backgroundLabel } from './SetupCard';
+import { CreditsDrawer } from './CreditsDrawer';
 import { InlineOptions } from './InlineOptions';
 import { LiveCard } from './LiveCard';
 import { Msg, Who } from './Msg';
@@ -82,9 +85,12 @@ interface Props {
   stream: RefObject<HTMLDivElement>; onSeek: (n: number, sec: number) => void;
   /** 剪辑直播卡跟随的版本（首版或正在进行的首版尝试） */
   liveN?: number;
+  notify: Notify;
 }
 
-export function Thread({ space, options, runs, convo, replay, stream, onSeek, liveN }: Props) {
+export function Thread({ space, options, runs, convo, replay, stream, onSeek, liveN, notify }: Props) {
+  const [sources, setSources] = useState<{ n: number; opener: HTMLElement }>();
+  const closeSources = useCallback(() => setSources(undefined), []);
   // 首版排队时还没建版本，直播卡也先出来（显示排队中）
   const tries = space.versions.filter((v) => isFirst(v) && v.status === 'failed' && v.n !== liveN);
   const items = itemsOf(space, convo.turns);
@@ -105,7 +111,7 @@ export function Thread({ space, options, runs, convo, replay, stream, onSeek, li
         said={isFirst(meta) ? undefined : saidFor(convo.turns, meta.n) ?? meta.summary}
         parent={meta.parent !== undefined ? done.find((v) => v.n === meta.parent) : undefined} totalShots={runs.stateOf(meta.n)?.storyboard.shots.length}
         events={runs.eventsOf(meta.n)} viewing={runs.view === meta.n} latest={meta.n === latest} exporting={runs.exporting === meta.n} busy={busy}
-        onView={() => runs.setView(meta.n)} onExport={() => void runs.exportVersion(meta.n)} onRevert={() => void runs.revert(meta.n)} />
+        onView={() => runs.setView(meta.n)} onExport={() => void runs.exportVersion(meta.n)} onRevert={() => void runs.revert(meta.n)} onSources={(opener) => setSources({ n: meta.n, opener })} />
     : <RunCard meta={meta} events={runs.eventsOf(meta.n)} onCancel={runs.active === meta.n ? () => void runs.cancel() : undefined} backdrop={backdrop}
         shots={shotsOf(runs.stateOf(meta.parent ?? meta.n - 1))} hot={hotOf(convo.turns, meta.n)} />);
 
@@ -126,6 +132,9 @@ export function Thread({ space, options, runs, convo, replay, stream, onSeek, li
               : <AiReply turn={it.turn} busy={busy} onPick={(i) => convo.pick(it.turn as AiTurn, i)} />}
         </Msg>
       ))}
+      <AnimatePresence>
+        {sources && <CreditsDrawer key={sources.n} opener={sources.opener} spaceId={space.id} version={sources.n} notify={notify} refresh={runs.refresh} onClose={closeSources} />}
+      </AnimatePresence>
     </>
   );
 }

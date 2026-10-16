@@ -1,10 +1,12 @@
 import type { TimedCaption } from '../captions/lines.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { CardScore } from '../qa/visual.js';
+import { cardTitleComplete } from './card-title.js';
 import { CATALOG } from './catalog.js';
 import { checkCardFacts } from './facts.js';
 import { STORYBOARD_MODEL } from './generate.js';
 import { normalizeStoryboard } from './normalize.js';
+import { revealToLocal } from './reveal.js';
 import { CardSpecSchema, type CardSpec, type Shot } from './schema.js';
 
 const catalogText = CATALOG.map((c) => `- ${c.id}：${c.use}\n  props：${c.props}`).join('\n');
@@ -66,7 +68,12 @@ export async function reviseCard(
   const parsed = CardSpecSchema.safeParse((raw as { card?: unknown } | null)?.card);
   if (!parsed.success || parsed.data.template === 'cta') return null;
   const checked = checkCardFacts(parsed.data, allCaptions.map((c) => c.text).join(' ')).card;
-  if (!checked || (checked.template === 'hook') !== (old.template === 'hook')) return null;
+  if (!checked || (checked.template === 'hook') !== (old.template === 'hook') || !cardTitleComplete(checked)) return null;
   const clean = sanitize(withoutVisual(checked), shot.end - shot.start, availableImages);
-  return clean ? keepHookNumbering(clean, old) : null;
+  return clean ? keepHookNumbering(localReveal(clean, shot), old) : null;
+}
+
+/** 模型按成片秒数写的 reveal 换算成镜头内秒数（不合格的去掉） */
+function localReveal(card: CardSpec, shot: Shot): CardSpec {
+  return revealToLocal([{ start: shot.start, end: shot.end, layout: 'split', card }])[0].card ?? card;
 }

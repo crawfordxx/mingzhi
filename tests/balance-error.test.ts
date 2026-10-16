@@ -41,9 +41,10 @@ describe('余额不足必须直接往外抛，不走降级', () => {
     await expect(runBroll({ workDir, cfg: loadConfig({}), broll: { enabled: true, maxVideos: 0, budgetYuan: 10 }, brollDeps: deps }, storyboard, 10, complete)).rejects.toBeInstanceOf(InsufficientBalanceError);
   });
 
-  it('封面：不降级为一条进度提示', async () => {
+  it('封面：余额不足不外抛（成片已写完，抛错会让用户以为整条白跑），返回原因，由调用方提示补封面', async () => {
     const sb: Storyboard = { bgm: 'tech', shots: [{ start: 0, end: 4, layout: 'full' }] };
     const coverDeps = { makeCovers: async () => broke() };
-    await expect(runCover({ workDir: '/tmp/w', cfg: loadConfig({}), llm: brokeLlm, coverDeps }, undefined, sb, caps, 'x', complete)).rejects.toBeInstanceOf(InsufficientBalanceError);
+    const res = await runCover({ workDir: '/tmp/w', cfg: loadConfig({}), llm: brokeLlm, coverDeps }, undefined, sb, caps, 'x', complete);
+    expect(res.missing).toMatch(/余额不足/);
   });
 });

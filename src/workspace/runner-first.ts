@@ -7,11 +7,12 @@ import type { VersionState } from '../edit/apply.js';
 import { prepareMultiSource } from '../pipeline/multi.js';
 import { validateArgs, type PipelineArgs } from '../pipeline/run.js';
 import {
-  analyzeStage, backgroundStage, captionsStage, composeStage, cutStage, finalQaStage, qaCardsStage, storyboardStage, type Analysis,
+  analyzeStage, backgroundStage, captionsStage, composeStage, cutStage, filmQaStage, finalQaStage, qaCardsStage, paletteOf, storyboardStage, whiteBalanceOf, type Analysis,
 } from '../pipeline/stages.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
 import { ANALYSIS_FILE, FINAL_FILE, LAYER_FILES, MATTE_META, linkBroll, linkFile, writeJsonAtomic, type BaseAnalysis } from './runner-files.js';
-import { makeCover } from './runner-cover.js';
+import { coverWarnings, makeCover } from './runner-cover.js';
+import { writeStoryboardCredits } from '../broll/credit-store.js';
 import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, type Person } from './runner-media.js';
 
 /** 首个版本的初始状态（剪辑参数用默认值，修改都从这里叠加） */
@@ -39,7 +40,7 @@ async function makePerson(env: VersionEnv, args: PipelineArgs, a: Analysis): Pro
   const cut = join(env.base, 'cut.mp4');
   await cutStage(args, a.plan.keep, cut, env.complete);
   linkFile(cut, join(env.dir, 'cut.mp4'));
-  if (!args.background) return cutAsPerson(env, cut);
+  if (!args.background) return cutAsPerson(env, args, cut);
   const bg = await backgroundStage(args, args.background, env.complete);
   return compositePerson(env, args, a.plan.keep, bg.path);
 }
@@ -53,7 +54,7 @@ function multiSource(env: VersionEnv, input: string): ReturnType<typeof prepareM
   });
 }
 
-/** 首个版本：分析 → 剪切与抠像 → 字幕 → 分镜与素材 → 卡片自检 → 分段渲染 → 成片检查 → 封面 */
+/** 首个版本：分析 → 剪切与抠像 → 字幕 → 分镜与素材 → 卡片自检 → 分段渲染 → 整片自检（局部重做）→ 成片检查 → 封面 */
 export async function produceFirst(env: VersionEnv, input: string): Promise<VersionOutcome> {
   const init = initialState(env);
   const empty = { plan: { keep: [], sourceDurationSec: 0, outputDurationSec: 0 }, captions: [], storyboard: { shots: [] } };
@@ -64,20 +65,33 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const a = await analyze(env, args, multi?.transcript);
   const { person, subject } = await makePerson(env, args, a);
   const captions = await captionsStage(args, a, join(env.dir, 'captions.ass'), env.complete);
-  const planned = await storyboardStage(args, captions, a.plan.outputDurationSec, env.base, env.complete);
+  // 白平衡参考：人物背景图（没换背景时用人像第一帧）
+  const whiteBalance = await whiteBalanceOf(args, env.record({}).background?.path ?? person);
+  // 片色：同一张参考图（套 LUT 后取样），卡片、钩子、片尾与人物背景同一个色彩世界
+  const palette = await paletteOf(args, env.record({}).background?.path ?? person);
+  const planned = await storyboardStage(args, captions, a.plan.outputDurationSec, env.base, env.complete, whiteBalance, palette);
   linkBroll(planned, env.base, env.dir);
-  const { storyboard, cards } = await qaCardsStage(args, env.meter, planned, captions, env.complete);
+  const checked = await qaCardsStage(args, env.meter, planned, captions, env.complete);
+  const cards = checked.cards;
   const final = join(env.dir, FINAL_FILE);
   const raw = join(env.dir, 'final.raw.mp4');
   const composeInput = {
-    person, subject, captions, storyboard, outputDurationSec: a.plan.outputDurationSec, raw, output: final, cacheDir: join(env.base, 'segments'),
+    person, subject, captions, storyboard: checked.storyboard, outputDurationSec: a.plan.outputDurationSec, raw, output: final, cacheDir: join(env.base, 'segments'),
   };
-  const res = await composeStage(args, composeInput, env.complete);
-  env.complete('compose', `分段渲染：新渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
-  await finalQaStage(args, final, storyboard, cards, env.complete);
-  await makeCover(env, args, init.coverStyle, storyboard, captions, person);
-  const state: VersionState = { ...init, plan: a.plan, captions, storyboard };
+  const first = await composeStage(args, composeInput, env.complete);
+  env.complete('compose', `分段渲染：新渲 ${first.rendered.length} 段 · 复用缓存 ${first.reused.length} 段`);
+  // 整片自检：首版不达标时局部重做一轮（只重渲受影响的镜头）
+  const film = await filmQaStage(args, composeInput, first, env.complete, true, env.base);
+  const { storyboard } = film;
+  const res = film.composed;
+  // 授权记录按卡片自检、整片自检之后的最终分镜写（自检可能改掉带图的卡、去掉复用的素材）
+  writeStoryboardCredits(storyboard, env.base, env.dir);
+  // 节拍记录在整片自检之后读：局部重做去掉的素材已同步成跳过
+  const brollBeats = env.record({}).broll?.beats;
+  await finalQaStage(args, final, storyboard, cards, env.complete, res.outroStartSec);
+  const cover = await makeCover(env, args, init.coverStyle, storyboard, captions, person);
+  const state: VersionState = { ...init, plan: a.plan, captions, storyboard, ...(brollBeats ? { brollBeats } : {}) };
   const qaScore = qaScoreOf(cards);
   // 首个版本没有父版本可比，本版改动为空（界面显示「首版」）
-  return { state, changedShots: [], shotHashes: res.hashes, ...(qaScore !== undefined ? { qaScore } : {}) };
+  return { state, changedShots: [], rerenderedShots: [], shotHashes: res.hashes, contentHashes: res.contents, ...(qaScore !== undefined ? { qaScore } : {}), ...coverWarnings(cover) };
 }

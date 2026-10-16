@@ -3,6 +3,7 @@ import { basename, extname, join } from 'node:path';
 import { z } from 'zod';
 import { isPresetId } from '../background/presets.js';
 import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
+import { DEFAULT_OUTRO, OUTRO_TEXT_MAX } from '../compose/ending.js';
 import { COVER_STYLES } from '../cover/styles.js';
 import { isInside } from '../workspace/runner-files.js';
 import { projectSpentYuan, type Space, type SpaceSettings, type VersionMeta } from '../workspace/store.js';
@@ -12,7 +13,8 @@ import type { RunState } from './runs.js';
 import { IMAGE_EXTS, looksLikeImage } from './upload.js';
 
 export const DEFAULT_BUDGET_YUAN = 10;
-export const DEFAULT_SETTINGS: SpaceSettings = { captionStyle: DEFAULT_CAPTION_STYLE, budgetYuan: DEFAULT_BUDGET_YUAN, broll: true, maxVideos: 1 };
+// 新项目带上片尾设置（默认开启）；设置里没有这个字段的是 P7 之前的旧项目，修改版本保持原行为（见 runner-next 的 legacyEnding）
+export const DEFAULT_SETTINGS: SpaceSettings = { captionStyle: DEFAULT_CAPTION_STYLE, budgetYuan: DEFAULT_BUDGET_YUAN, broll: true, maxVideos: 1, grain: true, outro: { ...DEFAULT_OUTRO } };
 export const DEFAULT_TITLE = '未命名项目';
 
 const ids = <T extends object>(o: T): [keyof T & string, ...(keyof T & string)[]] => Object.keys(o) as [keyof T & string, ...(keyof T & string)[]];
@@ -30,6 +32,8 @@ const SettingsPatch = z.object({
   budgetYuan: z.number().finite().min(0).max(1000).optional(),
   broll: z.boolean().optional(),
   maxVideos: z.number().int().min(0).max(10).optional(),
+  outro: z.object({ enabled: z.boolean(), text: z.string().trim().refine((t) => [...t].length <= OUTRO_TEXT_MAX, `片尾文字最多 ${OUTRO_TEXT_MAX} 个字`) }).strict().optional(),
+  grain: z.boolean().optional(),
 }).strict();
 export type SettingsPatchInput = z.infer<typeof SettingsPatch>;
 
@@ -88,10 +92,10 @@ export function publicSettings(settings: SpaceSettings): SpaceSettings {
 }
 
 /** 给前端的版本：内容哈希只在服务端比较用，不下发 */
-const publicVersion = ({ shotHashes: _h, ...v }: VersionMeta): Omit<VersionMeta, 'shotHashes'> => v;
+const publicVersion = ({ shotHashes: _h, contentHashes: _c, ...v }: VersionMeta): Omit<VersionMeta, 'shotHashes' | 'contentHashes'> => v;
 
 export type SpaceDto = Omit<Space, 'inputs' | 'versions'> & {
-  inputs: string[]; versions: Omit<VersionMeta, 'shotHashes'>[]; job: RunState | null; chatCostYuan: number; totalCostYuan: number;
+  inputs: string[]; versions: Omit<VersionMeta, 'shotHashes' | 'contentHashes'>[]; job: RunState | null; chatCostYuan: number; totalCostYuan: number;
 };
 
 /** 返回给前端的项目：输入与自定义背景只给文件名（不泄露本机路径），附当前任务状态与累计花费 */

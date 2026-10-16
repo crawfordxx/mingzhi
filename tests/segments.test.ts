@@ -40,9 +40,16 @@ describe('shotHash', () => {
     expect(hashAll({ ...BASE })).toEqual(base);
     expect(hashAll({ ...BASE, sfx: [{ sec: 1, sfx: 'click', volume: 1 }], bgm: { file: 'a.mp3', keys: [], durationSec: 1 } })).toEqual(base);
   });
-  it('改卡片内容只影响该镜头', () => {
+  it('改卡片内容只影响该镜头与紧随其后的镜头（交叉过渡：上一张卡在下一镜头开头 0.3 秒里淡出）', () => {
     const base = hashAll(BASE);
     const next = hashAll({ ...BASE, shots: [SHOTS[0], { ...SHOTS[1], card: title('乙改') }, SHOTS[2]] });
+    expect(next.map((h, i) => h === base[i])).toEqual([true, false, false]);
+  });
+  it('交叉过渡：下一镜头是画中画（素材铺满、硬切）时，上一张卡改动不影响它', () => {
+    const B = { file: 'broll/a.jpg', kind: 'photo' as const, focal: { x: 0.5, y: 0.5 } };
+    const shots: Shot[] = [SHOTS[0], SHOTS[1], { start: 2, end: 3, layout: 'pip', broll: B }];
+    const base = hashAll({ ...BASE, shots });
+    const next = hashAll({ ...BASE, shots: [SHOTS[0], { ...SHOTS[1], card: title('乙改') }, shots[2]] });
     expect(next.map((h, i) => h === base[i])).toEqual([true, false, true]);
   });
   it('字幕：只影响文字落在本段帧范围内的镜头；跨镜头边界的字幕两段都变', () => {
@@ -107,18 +114,18 @@ describe('盐值（素材与渲染代码指纹）', () => {
     write('fonts/f.ttf', 'font-v1');
   });
 
-  it('B-roll 图片内容变：只有画面里出现这张图的镜头变（相邻镜头不显示它，不变）；mtime 变而内容不变则不变', async () => {
+  it('B-roll 图片内容变：只有画面里出现这张图的镜头变（本镜头与交叉淡出里还显示它的下一镜头；前一镜头不显示它，不变）；mtime 变而内容不变则不变', async () => {
     const base = await hashes();
     write('broll/a.png', 'img-v1', 1_800_000_000);
     expect(changed(await hashes(), base)).toEqual([false, false, false, false]);
     write('broll/a.png', 'img-v2');
-    expect(changed(await hashes(), base)).toEqual([false, true, false, false]);
+    expect(changed(await hashes(), base)).toEqual([false, true, true, false]);
     write('broll/a.png', 'img-v1');
   });
   it('图片同名同大小同 mtime 但内容不同也能识别', async () => {
     const base = await hashes();
     write('broll/a.png', 'img-XX');
-    expect(changed(await hashes(), base)).toEqual([false, true, false, false]);
+    expect(changed(await hashes(), base)).toEqual([false, true, true, false]);
     write('broll/a.png', 'img-v1');
   });
   it('镜头边界不在整帧上、段首的帧还属于前一个镜头时，前一个镜头的素材也进本段指纹', async () => {
@@ -128,10 +135,10 @@ describe('盐值（素材与渲染代码指纹）', () => {
     const sl = await salts(odd, 'c');
     expect(sl.map((x) => x.includes('broll/a.png'))).toEqual([false, true, true, false]);
   });
-  it('换掉一个镜头的卡片（新卡片带图）：前后镜头的哈希不变（v1→v2 差异标记误报）', async () => {
+  it('换掉一个镜头的卡片（新卡片带图）：前一镜头的哈希不变，后一镜头因交叉淡出（开头 0.3 秒还显示这张卡）而变', async () => {
     const base = await hashes();
     const next: TalkProps = { ...props, shots: SHOTS4.map((s, i) => (i === 2 ? { ...s, card: photo('broll/a.png') } : s)) };
-    expect(changed(await hashes(next), base)).toEqual([false, false, true, false]);
+    expect(changed(await hashes(next), base)).toEqual([false, false, true, true]);
   });
   it('人像文件内容变：所有镜头变', async () => {
     const base = await hashes();
@@ -160,6 +167,41 @@ describe('盐值（素材与渲染代码指纹）', () => {
   it('代码指纹文件清单包含渲染包的 src 依赖（对比度、画布常量）与 render 模板', () => {
     const files = codeFiles().map((f) => f.replace(/\\/g, '/'));
     for (const tail of ['src/qa/contrast.ts', 'src/storyboard/schema.ts', 'src/captions/styles.ts', 'render/Talk.tsx', 'render/templates/Cta.tsx']) expect(files.some((f) => f.endsWith(tail)), tail).toBe(true);
+  });
+  it('全屏插入素材：文件内容变只影响用到它的镜头；J-cut 的前 2 帧画面属于前一镜，前一镜的卡片变也影响插入镜头', async () => {
+    write('broll/b.jpg', 'b-v1');
+    const B = { file: 'broll/b.jpg', kind: 'photo' as const, focal: { x: 0.5, y: 0.5 } };
+    const p: TalkProps = { ...props, shots: SHOTS4.map((s, i) => (i === 2 ? { start: s.start, end: s.end, layout: 'broll' as const, broll: B } : s)) };
+    const base = await hashes(p);
+    write('broll/b.jpg', 'b-v2');
+    expect(changed(await hashes(p), base)).toEqual([false, false, true, false]);
+    write('broll/b.jpg', 'b-v1');
+    const prevCard: TalkProps = { ...p, shots: p.shots.map((s, i) => (i === 1 ? { ...s, card: title('换卡') } : s)) };
+    expect(changed(await hashes(prevCard), base)).toEqual([false, true, true, false]);
+  });
+  it('版式与素材字段进哈希：同一镜头 full → pip、焦点或 Ken Burns 变化都让该镜头变', async () => {
+    const B = { file: 'broll/b.jpg', kind: 'photo' as const, focal: { x: 0.5, y: 0.5 } };
+    const at = (shot: Partial<Shot>): TalkProps => ({ ...props, shots: SHOTS4.map((s, i) => (i === 3 ? { start: s.start, end: s.end, layout: 'full' as const, ...shot } : s)) });
+    const base = await hashes(at({}));
+    expect(changed(await hashes(at({ layout: 'pip', broll: B })), base)[3]).toBe(true);
+    const pip = await hashes(at({ layout: 'pip', broll: B }));
+    expect(changed(await hashes(at({ layout: 'pip', broll: { ...B, focal: { x: 0.2, y: 0.5 } } })), pip)[3]).toBe(true);
+    expect(changed(await hashes(at({ layout: 'pip', broll: { ...B, file: 'broll/a.png' } })), pip)[3]).toBe(true);
+    // 来源角标（截图来源、AI 生成）也进哈希
+    expect(changed(await hashes(at({ layout: 'pip', broll: { ...B, label: { kind: 'ai' as const, text: 'AI 生成' } } })), pip)[3]).toBe(true);
+  });
+  it('画中画退出的 0.4 秒里垫底的是上一镜素材：素材内容变，后一段也变；颗粒开关进哈希（旧分镜未设置时与关闭一致）', async () => {
+    write('broll/v.mp4', 'v-v1');
+    const V = { file: 'broll/v.mp4', kind: 'video' as const, focal: { x: 0.5, y: 0.5 } };
+    const p: TalkProps = { ...props, shots: SHOTS4.map((s, i) => (i === 1 ? { start: s.start, end: s.end, layout: 'pip' as const, broll: V } : s)) };
+    const base = await hashes(p);
+    write('broll/v.mp4', 'v-v2');
+    expect(changed(await hashes(p), base)).toEqual([false, true, true, false]);
+    write('broll/v.mp4', 'v-v1');
+    const old = await hashes(props);
+    expect(await hashes({ ...props, grain: false })).toEqual(old);
+    expect(changed(await hashes({ ...props, grain: true }), old)).toEqual([true, true, true, true]);
+    expect(await hashes({ ...p, grain: true })).toEqual(base);
   });
   it('默认代码指纹：40 位十六进制、重复计算稳定', () => {
     expect(createStamper(dir).code).toMatch(/^[0-9a-f]{40}$/);
@@ -249,12 +291,11 @@ describe('renderSegmented（真实 Remotion 渲染）', () => {
     }
   }, 300_000);
 
-  it('改第 2 个镜头的卡片标题：只重渲 1，复用 0 与 2', async () => {
+  it('改第 2 个镜头的卡片标题：重渲 1 与紧随其后的 2（开头 0.3 秒里这张卡还在交叉淡出），复用 0', async () => {
     const props = { ...BASE, shots: [SHOTS[0], { ...SHOTS[1], card: title('乙改') }, SHOTS[2]] };
     const r = await renderSegmented({ workDir, cacheDir, props, output, ffmpeg: cfg.ffmpeg });
-    expect(r).toMatchObject({ rendered: [1], reused: [0, 2] });
-    // 内容哈希：只有第 2 个镜头和上一次不同
-    expect(r.hashes.map((h, i) => h === firstHashes[i])).toEqual([true, false, true]);
+    expect(r).toMatchObject({ rendered: [1, 2], reused: [0] });
+    expect(r.hashes.map((h, i) => h === firstHashes[i])).toEqual([true, false, false]);
     expect(await frames(output)).toBe(90);
     expect((await probe(output, cfg)).hasAudio).toBe(true);
     expect(existsSync(join(workDir, 'audio.m4a'))).toBe(true);

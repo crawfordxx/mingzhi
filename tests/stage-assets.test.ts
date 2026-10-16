@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
-import { fontPath, loadFonts, sfxPath, trackPath, type Track } from '../src/assets/catalog.js';
+import { brandLogoPath, fontPath, loadFonts, sfxPath, trackPath, type Track } from '../src/assets/catalog.js';
 import { CAPTION_STYLES } from '../src/captions/styles.js';
-import { stageAudio, stageCaptionFont } from '../src/compose/stage-assets.js';
+import { stageAudio, stageCaptionFont, stageOutroLogo } from '../src/compose/stage-assets.js';
 
 const track: Track = { id: 't1', title: 't', zip: 'z', entry: 'e.mp3', mood: 'chill', energy: 1, durationSec: 60 };
 
@@ -61,5 +61,15 @@ describe('素材落盘用硬链接（每个版本不再复制约 20MB 字体与�
     // 再落一次（同一个版本目录重跑）不报错
     await stageCaptionFont(workDir, cfg, 'blade');
     await stageAudio(workDir, cfg, track, []);
+  });
+});
+
+describe('stageOutroLogo', () => {
+  it('把产品 logo 硬链接到工作目录 brand/logo.png，返回相对路径，可重复调用', async () => {
+    const { workDir } = setup();
+    const rel = await stageOutroLogo(workDir);
+    expect(rel).toBe('brand/logo.png');
+    expect(statSync(join(workDir, rel)).ino).toBe(statSync(brandLogoPath()).ino);
+    expect(await stageOutroLogo(workDir)).toBe(rel);
   });
 });

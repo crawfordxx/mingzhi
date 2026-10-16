@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fulfillVisuals, makeDeps, visualKey, type BrollAsset, type BrollDeps } from '../src/broll/fulfill.js';
+import { fulfillVisuals, upgradeToVideo, visualKey, type BrollAsset, type BrollDeps } from '../src/broll/fulfill.js';
+import { makeDeps } from '../src/broll/deps.js';
 import { loadConfig } from '../src/config.js';
 import { COVER_YUAN } from '../src/cost/estimate.js';
 import { CostMeter } from '../src/cost/meter.js';
@@ -23,8 +24,8 @@ function fakeDeps(overrides: Overrides = {}): { deps: BrollDeps; calls: Calls } 
   const deps: BrollDeps = {
     screenshot: async (url, out) => { calls.screenshot.push(url); touch(out); },
     search: async (q) => { calls.search.push(q); return ['https://a.example/1', 'https://b.example/2', 'https://c.example/3']; },
-    image: async (prompt, out) => { calls.image.push(prompt); touch(out); return { cost: imageCost }; },
-    video: async (prompt, out) => { calls.video.push(prompt); touch(out); return { cost: videoCost }; },
+    image: async (prompt, out) => { calls.image.push(prompt); touch(out); return { cost: imageCost, url: `https://img.example/${calls.image.length}.jpg` }; },
+    video: async (prompt, _imageUrl, out) => { calls.video.push(prompt); touch(out); return { cost: videoCost }; },
     ...rest,
   };
   return { deps, calls };
@@ -101,45 +102,60 @@ describe('fulfillVisuals 缓存校验', () => {
     expect(one.calls.image).toHaveLength(1);
   });
 
-  it('onStart 只在真正去取素材前回调（缓存命中不回调）；onStatus 透传给视频依赖', async () => {
+  it('onStart 只在真正去取素材前回调（缓存命中不回调）；视频需求只生图，不在这里发起视频', async () => {
     const dir = workDir();
     const cached = gen('a jar of coins on a table');
     mkdirSync(join(dir, 'broll'));
     touch(join(dir, 'broll', `${visualKey(cached)}.jpg`));
     const fresh = vid('slow push-in on a glass of cola');
     const started: number[] = [];
-    const statuses: string[] = [];
-    const { deps } = fakeDeps({ video: async (_p, out, onStatus) => { onStatus?.('running'); touch(out); return { cost: 2.4 }; } });
-    await fulfillVisuals(board(photo(0, cached), hook(5, fresh)), deps, opts(dir, { onStart: (n) => started.push(n.shotIndex), onStatus: (s) => statuses.push(s) }));
+    const { deps, calls } = fakeDeps();
+    const r = await fulfillVisuals(board(photo(0, cached), hook(5, fresh)), deps, opts(dir, { onStart: (n) => started.push(n.shotIndex) }));
     expect(started).toEqual([1]);
-    expect(statuses).toEqual(['running']);
+    expect(calls.video).toEqual([]);
+    expect(r.videoWanted).toEqual([{ shotIndex: 1, key: visualKey(fresh), prompt: fresh.prompt, imageUrl: 'https://img.example/1.jpg' }]);
   });
 
-  it('依赖写到临时文件再改名：成功后只留正式文件，失败不留残留', async () => {
+  it('图生视频写到临时文件再改名、onStatus 透传、以生成图为首帧，成功后写回 hook.props.video（图片保留）', async () => {
     const dir = workDir();
     const outs: string[] = [];
-    const { deps } = fakeDeps({ video: async (_p, out) => { outs.push(out); touch(out); return { cost: 2.4 }; } });
+    const statuses: string[] = [];
+    const firstFrames: string[] = [];
+    const { deps } = fakeDeps({ video: async (_p, imageUrl, out, onStatus) => { firstFrames.push(imageUrl); onStatus?.('running'); outs.push(out); touch(out); return { cost: 2.4 }; } });
     const visual = vid('slow push-in on a glass of cola');
-    await fulfillVisuals(board(hook(0, visual)), deps, opts(dir));
+    const r = await fulfillVisuals(board(hook(0, visual)), deps, opts(dir));
+    const up = await upgradeToVideo(r.storyboard, r.videoWanted, deps, { workDir: dir, maxVideos: 1, onStatus: (st) => statuses.push(st) });
     const final = join(dir, `broll/${visualKey(visual)}.mp4`);
     expect(outs[0]).toMatch(/\.part\.mp4$/);
     expect(existsSync(final)).toBe(true);
     expect(existsSync(outs[0] as string)).toBe(false);
+    expect(statuses).toEqual(['running']);
+    expect(firstFrames).toEqual(['https://img.example/1.jpg']);
+    expect(shotCard(up.storyboard, 0)).toMatchObject({ template: 'hook', props: { video: `broll/${visualKey(visual)}.mp4`, image: r.assets[0]?.file, visual } });
+    expect(up.assets.map((a) => a.source)).toEqual(['video']);
   });
 });
 
 describe('fulfillVisuals 截图', () => {
-  it('有 url 直接截图，相对路径写回 browser.image，visual 保留', async () => {
+  it('有 url 先联网核实（搜索结果里有这个网址）再截图，相对路径写回 browser.image，visual 保留', async () => {
     const dir = workDir();
     const visual: Visual = { source: 'screenshot', url: 'https://example.com/page' };
-    const { deps, calls } = fakeDeps();
+    const { deps, calls } = fakeDeps({ search: async (q) => { calls.search.push(q); return ['https://www.example.com/about', 'https://example.com/page/']; } });
     const r = await fulfillVisuals(board(browser(0, visual)), deps, opts(dir));
-    expect(calls.search).toEqual([]);
+    expect(calls.search).toEqual(['example.com']);
     expect(calls.screenshot).toEqual(['https://example.com/page']);
     const file = `broll/${visualKey(visual)}.png`;
     expect(existsSync(join(dir, file))).toBe(true);
     expect(shotCard(r.storyboard, 0)).toMatchObject({ template: 'browser', props: { image: file, visual } });
     expect(r.assets[0]).toMatchObject({ source: 'screenshot', url: 'https://example.com/page', file });
+  });
+
+  it('搜索结果只对上域名：截搜索里同域名的网址（模型给的路径可能是编的），与 B-roll 节拍同一口径', async () => {
+    const dir = workDir();
+    const visual: Visual = { source: 'screenshot', url: 'https://example.com/made-up-path' };
+    const { deps, calls } = fakeDeps({ search: async (q) => { calls.search.push(q); return ['https://other.example/x', 'https://www.example.com/about']; } });
+    await fulfillVisuals(board(browser(0, visual)), deps, opts(dir));
+    expect(calls.screenshot).toEqual(['https://www.example.com/about']);
   });
 
   it('只有 query 时先搜索，第一个网址失败则用第二个', async () => {
@@ -232,49 +248,43 @@ describe('fulfillVisuals photo 的 visual', () => {
 });
 
 describe('fulfillVisuals 视频与预算', () => {
-  it('视频失败也计入 maxVideos：第 2 个视频需求不再发起视频', async () => {
-    const videoPrompts: string[] = [];
-    const { deps, calls } = fakeDeps({ video: async (p) => { videoPrompts.push(p); throw new Error('超时'); } });
+  it('upgradeToVideo：最多 maxVideos 条；失败只记原因，钩子保留图片', async () => {
+    const dir = workDir();
+    const { deps, calls } = fakeDeps({ video: async (p) => { calls.video.push(p); throw new Error('超时'); } });
     const sb = board(hook(0, vid('first video prompt here')), hook(4, vid('second video prompt here')));
-    const r = await fulfillVisuals(sb, deps, opts(workDir(), { maxVideos: 1 }));
-    expect(videoPrompts).toEqual(['first video prompt here']);
+    const r = await fulfillVisuals(sb, deps, opts(dir));
     expect(calls.image).toEqual(['first video prompt here', 'second video prompt here']);
-    expect(r.assets.map((a) => a.source)).toEqual(['generate', 'generate']);
+    const up = await upgradeToVideo(r.storyboard, r.videoWanted, deps, { workDir: dir, maxVideos: 1 });
+    expect(calls.video).toEqual(['first video prompt here']);
+    expect(up.failures[0]).toContain('图生视频失败');
+    expect(shotCard(up.storyboard, 0)).toMatchObject({ props: { image: r.assets[0]?.file } });
+    expect(shotCard(up.storyboard, 0)).not.toHaveProperty('props.video');
   });
 
-  it('hook 视频写回 hook.props.video', async () => {
-    const { deps } = fakeDeps();
-    const visual = vid('slow push-in on a glass of cola');
-    const r = await fulfillVisuals(board(hook(0, visual)), deps, opts(workDir()));
-    expect(shotCard(r.storyboard, 0)).toMatchObject({ template: 'hook', props: { video: `broll/${visualKey(visual)}.mp4`, visual } });
-    expect(r.assets[0]?.source).toBe('video');
+  it('upgradeToVideo：预算不够（afford 为假）不发起视频', async () => {
+    const dir = workDir();
+    const { deps, calls } = fakeDeps();
+    const r = await fulfillVisuals(board(hook(0, vid('first video prompt here'))), deps, opts(dir));
+    const up = await upgradeToVideo(r.storyboard, r.videoWanted, deps, { workDir: dir, maxVideos: 1, afford: (est) => est < 1 });
+    expect(calls.video).toEqual([]);
+    expect(up.failures).toEqual([]);
+    expect(up.skipped).toEqual(['钩子图生视频超出预算，保留图片']);
   });
 
-  it('maxVideos=1 时第 2 个视频需求改为生图', async () => {
+  it('afford 代替 meter / budgetYuan 的检查（B-roll 上限）', async () => {
+    const { deps, calls } = fakeDeps();
+    const r = await fulfillVisuals(board(photo(0, gen('a jar of coins on a table'))), deps, opts(workDir(), { afford: () => false }));
+    expect(calls.image).toEqual([]);
+    expect(r.failures).toEqual([{ shotIndex: 0, reason: '超出预算' }]);
+  });
+
+  it('预算 0.3 元：第 1 张图之后再生图超预算，记 failure「超出预算」且不再调用', async () => {
     const { deps, calls } = fakeDeps();
     const sb = board(hook(0, vid('first video prompt here')), hook(4, vid('second video prompt here')));
-    const r = await fulfillVisuals(sb, deps, opts(workDir(), { maxVideos: 1 }));
-    expect(calls.video).toEqual(['first video prompt here']);
-    expect(calls.image).toEqual(['second video prompt here']);
-    expect(r.assets.map((a) => a.source)).toEqual(['video', 'generate']);
-    expect(shotCard(r.storyboard, 1)).toMatchObject({ props: { image: r.assets[1]?.file } });
-  });
-
-  it('视频失败退到生图', async () => {
-    const { deps, calls } = fakeDeps({ video: async () => { throw new Error('超时'); } });
-    const r = await fulfillVisuals(board(hook(0, vid('slow push-in on a glass of cola'))), deps, opts(workDir()));
+    const r = await fulfillVisuals(sb, deps, opts(workDir(), { budgetYuan: 0.3 }));
     expect(calls.image).toHaveLength(1);
-    expect(r.assets[0]?.source).toBe('generate');
-  });
-
-  it('预算 3 元：第 1 个视频之后视频与生图都超预算，记 failure「超出预算」且不再调用', async () => {
-    const { deps, calls } = fakeDeps({ videoCost: 2.9 });
-    const sb = board(hook(0, vid('first video prompt here')), hook(4, vid('second video prompt here')));
-    const r = await fulfillVisuals(sb, deps, opts(workDir(), { budgetYuan: 3 }));
-    expect(calls.video).toHaveLength(1);
-    expect(calls.image).toEqual([]);
     expect(r.failures).toEqual([{ shotIndex: 1, reason: '超出预算' }]);
-    expect(r.costYuan).toBeCloseTo(2.9);
+    expect(r.costYuan).toBeCloseTo(0.2);
   });
 
   it('接口没返回 cost 时按预估计费', async () => {
@@ -285,14 +295,14 @@ describe('fulfillVisuals 视频与预算', () => {
 
   it('costYuan 等于各素材 cost 之和，onAsset 逐个回调（含失败）', async () => {
     const events: (BrollAsset | { key: string; failed: string })[] = [];
-    const { deps } = fakeDeps({ imageCost: 0.25, videoCost: 2.5, screenshot: async () => { throw new Error('boom'); } });
+    const { deps } = fakeDeps({ imageCost: 0.25, screenshot: async () => { throw new Error('boom'); } });
     const sb = board(
       hook(0, vid('first video prompt here')),
       photo(4, gen('a jar of coins on a table')),
       browser(9, { source: 'screenshot', query: 'openai pricing' }),
     );
     const r = await fulfillVisuals(sb, deps, opts(workDir(), { onAsset: (a) => events.push(a) }));
-    expect(r.costYuan).toBeCloseTo(2.75);
+    expect(r.costYuan).toBeCloseTo(0.5);
     expect(r.costYuan).toBeCloseTo(r.assets.reduce((s, a) => s + (a.cost ?? 0), 0));
     expect(events).toHaveLength(3);
     expect(events.filter((e) => 'failed' in e)).toHaveLength(1);
@@ -301,34 +311,22 @@ describe('fulfillVisuals 视频与预算', () => {
 
 describe('fulfillVisuals 统一记账', () => {
   /** 假依赖像真实任务客户端那样把花费记进 meter（返回的 cost 仅用于展示） */
-  const metered = (meter: CostMeter, videoCost = 2.4) => {
-    const calls = { video: [] as string[], image: [] as string[] };
+  const metered = (meter: CostMeter) => {
+    const calls = { image: [] as string[] };
     const { deps } = fakeDeps({
-      video: async (p, out) => { calls.video.push(p); touch(out); meter.addTask('video', videoCost, '视频'); return { cost: videoCost }; },
       image: async (p, out) => { calls.image.push(p); touch(out); meter.addTask('image', 0.2, '生图'); return { cost: 0.2 }; },
     });
     return { deps, calls };
   };
 
-  it('预算以 meter 为准：meter 里前面步骤已花的钱也算，不够时视频退到生图', async () => {
-    const meter = new CostMeter(FALLBACK_PRICES, 3);
-    meter.addChat('openai/gpt-5.6-sol', { prompt_tokens: 10000, completion_tokens: 5000 }, '前序步骤'); // 0.28 + 0.7 = 0.98
+  it('预算以 meter 为准：meter 里前面步骤已花的钱也算', async () => {
+    const meter = new CostMeter(FALLBACK_PRICES, 1.2);
+    meter.addChat('openai/gpt-5.6-sol', { prompt_tokens: 10000, completion_tokens: 5000 }, '前序步骤'); // 0.98
     const { deps, calls } = metered(meter);
     const sb = board(hook(0, vid('first video prompt here')), hook(4, vid('second video prompt here')));
     const r = await fulfillVisuals(sb, deps, opts(workDir(), { meter, budgetYuan: 100 }));
-    expect(calls.video).toEqual([]); // 0.98 + 2.4 > 3，不发起视频
-    expect(calls.image).toHaveLength(2); // 退到生图 0.2 × 2
-    expect(meter.total).toBeCloseTo(1.38);
-    expect(r.failures).toEqual([]);
-  });
-
-  it('meter 剩余预算用尽后不再发起付费请求', async () => {
-    const meter = new CostMeter(FALLBACK_PRICES, 2.5);
-    const { deps, calls } = metered(meter);
-    const sb = board(hook(0, vid('first video prompt here')), hook(4, vid('second video prompt here')));
-    const r = await fulfillVisuals(sb, deps, opts(workDir(), { meter, budgetYuan: 100 }));
-    expect(calls.video).toHaveLength(1);
-    expect(calls.image).toEqual([]); // 2.4 + 0.2 > 2.5
+    expect(calls.image).toHaveLength(1); // 0.98 + 0.2 ≤ 1.2，再一张就超
+    expect(meter.total).toBeCloseTo(1.18);
     expect(r.failures).toEqual([{ shotIndex: 1, reason: '超出预算' }]);
   });
 
@@ -338,6 +336,23 @@ describe('fulfillVisuals 统一记账', () => {
     const r = await fulfillVisuals(board(photo(0, gen('a jar of coins on a table'))), deps, opts(workDir(), { meter }));
     expect(r.costYuan).toBeCloseTo(0.2);
     expect(meter.total).toBeCloseTo(0.2);
+  });
+});
+
+describe('fulfillVisuals 网址核实', () => {
+  it('模型给的网址搜不到同一域名：不截它，改截搜索给出的网址', async () => {
+    const { deps, calls } = fakeDeps({ search: async (q) => { calls.search.push(q); return ['https://real.example.org/jobs']; } });
+    const r = await fulfillVisuals(board(browser(0, { source: 'screenshot', url: 'https://made-up.example.com/x', query: 'FDE 招聘' })), deps, opts(workDir()));
+    expect(calls.search).toEqual(['made-up.example.com FDE 招聘']);
+    expect(calls.screenshot).toEqual(['https://real.example.org/jobs']);
+    expect(r.assets[0]?.url).toBe('https://real.example.org/jobs');
+  });
+
+  it('核实时搜索失败：不截未核实的网址，记失败', async () => {
+    const { deps, calls } = fakeDeps({ search: async () => { throw new Error('网络中断'); } });
+    const r = await fulfillVisuals(board(browser(0, { source: 'screenshot', url: 'https://example.com/page' })), deps, opts(workDir()));
+    expect(calls.screenshot).toEqual([]);
+    expect(r.failures[0]?.reason).toContain('搜索失败');
   });
 });
 

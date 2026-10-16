@@ -1,5 +1,5 @@
 import { MAX_DISPLAY_WIDTH, displayWidth } from '../captions/lines.js';
-import { MOODS, type CardSpec, type TemplateId } from '../storyboard/schema.js';
+import { MOODS, type CardSpec, type Layout, type TemplateId } from '../storyboard/schema.js';
 import type { EditContext } from './context.js';
 import { VISUAL_SOURCES, type EditOp } from './ops.js';
 
@@ -8,6 +8,26 @@ export function checkCard(card: CardSpec): string | null {
   const p = card.props as { image?: unknown; video?: unknown; visual?: unknown };
   if (p.image !== undefined || p.video !== undefined) return '卡片不能自带 image / video 文件，需要素材请用 visual 描述';
   if (card.template === 'photo' && p.visual === undefined) return 'photo 卡片需要 visual 才能取到素材';
+  return null;
+}
+
+/**
+ * 镜头能不能换成某个版式（预检与执行共用）：cta 只能全屏；全屏插入、画中画要有 B-roll 素材；
+ * 浮层要有卡片或素材；分屏要有卡片或素材（无卡片时上半屏铺素材）
+ */
+export function layoutBlocker(layout: Layout, shot: { template?: string; broll: boolean }): string | null {
+  if (layout === 'full') return null;
+  if (shot.template === 'cta') return 'cta 卡片只能全屏';
+  if ((layout === 'broll' || layout === 'pip') && !shot.broll) return '该镜头没有 B-roll 素材，不能改成全屏插入或画中画';
+  if (layout === 'overlay' && !shot.template && !shot.broll) return '该镜头没有卡片或素材，不能改成浮层';
+  if (layout === 'split' && !shot.template && !shot.broll) return '该镜头没有卡片，不能改成分屏';
+  return null;
+}
+
+/** 这个版式里换上的非 cta 卡片会不会看不见（全屏插入、画中画只显示素材与人物） */
+export function cardHiddenIn(layout: Layout): string | null {
+  if (layout === 'broll') return '这是全屏插入镜头，卡片不会显示；要显示卡片请先改成分屏或浮层';
+  if (layout === 'pip') return '这是画中画镜头，卡片不会显示；要显示卡片请先改成分屏或浮层';
   return null;
 }
 
@@ -37,15 +57,16 @@ export function checkOp(op: EditOp, ctx: EditContext): string | null {
     case 'setBgm':
       return ['auto', 'none', ...MOODS, ...ctx.tracks.map((t) => t.id)].includes(op.bgm) ? null : `没有配乐「${op.bgm}」`;
     case 'replaceCard':
-      return shotMissing(op.shotIndex, ctx) ?? checkCard(op.card);
+      return shotMissing(op.shotIndex, ctx) ?? checkCard(op.card) ?? (op.card.template === 'cta' ? null : cardHiddenIn(ctx.shots[op.shotIndex].layout));
     case 'setLayout': {
       const shot = ctx.shots[op.shotIndex];
       if (!shot) return shotMissing(op.shotIndex, ctx);
-      if (op.layout === 'split' && !shot.template) return '该镜头没有卡片，不能改成分屏';
-      return op.layout === 'split' && shot.template === 'cta' ? 'cta 卡片只能全屏' : null;
+      return layoutBlocker(op.layout, { template: shot.template, broll: shot.broll === true });
     }
     case 'regenerateVisual':
       return checkVisual(op, ctx);
+    case 'replaceBroll':
+      return shotMissing(op.shotIndex, ctx) ?? (ctx.shots[op.shotIndex].broll ? null : '该镜头没有 B-roll 素材，无法换一张');
     case 'editCaption':
       return op.index >= ctx.captions.length ? `没有第 ${op.index} 句字幕` : captionTooLong(op.text);
     case 'removeSpan':

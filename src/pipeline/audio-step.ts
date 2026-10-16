@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { downloadedTracks, loadTracks, musicReady, type Track } from '../assets/catalog.js';
 import { bgmEnvelope, pickTrack, sfxCues } from '../audio/plan.js';
+import { sfxStats } from '../audio/sfx-map.js';
 import type { TimedCaption } from '../captions/lines.js';
 import { DEFAULT_CAPTION_STYLE, type CaptionStyleId } from '../captions/styles.js';
 import { stageAudio, stageCaptionFont } from '../compose/stage-assets.js';
@@ -43,20 +44,24 @@ function chooseTrack(ctx: AudioContext, storyboard: Storyboard): { track: Track 
   return { track };
 }
 
-/** 把背景乐、音效和所选字幕样式的字体落到工作目录，并算出渲染要用的字段 */
-export async function prepareAudio(ctx: AudioContext, storyboard: Storyboard, captions: TimedCaption[], durationSec: number): Promise<AudioPlan> {
+/**
+ * 把背景乐、音效和所选字幕样式的字体落到工作目录，并算出渲染要用的字段。
+ * durationSec 是整片时长；outroStartSec 给出时配乐在片尾收束淡出，并在 logo 弹出处加 logo 音
+ */
+export async function prepareAudio(ctx: AudioContext, storyboard: Storyboard, captions: TimedCaption[], durationSec: number, outroStartSec?: number): Promise<AudioPlan> {
   const mood = storyboard.bgm ?? DEFAULT_MOOD;
   const style = ctx.captionStyle ?? DEFAULT_CAPTION_STYLE;
   const { track, note: musicNote } = chooseTrack(ctx, storyboard);
-  const cues = sfxCues(storyboard.shots);
+  const cues = sfxCues(storyboard.shots, { outroStartSec });
+  const stats = sfxStats(cues);
   const staged = await stageAudio(ctx.workDir, ctx.cfg, track, cues);
   const font = await stageCaptionFont(ctx.workDir, ctx.cfg, style);
-  const bgm = track && staged.bgm ? { file: staged.bgm, keys: bgmEnvelope(captions, durationSec), durationSec: track.durationSec } : undefined;
+  const bgm = track && staged.bgm ? { file: staged.bgm, keys: bgmEnvelope(captions, durationSec, outroStartSec), durationSec: track.durationSec } : undefined;
   const label = track ? `配乐《${track.title}》（${mood}）` : '无背景乐';
   return {
     props: { ...(bgm ? { bgm } : {}), sfx: cues, captionStyle: style, captionFontFile: font.file },
     info: { track: track?.id ?? null, mood, sfxCount: cues.length },
-    summary: `${label} · 音效 ${cues.length} 个 · 字幕样式 ${style}`,
+    summary: `${label} · 音效 ${cues.length} 个（${stats.kinds} 种）· 字幕样式 ${style}`,
     notes: [...(musicNote ? [musicNote] : []), ...(font.fallback ? [`字幕字体未下载，改用系统字体；${FETCH_HINT}`] : [])],
   };
 }

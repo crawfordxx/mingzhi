@@ -20,3 +20,26 @@
 
 	Follow on Twitter for updates:
 	http://twitter.com/KenneyNL
+
+
+======================================================================
+代码合成的音效（Synthesized in this repository）
+======================================================================
+
+以下文件由 scripts/make-sfx.mjs 用代码合成（滤波噪声、正弦波、包络、简易混响），
+没有使用任何第三方采样或录音，不涉及外部来源的许可：
+
+  whoosh.wav whoosh_2.wav whoosh_3.wav      全屏 B-roll 插入
+  hit.wav hit_2.wav hit_3.wav               钩子标题落定、数字滚完
+  riser.wav riser_short.wav                 钩子前的上扫
+  pop.wav pop_2.wav pop_3.wav pop_4.wav     卡片入场（轻）
+  tick_2.wav tick_3.wav                     数字滚动（tick 的变体）
+  click_2.wav toggle_2.wav                  点击、开关的变体
+  confirm_2.wav confirm_3.wav               标签确认的变体
+  logo.wav                                  片尾品牌音
+
+这些文件随本仓库一起以 MIT 许可证发布，可自由用于个人、教育与商业项目，无需署名。
+重新生成：node scripts/make-sfx.mjs（固定随机种子，结果逐字节一致）。
+
+其余文件（maximize_006 / minimize_003 / click_002 / toggle_002 / tick_002 / scroll_002 /
+confirmation_002 / glass_001）来自上面的 Kenney「Interface Sounds」，CC0。

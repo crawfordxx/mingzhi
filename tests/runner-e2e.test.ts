@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+// 和新建项目一样带片尾设置（没有片尾字段的是旧项目，修改版本不加片尾）
+import { DEFAULT_OUTRO } from '../src/compose/ending.js';
 import ort from 'onnxruntime-node';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -44,7 +46,7 @@ describe.skipIf(!hasModels())('版本运行器端到端（真实小样片）', (
   it('v1 全量出片；v2 换一张卡片只重渲 1 段，v1 成片不变', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mz-runner-e2e-'));
     const store = new SpaceStore(root);
-    const space = store.create('样片', [join(import.meta.dirname, 'fixtures', 'talk.mp4')], { captionStyle: 'blade', budgetYuan: 5, broll: false, maxVideos: 0 });
+    const space = store.create('样片', [join(import.meta.dirname, 'fixtures', 'talk.mp4')], { captionStyle: 'blade', budgetYuan: 5, broll: false, maxVideos: 0, outro: { ...DEFAULT_OUTRO } });
     const ctx = baseCtx(store, loadConfig({}));
     const v1 = await runFirstVersion(ctx, space.id);
     const v1Final = join(store.versionDir(space.id, 1), FINAL_FILE);
@@ -56,7 +58,9 @@ describe.skipIf(!hasModels())('版本运行器端到端（真实小样片）', (
     const before = sha(v1Final);
     const k = state.storyboard.shots.findIndex((s) => s.card?.props && (s.card.props as { title?: string }).title === '第二张');
     const v2 = await runNextVersion(ctx, space.id, 1, [{ type: 'replaceCard', shotIndex: k, card: { template: 'title', props: { title: '换过了' } } }], '换卡片');
+    // 用户可见的改动只有本镜头；下一镜头（这张卡在它开头 0.3 秒里交叉淡出）只是被重渲
     expect(v2.changedShots).toEqual([k]);
+    expect(v2.rerenderedShots).toEqual([k, k + 1]);
     expect(sha(v1Final)).toBe(before);
     const out = await probe(join(store.versionDir(space.id, 2), FINAL_FILE), ctx.cfg);
     expect(Math.abs(out.durationSec - info.durationSec)).toBeLessThan(0.05);
@@ -68,7 +72,7 @@ describe.skipIf(!hasModels())('版本运行器端到端（真实小样片）', (
     const input = join(root, 'talk8.mp4');
     await run(cfg.ffmpeg, ['-v', 'error', '-y', '-i', join(import.meta.dirname, 'fixtures', 'talk.mp4'), '-t', '8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', input]);
     const store = new SpaceStore(root);
-    const space = store.create('样片', [input], { background: { kind: 'preset', id: 'cafe' }, captionStyle: 'blade', budgetYuan: 5, broll: false, maxVideos: 0 });
+    const space = store.create('样片', [input], { background: { kind: 'preset', id: 'cafe' }, captionStyle: 'blade', budgetYuan: 5, broll: false, maxVideos: 0, outro: { ...DEFAULT_OUTRO } });
     const ctx: RunnerCtx = { ...baseCtx(store, cfg) };
     await runFirstVersion(ctx, space.id);
     const spy = vi.spyOn(ort.InferenceSession, 'create');

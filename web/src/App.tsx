@@ -1,5 +1,5 @@
 /** 工作台外壳：公告条 / Spaces 栏 / 对话流 / 大预览 */
-import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import { MotionConfig } from 'motion/react';
 import { useCallback, useEffect, useRef } from 'react';
 import { spentOf, type Space } from './api';
 import { AnnouncementBar } from './components/AnnouncementBar';
@@ -8,6 +8,7 @@ import { ChatFlow } from './components/ChatFlow';
 import { Composer } from './components/Composer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PreviewStage } from './components/PreviewStage';
+import { Toast } from './components/Toast';
 import { SpacesRail } from './components/SpacesRail';
 import { reduceLive } from './lib/liveModel';
 import { liveVersionOf } from './lib/versions';
@@ -17,7 +18,7 @@ import { useConversation } from './useConversation';
 import { useClock, usePlayback, type Clock } from './usePlayback';
 import { useRuns } from './useRuns';
 import { useWorkbench } from './useWorkbench';
-import { It, SPRING } from './ui';
+import { It } from './ui';
 
 /** 文件拖到拖入区以外时，阻止浏览器直接打开视频、把工作台换掉 */
 function useBlockFileDrop() {
@@ -62,15 +63,6 @@ const Boot = ({ error }: { error?: string }) => (
   </div>
 );
 
-const Toast = ({ text }: { text?: string }) => (
-  <AnimatePresence>
-    {text && (
-      <motion.div className="toast" role="status" initial={{ opacity: 0, y: 12, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }}
-        exit={{ opacity: 0, y: 8, x: '-50%' }} transition={SPRING}>{text}</motion.div>
-    )}
-  </AnimatePresence>
-);
-
 export function App() {
   const wb = useWorkbench();
   useBlockFileDrop();
@@ -110,7 +102,7 @@ export function App() {
           ) : <Boot error={wb.loadError} />}
         </div>
       </div>
-      <Toast text={wb.toast} />
+      <Toast toast={wb.toast} onDismiss={wb.dismissToast} />
       {bar.exited && <Exited />}
     </MotionConfig>
   );

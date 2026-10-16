@@ -19,7 +19,7 @@ const good = { shots: [
 ] };
 
 describe('CATALOG', () => {
-  it('覆盖全部 12 个模板', () => {
+  it('覆盖全部模板', () => {
     expect(CATALOG.map((c) => c.id).sort()).toEqual([...TEMPLATE_IDS].sort());
   });
 });
@@ -119,3 +119,59 @@ describe('generateStoryboard：背景乐情绪与封面标题', () => {
     expect(retried.storyboard.bgm).toBe('upbeat');
   });
 });
+
+describe('generateStoryboard：多样性规则与持续演进', () => {
+  const ev = (t: string) => ({ template: 'evidenceList', props: { title: t, rows: [{ badge: '证据', text: '都是乙方身份' }, { badge: '成本', text: '贵 3 元' }] } });
+  it('提示词写明多样性、徽章、钩子画面、来源标签与 reveal 规则', async () => {
+    const { client, calls } = scripted(good);
+    await generateStoryboard(client, caps, 9, []);
+    for (const k of ['最多连续 2 个', '20%', '4 种呈现模式', '「要点」', 'source', 'reveal', 'overlay', 'flow']) expect(calls[0].system).toContain(k);
+  });
+  it('违反多样性规则时带规则原因重试 1 次；规则修正后的结果不再违规', async () => {
+    const broken = { shots: [0, 1, 2].map((i) => ({ start: i * 3, end: i * 3 + 3, layout: 'split', card: ev(`第 ${i} 张`) })) };
+    const { client, calls } = scripted(broken, broken);
+    const res = await generateStoryboard(client, caps, 9, []);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].user).toContain('多样性规则');
+    expect(res.storyboard.shots.filter((s) => s.card?.template === 'evidenceList').length).toBeLessThanOrEqual(1);
+    expect(res.storyboard.shots.flatMap((s) => (s.card?.template === 'evidenceList' ? s.card.props.rows.map((r) => r.badge) : []))).not.toContain('证据');
+  });
+  it('演进卡没写 reveal 时按镜头内字幕起点补齐（镜头内秒数）', async () => {
+    const flow = { shots: [
+      { start: 0, end: 3, layout: 'split', card: { template: 'title', props: { title: '开头' } } },
+      { start: 3, end: 9, layout: 'split', card: { template: 'flow', props: { steps: [{ label: '需求' }, { label: '开发' }, { label: '验收' }] } } },
+    ] };
+    const caps2 = [{ start: 0, end: 3, text: '开头' }, { start: 3, end: 5, text: '先提需求' }, { start: 5, end: 7, text: '再开发' }, { start: 7, end: 9, text: '最后验收' }];
+    const res = await generateStoryboard(scripted(flow).client, caps2, 9, []);
+    expect(res.storyboard.shots[1].card?.props).toMatchObject({ reveal: [0, 2, 4] });
+  });
+});
+
+describe('generateStoryboard：卡片标题要是完整意思', () => {
+  const caps3 = [{ start: 0, end: 3, text: '前面的话' }, { start: 3, end: 4, text: '每天睡前' }, { start: 4, end: 6, text: '列出明天的清单' }];
+  const half = { shots: [
+    { start: 0, end: 3, layout: 'split', card: { template: 'title', props: { title: '开头' } } },
+    { start: 3, end: 6, layout: 'split', card: { template: 'title', props: { title: '第三个习惯：每天睡前' } } },
+  ] };
+  it('提示词写明标题要完整（句末或完整短语）', async () => {
+    const { client, calls } = scripted(good);
+    await generateStoryboard(client, caps, 9, []);
+    expect(calls[0].system).toContain('完整的意思');
+    expect(calls[0].system).toContain('话说一半');
+  });
+  it('话说一半的标题按字幕整句补全，不触发重试', async () => {
+    const { client, calls } = scripted(half);
+    const res = await generateStoryboard(client, caps3, 6, []);
+    expect(calls).toHaveLength(1);
+    const second = res.storyboard.shots[1].card;
+    expect(second?.template === 'title' && second.props.title).toBe('第三个习惯：每天睡前列出明天的清单');
+  });
+  it('补不出来的标题带原因重试 1 次', async () => {
+    const bad = { shots: [{ start: 0, end: 6, layout: 'split', card: { template: 'title', props: { title: '提高效率的' } } }] };
+    const { client, calls } = scripted(bad, bad);
+    await generateStoryboard(client, caps3, 6, []);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].user).toContain('话没说完');
+  });
+});
+

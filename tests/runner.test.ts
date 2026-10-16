@@ -59,12 +59,17 @@ describe('runFirstVersion', () => {
     expect(f.calls.qaOnly).toEqual([undefined]);
     expect(f.calls.covers).toEqual([{ style: 'bauhaus', workDir: join(base, 'covers', 'bauhaus') }]);
     expect(f.calls.hard).toEqual([join(v1, FINAL_FILE)]);
+    // 整片自检检查本版成片（假度量达标，不触发局部重做）；白平衡参考取人物背景图
+    expect(f.calls.film).toEqual([join(v1, FINAL_FILE)]);
+    // 素材记录在 base/broll：整片度量按它判同一候选的复用
+    expect(f.calls.filmMetaDir).toEqual([base]);
+    expect(f.calls.meanColor).toEqual([readJson<ProjectFile>(join(v1, 'project.json')).background?.path]);
     expect(f.calls.llm).toEqual(expect.arrayContaining(['剪口误', '分镜']));
     expect(meta.costYuan).toBeCloseTo(f.calls.llm.length * 0.01 + 1.2); // 每次模型调用 ¥0.01 + 封面
     expect(meta.qaScore).toBeCloseTo(8.5);
     expect(f.events.every((e) => e.spaceId === f.spaceId && e.version === 1)).toBe(true);
     expect(f.events.at(-1)?.step).toBe('done');
-    expect(f.events.map((e) => e.step)).toEqual(expect.arrayContaining(['probe', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover']));
+    expect(f.events.map((e) => e.step)).toEqual(expect.arrayContaining(['probe', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-film', 'qa-final', 'cover']));
     expect(f.store.get(f.spaceId).versions[0].status).toBe('done');
   });
 
@@ -86,6 +91,18 @@ describe('runFirstVersion', () => {
     expect(f.calls.matte).toEqual([]);
     expect(inode(join(v1, 'person.mp4'))).toBe(inode(join(f.store.baseDir(f.spaceId), 'cut.mp4')));
   });
+
+  it('没有背景时抽帧取到的人物框写进 project.json 的 subject；没取到则为 null', async () => {
+    const box = { top: 0.3, bottom: 1, left: 0.1, right: 0.9 };
+    const f = makeFixture({ background: undefined });
+    f.hooks.subject = box;
+    await runFirstVersion(f.ctx, f.spaceId);
+    const file = join(f.store.versionDir(f.spaceId, 1), 'project.json');
+    expect(JSON.parse(readFileSync(file, 'utf8')).subject).toEqual(box);
+    const g = makeFixture({ background: undefined });
+    await runFirstVersion(g.ctx, g.spaceId);
+    expect(JSON.parse(readFileSync(join(g.store.versionDir(g.spaceId, 1), 'project.json'), 'utf8')).subject).toBeNull();
+  });
 });
 
 describe('runNextVersion：只重跑受影响的阶段', () => {
@@ -96,6 +113,8 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     const v2 = f.store.versionDir(f.spaceId, 2);
     expect(meta).toMatchObject({ n: 2, parent: 1, status: 'done', summary: '换字幕样式' });
     expect(f.calls).toMatchObject({ llm: [], renderCut: [], matte: [], composite: [], covers: [], qaOnly: [] });
+    // 修改版本也做整片自检（只检查，不局部重做）
+    expect(f.calls.film).toEqual([join(f.store.versionDir(f.spaceId, 2), FINAL_FILE)]);
     for (const name of ['cut.mp4', 'person.mp4', 'cover-3x4.png']) expect(inode(join(v2, name)), name).toBe(inode(join(v1, name)));
     // 字幕样式影响每一帧：全部镜头重渲
     expect(meta.changedShots).toEqual(stateOf(f, 2).storyboard.shots.map((_, i) => i));
@@ -105,14 +124,15 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     expect(f.events.every((e) => e.version === 2)).toBe(true);
   });
 
-  it('replaceCard 只重渲那 1 段，卡片自检只查这张卡', async () => {
+  it('replaceCard 只重渲那 1 段与下一段（卡片在下一镜头开头交叉淡出），卡片自检只查这张卡', async () => {
     const f = await afterV1();
     const before = stateOf(f, 1);
     const k = splitShots(before)[1];
     const op = { type: 'replaceCard', shotIndex: k, card: { template: 'title', props: { title: '换过的标题' } } } as EditOp;
     const meta = await runNextVersion(f.ctx, f.spaceId, 1, [op], '换卡片');
     expect(meta.changedShots).toEqual([k]);
-    expect(f.calls.segments).toHaveLength(1);
+    expect(meta.rerenderedShots).toEqual([k, k + 1]);
+    expect(f.calls.segments).toHaveLength(2);
     expect(f.calls.qaOnly).toEqual([[k]]);
     expect(stateOf(f, 2).storyboard.shots[k].card).toEqual({ template: 'title', props: { title: '换过的标题' } });
   });
@@ -214,7 +234,7 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     expect(stateOf(off, 2).storyboard.shots.some((s) => s.card?.template === 'photo')).toBe(false);
   });
 
-  it('regenerateVisual 换素材重新付费；maxVideos 用完时不再生成视频', async () => {
+  it('regenerateVisual 换素材重新付费；钩子要视频时先生图，短片的 B-roll 上限放不下图生视频', async () => {
     const f = await afterV1();
     const k = splitShots(stateOf(f, 1))[0];
     await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'replaceCard', shotIndex: k, card: { template: 'photo', props: { label: '图', visual: { source: 'generate', prompt: 'a savings jar on a desk, editorial photo' } } } } as EditOp], '加图');
@@ -231,7 +251,8 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     expect(g.calls.videos).toEqual([]);
     f.reset();
     await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'replaceCard', shotIndex: 0, card: hook } as EditOp], '加开场视频');
-    expect(f.calls.videos).toHaveLength(1); // 对照：maxVideos 为 1 时会生成
+    expect(f.calls.images).toEqual(['a jar of coins on a wooden table, slow push in']);
+    expect(f.calls.videos).toEqual([]); // maxVideos 为 1 也不做：每 2 分钟 ¥4 的上限按片长折算，短片放不下 ¥2.4 的视频
   });
 
   it('空操作（回退）：全部复用父版本，状态与父版本一致', async () => {
@@ -270,18 +291,18 @@ describe('修复轮 1 补充', () => {
     await expect(runNextVersion(f.ctx, f.spaceId, 1, [], '回退')).rejects.toThrow('v1 还没有完成');
   });
 
-  it('素材名额先给没改动的卡片：父版本已用掉视频名额时，新加在前面的视频卡退为生图，旧视频卡保留', async () => {
+  it('钩子视频需求先生图：父版本的钩子图命中缓存不重复付费，新加的钩子只生图', async () => {
     const f = await afterV1();
     const hook = (prompt: string, i: number) => ({ type: 'replaceCard', shotIndex: i, card: { template: 'hook', props: { index: 1, total: 1, headline: '钱要放在取得到的地方', highlight: ['取得到'], visual: { source: 'video', prompt } } } }) as EditOp;
     const later = splitShots(stateOf(f, 1))[1];
     await runNextVersion(f.ctx, f.spaceId, 1, [hook('old clip of coins on a table', later)], '后面加视频');
-    expect(f.calls.videos).toEqual(['old clip of coins on a table']);
+    expect(f.calls.images).toEqual(['old clip of coins on a table']);
     f.reset();
     await runNextVersion(f.ctx, f.spaceId, 2, [hook('new clip of a piggy bank', 0)], '前面再加视频');
     expect(f.calls.videos).toEqual([]);
     expect(f.calls.images).toEqual(['new clip of a piggy bank']);
-    const cards = stateOf(f, 3).storyboard.shots.flatMap((sh) => (sh.card?.template === 'hook' ? [sh.card.props as { video?: string; visual?: { prompt: string } }] : []));
-    expect(cards.find((c) => c.visual?.prompt === 'old clip of coins on a table')?.video).toMatch(/\.mp4$/);
+    const cards = stateOf(f, 3).storyboard.shots.flatMap((sh) => (sh.card?.template === 'hook' ? [sh.card.props as { image?: string; visual?: { prompt: string } }] : []));
+    expect(cards.find((c) => c.visual?.prompt === 'old clip of coins on a table')?.image).toMatch(/\.jpg$/);
   });
 
   it('换回用过的封面风格：在 base/covers/<风格> 里生成，命中已付费的底图缓存', async () => {

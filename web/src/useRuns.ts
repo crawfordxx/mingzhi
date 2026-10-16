@@ -5,7 +5,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type Space, type VersionMeta, type VersionState, type WorkEvent } from './api';
 import { isTerminal, loadHistory } from './live';
-import { errText } from './useWorkbench';
+import { copyText } from './lib/clipboard';
+import { exportNotice } from './lib/exportNotice';
+import { errText, type Notify } from './useWorkbench';
 
 export const doneVersions = (space?: Space): VersionMeta[] => (space?.versions ?? []).filter((v) => v.status === 'done');
 /** 正在排队或运行的版本号 */
@@ -104,7 +106,7 @@ function useViewVersion(space: Space | undefined) {
   return { view, setView };
 }
 
-interface Deps { space?: Space; putSpace: (s: Space) => void; notify: (m: string) => void }
+interface Deps { space?: Space; putSpace: (s: Space) => void; notify: Notify }
 
 export function useRuns({ space, putSpace, notify }: Deps) {
   const refresh = useCallback(async (id: string) => {
@@ -126,8 +128,9 @@ export function useRuns({ space, putSpace, notify }: Deps) {
     setExporting(n);
     try {
       const out = await api.exportVersion(space.id, n);
-      const name = out.files[0]?.split(/[\\/]/).pop() ?? '';
-      notify(`已导出 ${out.files.length} 个文件到「${shortDir(out.dir)}」 · ${name}`);
+      const { text, action } = exportNotice(out, shortDir(out.dir));
+      const copy = () => void copyText(out.attribution ?? '').then((ok) => notify(ok ? '署名文本已复制，发布时贴在正文末尾' : '复制失败，请到「素材来源」里手动复制'));
+      notify(text, action === 'copy' ? { label: '复制署名文本', run: copy } : action === 'ack' ? { label: '知道了', run: () => undefined } : undefined);
     } catch (err) {
       notify(`导出失败：${errText(err)}`);
     } finally {

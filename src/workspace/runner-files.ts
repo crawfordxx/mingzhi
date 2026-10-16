@@ -19,6 +19,8 @@ export const LAYER_FILES = ['fgr.mp4', 'matte.mp4'] as const;
 /** 与抠像图层配套的信息：取景框与人物平均色（换背景合成时重算调色增益）；最后写，存在即图层完整 */
 export const MATTE_META = 'matte.json';
 export const COVER_FILES = ['cover-3x4.png', 'cover-4x3.png'] as const;
+/** 版本目录里素材面板的标记（替换 / 删除，键是 credits.json 里的素材相对路径），下一版「换一张 B-roll」读取 */
+export const MARKS_FILE = 'credits-marks.json';
 /** base/ 里依赖口播内容的产物：口播换了（首版失败后增删口播）就都不能再用；分段缓存与素材按内容命中，不在其中 */
 export const INPUT_DEPENDENTS = [ANALYSIS_FILE, 'audio16k.wav', 'cut.mp4', ...LAYER_FILES, MATTE_META, SOURCE_FILE, 'order.json'] as const;
 
@@ -64,11 +66,11 @@ export function linkIfExists(src: string, dest: string): boolean {
   return true;
 }
 
-/** 分镜里卡片引用的素材文件（相对路径） */
+/** 分镜里引用的素材文件（卡片的 image / video 与镜头的 B-roll，相对路径） */
 function mediaFiles(storyboard: Storyboard): string[] {
   return storyboard.shots.flatMap((s) => {
     const p = (s.card?.props ?? {}) as { image?: unknown; video?: unknown };
-    return [p.image, p.video].filter((f): f is string => typeof f === 'string');
+    return [p.image, p.video, s.broll?.file].filter((f): f is string => typeof f === 'string');
   });
 }
 

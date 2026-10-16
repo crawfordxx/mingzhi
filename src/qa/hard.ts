@@ -6,7 +6,7 @@ import { CANVAS } from '../storyboard/schema.js';
 import { contrastRatio } from './contrast.js';
 
 export interface HardCheck {
-  id: 'resolution' | 'fps' | 'loudness' | 'truePeak' | 'blackFrames' | 'safeArea' | 'contrast';
+  id: 'resolution' | 'fps' | 'loudness' | 'truePeak' | 'outroLoudness' | 'blackFrames' | 'safeArea' | 'contrast';
   ok: boolean;
   detail: string;
 }
@@ -107,7 +107,31 @@ export function checkContrast(palette: Palette[]): HardCheck {
   return { id: 'contrast', ok: low.length === 0, detail };
 }
 
-export async function hardChecks(video: string, layout: CaptionLayout, palette: Palette[], cfg: AppConfig): Promise<HardCheck[]> {
+/** 品牌片尾（成片最后 TAIL_SEC 秒，片尾不足 TAIL_SEC 时只量片尾本身）的响度上限：比口播安静，logo 音与配乐淡出收束 */
+export const TAIL_MAX_LUFS = -18;
+export const TAIL_SEC = 3;
+
+/** 从 fromSec 到结尾的积分响度（LUFS）；ebur128 对静音与不足 400ms 的片段给 -70 */
+export async function measureTailLufs(video: string, fromSec: number, cfg: AppConfig): Promise<number> {
+  const { stderr } = await run(cfg.ffmpeg, ['-hide_banner', '-nostats', '-i', video, '-vn', '-af', `atrim=start=${Math.max(0, fromSec)},asetpts=N/SR/TB,ebur128=peak=true`, '-f', 'null', '-']);
+  return parseEbur128(stderr).lufs;
+}
+
+/** 量片尾响度的起点：最后 TAIL_SEC 秒，片尾更短（短片 1 秒出头）时从片尾开始，不把口播和 CTA 量进去 */
+export const tailFrom = (durationSec: number, outroStartSec?: number): number => Math.max(durationSec - TAIL_SEC, outroStartSec ?? 0);
+
+/** 片尾响度不高于 -18 LUFS；没有片尾（outroStartSec 未给）时不检查 */
+export async function checkOutroLoudness(video: string, durationSec: number, cfg: AppConfig, outroStartSec?: number): Promise<HardCheck> {
+  try {
+    const from = tailFrom(durationSec, outroStartSec);
+    const lufs = await measureTailLufs(video, from, cfg);
+    return { id: 'outroLoudness', ok: lufs <= TAIL_MAX_LUFS, detail: `片尾 ${(durationSec - from).toFixed(1)} 秒响度 ${fmt(lufs)} LUFS（要求 ≤ ${TAIL_MAX_LUFS}）` };
+  } catch (err) {
+    return { id: 'outroLoudness', ok: false, detail: `片尾响度测量失败：${(err as Error).message.split('\n')[0]}` };
+  }
+}
+
+export async function hardChecks(video: string, layout: CaptionLayout, palette: Palette[], cfg: AppConfig, outroStartSec?: number): Promise<HardCheck[]> {
   const info = await probe(video, cfg);
   const loudness: HardCheck[] = info.hasAudio
     ? await measureLoudness(video, cfg)
@@ -116,6 +140,7 @@ export async function hardChecks(video: string, layout: CaptionLayout, palette: 
     checkSize(info.width, info.height),
     checkFps(info.fps),
     ...loudness,
+    ...(outroStartSec === undefined ? [] : [await checkOutroLoudness(video, info.durationSec, cfg, outroStartSec)]),
     await checkBlack(video, info.durationSec, cfg),
     checkSafeArea(layout),
     checkContrast(palette),

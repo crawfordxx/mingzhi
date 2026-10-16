@@ -13,6 +13,12 @@ describe('loadConfig', () => {
     expect(cfg.modelsDir).toBe(join(homedir(), '.mingzhi', 'models'));
     expect(cfg.kexiangKey).toBeUndefined();
     expect(cfg.pexelsKey).toBeUndefined();
+    expect(cfg.pixabayKey).toBeUndefined();
+  });
+
+  it('MINGZHI_PIXABAY_KEY 注入 pixabayKey，空串视为未设置', () => {
+    expect(loadConfig({ MINGZHI_PIXABAY_KEY: 'pk' }).pixabayKey).toBe('pk');
+    expect(loadConfig({ MINGZHI_PIXABAY_KEY: '' }).pixabayKey).toBeUndefined();
   });
 
   it('MINGZHI_DATA_DIR 为空串时回退默认数据目录', () => {

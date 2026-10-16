@@ -1,6 +1,7 @@
 import { CAPTION_STYLES } from '../captions/styles.js';
 import { THEME } from '../../render/theme.js';
 import { blend, readableOn } from './contrast.js';
+import { ctaIdle, type Palette } from '../compose/palette.js';
 
 export interface PalettePair { fg: string; bg: string; label: string }
 
@@ -52,13 +53,37 @@ function glassPairs(): PalettePair[] {
   ];
 }
 
-/** 卡片模板里的文字/底色组合 + 字幕样式的字/描边（或底框）。
+/** CTA 未点胶囊（叠在人物画面上，按最不利的底合成） */
+function ctaIdlePair(p: Palette): [string, string, string][] {
+  const idle = ctaIdle(p);
+  return [[idle.fg, blend(idle.bg, idle.alpha, p.tone === 'dark' ? '#FFFFFF' : '#000000'), 'CTA 未点胶囊（叠最不利底）']];
+}
+
+/** 片色（背景推导出的卡片与钩子配色）里的文字/底色组合；玻璃卡按最不利的底（暗色卡叠白、亮色卡叠黑）合成后检查 */
+export function palettePairs(p: Palette): PalettePair[] {
+  const glass = blend(p.glass.bg, p.glass.alpha, p.tone === 'dark' ? '#FFFFFF' : '#000000');
+  const pairs: [string, string, string][] = [
+    [p.ink, p.card, 'ink/card'], [p.sub, p.card, 'sub/card'], [p.ink, p.stage, 'ink/stage'], [p.sub, p.stage, 'sub/stage'],
+    [p.ink, p.inset, 'ink/inset'], [p.sub, p.inset, 'sub/inset'], [p.idleInk, p.card, '流程未点亮 idleInk/card'], [p.card, p.ink, '流程点亮序号 card/ink'],
+    [p.accentText, p.card, '强调字 accentText/card'], [p.accentInk, p.accent, '强调底上的字 accentInk/accent'],
+    [p.redText, p.card, 'redText/card'], [p.redText, p.tint.no, 'redText/tint.no'], [p.goldText, p.card, 'goldText/card'],
+    [p.greenText, p.card, 'greenText/card'], [p.greenText, p.tint.yes, 'greenText/tint.yes'], [p.greenText, p.tint.hot, 'greenText/tint.hot'],
+    [p.maybe.fg, p.maybe.bg, 'maybe.fg/bg'],
+    [p.hook.ink, p.hook.bg, '钩子标题 hook.ink/bg'], [p.hook.accent, p.hook.bg, '钩子强调 hook.accent/bg'], [p.hook.accentInk, p.hook.accent, '钩子胶囊 accentInk/accent'],
+    [p.ink, glass, '玻璃卡 ink（叠最不利底）'],
+    ...(p.tone === 'dark' ? [[p.sub, glass, '玻璃卡 sub（叠白最不利）'] as [string, string, string]] : []),
+    ...ctaIdlePair(p),
+  ];
+  return pairs.map(([fg, bg, label]) => ({ fg, bg, label: `片色 ${label}` }));
+}
+
+/** 卡片模板里的文字/底色组合 + 字幕样式的字/描边（或底框）；给了片色时再加上片色的组合（成片检查按这条片实际的配色查）。
  *  有意不在表内：
  *  - THEME.faint：只用于「划掉」文字（刻意弱化的已删除项）和装饰分隔点；
  *  - Hook 白色标题压在视频上：真实底色是「视频 + 55% 深色蒙层」，随画面变，无法静态计算，表内只按 hookBg 实色检查；
  *  - EvidenceList 高亮行的 12% 彩色浅底：叠在白卡上仍极浅，ink 字对比度 > 14；
  *  - 光标、进度条、开关、色点、瓶盖等无文字的装饰色块。 */
-export function defaultPalette(): PalettePair[] {
+export function defaultPalette(palette?: Palette): PalettePair[] {
   const badges = Object.entries(THEME.badge).map(([name, color]) => ({ fg: WHITE, bg: color, label: `徽标 ${name} 白字/底色` }));
   return [
     { fg: THEME.ink, bg: THEME.card, label: '卡片正文 ink/card' },
@@ -83,5 +108,6 @@ export function defaultPalette(): PalettePair[] {
     ...filledPairs(),
     ...glassPairs(),
     ...captionPairs(),
+    ...(palette ? palettePairs(palette) : []),
   ];
 }

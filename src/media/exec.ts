@@ -18,9 +18,9 @@ export async function run(cmd: string, args: string[], opts: { cwd?: string; sig
 }
 
 /** 执行外部命令并取二进制 stdout（如 ffmpeg 输出 rawvideo）；失败时附 stderr 末尾 800 字 */
-export async function runBuffer(cmd: string, args: string[]): Promise<Buffer> {
+export async function runBuffer(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<Buffer> {
   try {
-    const { stdout } = await execFileAsync(cmd, args, { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024 });
+    const { stdout } = await execFileAsync(cmd, args, { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024, cwd: opts.cwd });
     return stdout;
   } catch (err) {
     const e = err as { stderr?: Buffer; message: string };

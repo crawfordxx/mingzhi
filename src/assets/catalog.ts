@@ -30,7 +30,10 @@ export interface FontAsset {
   zipEntry?: string;
 }
 
-/** 入库的 Kenney CC0 音效（assets/sfx/） */
+/**
+ * 入库的音效（assets/sfx/）：前 8 个是 Kenney CC0 包里挑出的；其余由 scripts/make-sfx.mjs 用代码合成（无第三方采样），
+ * 带数字后缀的是同类变体（音高、质感略不同），同一音效全片重复过多时轮换用
+ */
 export const SFX = {
   enter: 'maximize_006.wav',
   exit: 'minimize_003.wav',
@@ -40,6 +43,25 @@ export const SFX = {
   load: 'scroll_002.wav',
   confirm: 'confirmation_002.wav',
   sparkle: 'glass_001.wav',
+  whoosh: 'whoosh.wav',
+  whoosh2: 'whoosh_2.wav',
+  whoosh3: 'whoosh_3.wav',
+  hit: 'hit.wav',
+  hit2: 'hit_2.wav',
+  hit3: 'hit_3.wav',
+  riser: 'riser.wav',
+  riserShort: 'riser_short.wav',
+  pop: 'pop.wav',
+  pop2: 'pop_2.wav',
+  pop3: 'pop_3.wav',
+  pop4: 'pop_4.wav',
+  tick2: 'tick_2.wav',
+  tick3: 'tick_3.wav',
+  click2: 'click_2.wav',
+  toggle2: 'toggle_2.wav',
+  confirm2: 'confirm_2.wav',
+  confirm3: 'confirm_3.wav',
+  logo: 'logo.wav',
 } as const;
 
 export type SfxId = keyof typeof SFX;
@@ -119,6 +141,11 @@ export function fontPath(cfg: AppConfig, f: FontAsset): string {
 
 export function sfxPath(id: SfxId): string {
   return join(REPO_ASSETS, 'sfx', SFX[id]);
+}
+
+/** 片尾用的品牌 logo（PNG） */
+export function brandLogoPath(): string {
+  return join(REPO_ASSETS, 'brand', 'logo-512.png');
 }
 
 function nonEmpty(path: string): boolean {

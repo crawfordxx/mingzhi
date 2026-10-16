@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { resolveCliPaths } from './cli-paths.js';
@@ -13,13 +14,17 @@ import { makeTaskClient, parseBrollArgs, parseBudgetArg } from './pipeline/broll
 import { parseFinishArgs } from './pipeline/finish-step.js';
 import { KexiangTaskClient } from './llm/kexiang-task.js';
 import { probe } from './media/probe.js';
-import { qaSummary } from './pipeline/qa-step.js';
+import { coverOnlyCommand } from './cli-cover.js';
+import { doneReport, exitCodeOf } from './cli-report.js';
+import { projectQaSummary } from './pipeline/qa-step.js';
+import type { ProjectFile } from './pipeline/project.js';
 import { runPipeline, type ProgressEvent } from './pipeline/run.js';
 
-const USAGE = '用法：pnpm mingzhi edit <口播视频> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] [--no-broll] [--max-videos N] [--budget 元] [--bgm auto|none|曲目id] [--caption-style 样式id] [--cover-style 风格id] [--no-cover] [--no-qa] [--yes]';
+const USAGE = '用法：pnpm mingzhi edit <口播视频> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] [--no-broll] [--max-videos N] [--budget 元] [--bgm auto|none|曲目id] [--caption-style 样式id] [--cover-style 风格id] [--no-cover] [--no-outro] [--outro-text 片尾文字] [--no-qa] [--cover-only] [--yes]';
+// --cover-only：成片已在工作目录里时只补封面（复用 --work 里的成片与分镜，不重做任何其他步骤）
 
 async function main(): Promise<void> {
-  const { positionals, values } = parseArgs({ allowPositionals: true, options: { output: { type: 'string', short: 'o' }, work: { type: 'string' }, bg: { type: 'string' }, 'bg-prompt': { type: 'string' }, 'no-broll': { type: 'boolean' }, 'max-videos': { type: 'string' }, budget: { type: 'string' }, bgm: { type: 'string' }, 'caption-style': { type: 'string' }, 'cover-style': { type: 'string' }, 'no-cover': { type: 'boolean' }, 'no-qa': { type: 'boolean' }, yes: { type: 'boolean', short: 'y' } } });
+  const { positionals, values } = parseArgs({ allowPositionals: true, options: { output: { type: 'string', short: 'o' }, work: { type: 'string' }, bg: { type: 'string' }, 'bg-prompt': { type: 'string' }, 'no-broll': { type: 'boolean' }, 'max-videos': { type: 'string' }, budget: { type: 'string' }, bgm: { type: 'string' }, 'caption-style': { type: 'string' }, 'cover-style': { type: 'string' }, 'no-cover': { type: 'boolean' }, 'no-outro': { type: 'boolean' }, 'outro-text': { type: 'string' }, 'no-qa': { type: 'boolean' }, 'cover-only': { type: 'boolean' }, yes: { type: 'boolean', short: 'y' } } });
   const [command, inputArg] = positionals;
   if (command !== 'edit' || !inputArg) throw new Error(USAGE);
   const baseDir = process.env.INIT_CWD ?? process.cwd();
@@ -33,6 +38,10 @@ async function main(): Promise<void> {
   const meter = new CostMeter(await loadPrices(join(cfg.dataDir, 'prices.json'), fetch, Date.now, cfg.kexiangKey), budgetYuan);
   const task = makeTaskClient(cfg, { background: background?.kind === 'prompt', broll, meter }) ?? (finish.cover && cfg.kexiangKey ? new KexiangTaskClient(cfg.kexiangKey, undefined, undefined, undefined, meter) : undefined);
   const llm = new KexiangClient(cfg.kexiangKey ?? '', undefined, undefined, meter);
+  if (values['cover-only']) {
+    process.exitCode = await coverOnlyCommand({ workDir, output, cfg, llm, task, meter, budgetYuan, cover: finish.cover, yes: values.yes === true, isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true });
+    return;
+  }
   const estimate = estimateCost({ durationSec: (await probe(input, cfg)).durationSec, bgPrompt: background?.kind === 'prompt', broll: broll.enabled, maxVideos: broll.maxVideos, qa: !values['no-qa'], cover: finish.cover !== false });
   if (!(await confirmRun({ estimate, budgetYuan, yes: values.yes === true, isTTY: process.stdin.isTTY === true && process.stdout.isTTY === true }))) {
     console.log('已取消，未花费任何费用');
@@ -42,14 +51,21 @@ async function main(): Promise<void> {
   const onProgress = (e: ProgressEvent): void => {
     if (e.detail?.kind !== 'cost') console.log(`[${e.step}] ${e.message}`);
   };
-  const args = { input, workDir, output, cfg, llm, background, task, broll, meter, qa: !values['no-qa'], ...finish, onProgress };
+  const args = { input, workDir, output, cfg, llm, background, task, broll, meter, qa: !values['no-qa'], grain: true, ...finish, onProgress };
   const res = await runPipeline(args).catch((err: unknown) => {
     console.error(`已花费 ¥${meter.total.toFixed(2)}`);
     if (err instanceof InsufficientBalanceError) console.error(`请先到 ${RECHARGE_URL} 充值，再重新运行（重跑会重新付费：只有 B-roll 素材与封面底图有缓存，其余 AI 步骤会重新调用）`);
     throw err;
   });
   const secs = Math.round((Date.now() - started) / 1000);
-  console.log(`\n完成：删除 ${res.cuts.length} 处 · 成片 ${res.plan.outputDurationSec.toFixed(1)} 秒 · ${res.storyboard.shots.length} 个镜头 · 用时 ${secs} 秒 · 花费 ¥${meter.total.toFixed(2)}（上限 ¥${budgetYuan.toFixed(2)}）${values['no-qa'] ? '' : `\n${qaSummary(res.qa)}`}\n${res.output}`);
+  // 成片含最后一句后的留白与品牌片尾，时长以成片文件为准
+  const finalSec = (await probe(res.output, cfg)).durationSec;
+  // 自检摘要读 project.json（与工作台事件、落盘文件同一份数据）；封面没生成时成片照常交付，警告走 stderr，退出码见 cli-report
+  const qaText = values['no-qa'] ? undefined : projectQaSummary(JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile);
+  const report = doneReport({ cuts: res.cuts.length, finalSec, shots: res.storyboard.shots.length, secs, spent: meter.total, budget: budgetYuan, output: res.output, workDir, qaText, coverMissing: res.coverMissing });
+  console.log(report.text);
+  if (report.warning) console.error(`\n${report.warning}`);
+  process.exitCode = exitCodeOf(report);
 }
 
 main().catch((err: Error) => {

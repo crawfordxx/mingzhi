@@ -56,14 +56,22 @@ describe('screenshotUrl 子进程处理（假浏览器）', () => {
   posixOnly('超时会杀掉浏览器及其子进程并报错，不留输出文件', async () => {
     const { dir, fake } = fakeBrowser(`sleep 30 &\necho $! > "${'$(dirname "$0")'}/child.pid"\nwait`);
     const out = join(dir, 'o.png');
-    // 超时给 3 秒：高并发下假浏览器脚本可能要一会儿才写出子进程号
-    await expect(screenshotUrl('https://example.com', out, { browserPath: fake, timeoutMs: 3000 })).rejects.toThrow('超时');
+    // 超时给 6 秒：全量并行满载时假浏览器脚本可能要好几秒才启动并写出子进程号（超时先到就没有 pid 可查）
+    await expect(screenshotUrl('https://example.com', out, { browserPath: fake, timeoutMs: 6000 })).rejects.toThrow('超时');
     expect(existsSync(out)).toBe(false);
     const childPid = Number(readFileSync(join(dir, 'child.pid'), 'utf8').trim());
-    // 轮询等子进程退出（最多 3 秒），不用固定等待，避免高负载下误报
+    // 轮询等子进程退出（最多 10 秒），不用固定等待，避免高负载下误报
     const alive = (): boolean => { try { process.kill(childPid, 0); return true; } catch { return false; } };
-    for (let i = 0; i < 30 && alive(); i += 1) await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 100 && alive(); i += 1) await new Promise((r) => setTimeout(r, 100));
     expect(alive()).toBe(false);
+  }, 30_000);
+
+  posixOnly('hideImages：不加载图片（只截页面与标题区，不截新闻配图本体）', async () => {
+    const { dir, fake } = fakeBrowser(`echo "$@" > "$(dirname "$0")/args.txt"\nexit 0`);
+    await expect(screenshotUrl('https://example.com', join(dir, 'o.png'), { browserPath: fake, hideImages: true })).rejects.toThrow('空白');
+    expect(readFileSync(join(dir, 'args.txt'), 'utf8')).toContain('--blink-settings=imagesEnabled=false');
+    await expect(screenshotUrl('https://example.com', join(dir, 'p.png'), { browserPath: fake })).rejects.toThrow('空白');
+    expect(readFileSync(join(dir, 'args.txt'), 'utf8')).not.toContain('imagesEnabled');
   });
 
   posixOnly('浏览器没产出图片时报错（空白/被拦截）', async () => {

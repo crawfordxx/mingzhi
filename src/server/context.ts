@@ -17,6 +17,8 @@ import type { EditOp } from '../edit/plan.js';
 import { renderCaptionPreview } from './preview.js';
 import { makeBackgroundThumb } from './thumbs.js';
 import type { KeyCache } from './keys.js';
+import type { StockKeys, StockStores } from './stock-keys.js';
+import { validateStockKey, type StockProvider } from './stock-validate.js';
 import type { Activity } from './lifecycle.js';
 import type { RunManager } from './runs.js';
 import type { UpdateInfo } from './update.js';
@@ -24,6 +26,8 @@ import type { UpdateInfo } from './update.js';
 /** 可替换的外部依赖：默认是真实实现，测试注入假的 */
 export interface AppDeps {
   validateKey: (key: string) => Promise<boolean>;
+  /** 校验图库 key：有效 true、无效 false、暂时无法判断抛错 */
+  validateStockKey: (provider: StockProvider, key: string) => Promise<boolean>;
   probe: (path: string) => Promise<MediaInfo>;
   planClient: (key: string, meter: CostMeter) => LlmClient;
   loadPrices: (key: string) => Promise<Record<string, Price>>;
@@ -38,6 +42,8 @@ export interface AppDeps {
 export interface AppOptions {
   cfg: AppConfig;
   keyStore?: KeyStore;
+  /** 图库 key 的存放；缺省：传了 keyStore（测试、假模型）就只用数据目录文件，否则系统钥匙串优先 */
+  stockStores?: StockStores;
   /** 前端构建目录，默认仓库的 web/dist */
   webDir?: string;
   /** 导出目录，默认 ~/Downloads/明知AI剪辑 */
@@ -70,6 +76,7 @@ export interface AppCtx {
   spacesRoot: string;
   keyStore: KeyStore;
   keys: KeyCache;
+  stock: StockKeys;
   /** 抹掉文字里的本机绝对路径（事件与错误响应） */
   scrub: (text: string) => string;
   deps: AppDeps;
@@ -89,6 +96,7 @@ export interface AppCtx {
 export function buildDeps(cfg: AppConfig, over: Partial<AppDeps> = {}): AppDeps {
   const base: AppDeps = {
     validateKey: (key) => validateKey(key),
+    validateStockKey: (provider, key) => validateStockKey(provider, key),
     probe: (path) => probe(path, cfg),
     planClient: (key, meter) => new KexiangClient(key, undefined, undefined, meter),
     loadPrices: (key) => loadPrices(join(cfg.dataDir, 'prices.json'), fetch, Date.now, key),
@@ -103,10 +111,10 @@ export function buildDeps(cfg: AppConfig, over: Partial<AppDeps> = {}): AppDeps 
 export const defaultExportDir = (): string => join(homedir(), 'Downloads', '明知AI剪辑');
 
 /** 默认的任务上下文：模型与任务客户端用当前 key 构造，花费记到本版本的计费器 */
-export async function defaultRunnerCtx(app: Pick<AppCtx, 'cfg' | 'store' | 'bus' | 'deps'>, key: string, signal: AbortSignal): Promise<RunnerCtx> {
+export async function defaultRunnerCtx(app: Pick<AppCtx, 'cfg' | 'store' | 'bus' | 'deps' | 'stock'>, key: string, signal: AbortSignal): Promise<RunnerCtx> {
   const prices = await loadPricesOrEmpty(app.deps, key);
   return {
-    store: app.store, bus: app.bus, cfg: { ...app.cfg, kexiangKey: key }, prices, signal,
+    store: app.store, bus: app.bus, cfg: { ...app.cfg, ...(await app.stock.asConfig()), kexiangKey: key }, prices, signal,
     clients: (meter) => ({
       llm: new KexiangClient(key, undefined, undefined, meter),
       task: new KexiangTaskClient(key, undefined, undefined, undefined, meter),

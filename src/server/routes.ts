@@ -11,8 +11,10 @@ import { HttpError, readJsonBody, sendJson, sendNoContent } from './http.js';
 import { activeKey, maskKey } from './keys.js';
 import { handleBackgroundThumb, handleCaptionPreview, handleMedia } from './media.js';
 import { route, type Route } from './router.js';
+import { creditRoutes } from './routes-credits.js';
 import { runRoutes } from './routes-runs.js';
 import { spaceRoutes } from './routes-spaces.js';
+import { stockRoutes } from './routes-stock.js';
 import { readPrefs, writePrefs } from './prefs.js';
 import { DEFAULT_SETTINGS } from './spaces.js';
 import { appVersion } from './update.js';
@@ -88,6 +90,7 @@ export function buildRoutes(app: AppCtx): Route[] {
       app.keys.invalidate();
       sendNoContent(c.res);
     }),
+    ...stockRoutes(app),
     // 工作台页面开着时定时 ping，服务据此判断有没有浏览器在用（空闲退出）
     route('GET', 'api/ping', (c) => sendNoContent(c.res)),
     route('GET', 'api/prefs', (c) => sendJson(c.res, 200, readPrefs(app.cfg.dataDir))),
@@ -103,6 +106,7 @@ export function buildRoutes(app: AppCtx): Route[] {
     }),
     ...spaceRoutes(app),
     ...runRoutes(app),
+    ...creditRoutes(app),
     route('GET', 'media/:id/:n/:file', (c) => handleMedia(app, c)),
     route('GET', 'thumbs/backgrounds/:file', (c) => handleBackgroundThumb(app, c)),
     route('GET', 'previews/captions/:file', (c) => handleCaptionPreview(app, c)),

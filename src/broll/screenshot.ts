@@ -20,6 +20,8 @@ export interface ScreenshotOptions {
   browserPath?: string;
   /** 允许 file:// 本地页面，仅供测试使用 */
   allowFile?: boolean;
+  /** 不加载图片（img、picture、CSS 背景图、视频封面）：只留页面与标题区，不截新闻配图本体与品牌 Logo 图 */
+  hideImages?: boolean;
 }
 
 /** 小于 10KB 视为空白页或被拦截 */
@@ -101,6 +103,7 @@ export async function screenshotUrl(url: string, output: string, opts: Screensho
     '--hide-scrollbars',
     '--force-device-scale-factor=1',
     `--virtual-time-budget=${VIRTUAL_TIME_BUDGET_MS}`,
+    ...(opts.hideImages ? ['--blink-settings=imagesEnabled=false', '--autoplay-policy=user-gesture-required'] : []),
     target,
   ];
   try {

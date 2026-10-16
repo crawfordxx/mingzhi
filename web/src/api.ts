@@ -25,6 +25,8 @@ export interface VersionMeta {
   changedShots: number[];
   costYuan: number;
   qaScore?: number;
+  /** 版本已完成但有需要知道的事（如封面没生成：余额不足）；成片可用 */
+  warnings?: string[];
   status: 'running' | 'done' | 'failed';
 }
 
@@ -72,7 +74,34 @@ export interface VersionState {
   captions: { start: number; end: number; text: string }[];
   plan: { outputDurationSec: number; sourceDurationSec: number };
 }
-export interface ExportResult { dir: string; files: string[] }
+export interface ExportResult { dir: string; files: string[]; /** 署名文本（本版用了需要署名的素材才有） */ attribution?: string; /** 素材来源记录读不出来时的警告，必须显示给用户 */ attributionError?: string }
+
+export type StockProvider = 'pexels' | 'pixabay';
+export interface StockKeyInfo { configured: boolean; source?: KeySource; masked?: string }
+export type StockKeys = Record<StockProvider, StockKeyInfo>;
+
+export type CreditSource = 'pexels' | 'pixabay' | 'openverse' | 'wikimedia' | 'screenshot' | 'generated';
+export type CreditMark = 'replace' | 'remove';
+/** 素材来源面板的一条（src/server/credits.ts publicEntry）：file 只是文件名，不含本机路径 */
+export interface CreditItem {
+  file: string;
+  kind: 'video' | 'image';
+  source: CreditSource;
+  page: string;
+  author?: string;
+  authorUrl?: string;
+  license: string;
+  licenseUrl?: string;
+  attributionRequired: boolean;
+  aiGenerated: boolean;
+  modified: string[];
+  query: string;
+  thumb: string;
+  mark?: CreditMark;
+  /** 用在第几个镜头；有它才能直接提交「换一张 B-roll」 */
+  shotIndex?: number;
+}
+export interface Credits { entries: CreditItem[]; attribution: string }
 export type EventSink = (e: WorkEvent) => void
 
 export interface Status {
@@ -136,6 +165,15 @@ export interface Api {
   cancel(id: string): Promise<void>;
   exportVersion(id: string, n: number): Promise<ExportResult>;
   versionState(id: string, n: number): Promise<VersionState>;
+  /** 图库 key（选填）：Pexels、Pixabay；完整 key 永远不会返回，只给末 4 位 */
+  stockKeys(): Promise<StockKeys>;
+  /** 校验通过才保存；无效 400、暂时无法校验 503，都抛带中文原因的 ApiError */
+  saveStockKey(provider: StockProvider, key: string): Promise<StockKeys>;
+  deleteStockKey(provider: StockProvider): Promise<void>;
+  /** 某个版本用到的素材与署名文本 */
+  credits(id: string, n: number): Promise<Credits>;
+  /** 标记一条素材要替换或删除（写进版本目录，随后的 replaceBroll 修改读取） */
+  markCredit(id: string, n: number, file: string, action: CreditMark): Promise<void>;
   /** 订阅某个版本的事件：先补历史再推实时；断线自动重连（onStatus 报告在线与否）；返回取消订阅 */
   events(id: string, version: number, sink: EventSink, onStatus?: (online: boolean) => void): () => void;
   /** 页面开着时定时调用：服务据此知道还有浏览器在用（否则空闲 2 小时自动退出） */
@@ -241,6 +279,11 @@ export function createHttpApi(): Api {
     cancel: (id) => json(`/api/spaces/${enc(id)}/cancel`, { method: 'POST' }),
     exportVersion: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/export`, { method: 'POST' }, PLAN_TIMEOUT_MS),
     versionState: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/state`),
+    stockKeys: () => json('/api/stock-keys'),
+    saveStockKey: (provider, key) => json('/api/stock-keys', { method: 'POST', body: JSON.stringify({ provider, key }) }, KEY_TIMEOUT_MS),
+    deleteStockKey: (provider) => json(`/api/stock-keys?provider=${provider}`, { method: 'DELETE' }),
+    credits: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/credits`),
+    markCredit: (id, n, file, action) => json(`/api/spaces/${enc(id)}/versions/${n}/credits/${enc(file)}/${action}`, { method: 'POST' }),
     events: (id, version, sink, onStatus) => openEvents(`/api/spaces/${enc(id)}/events?version=${version}`, sink, onStatus),
     ping: () => json('/api/ping'),
     prefs: () => json('/api/prefs'),

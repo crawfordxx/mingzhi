@@ -18,7 +18,13 @@ export type Exec = (cmd: string, args: string[], opts?: { input?: string }) => P
  */
 export const KEXIANG_VALIDATE_URL = 'https://kexiangai.com/api/v1/chat/completions';
 const SERVICE = 'mingzhi';
-const ACCOUNT = 'kexiang';
+
+/** 一把 key 的存放位置：钥匙串里的账号名 + 数据目录下回退文件名（DPAPI 密文文件为 <file>.dpapi） */
+export interface KeySlot { account: string; file: string }
+export const KEXIANG_SLOT: KeySlot = { account: 'kexiang', file: 'key' };
+/** 图库 key（选填）：与可想 key 各占一个槽，互不覆盖 */
+export const PEXELS_SLOT: KeySlot = { account: 'pexels', file: 'pexels-key' };
+export const PIXABAY_SLOT: KeySlot = { account: 'pixabay', file: 'pixabay-key' };
 const VALIDATE_TIMEOUT_MS = 15_000;
 /** 外部命令超时：钥匙串被锁或弹授权框时 security 会一直阻塞，超时按失败处理并退回文件 */
 const EXEC_TIMEOUT_MS = 10_000;
@@ -88,9 +94,9 @@ function needKey(key: string): string {
 /** security -i 的命令行里用双引号包住密码，其中的反斜杠和双引号需转义 */
 const quoteForSecurity = (key: string): string => `"${key.replace(/[\\"]/g, '\\$&')}"`;
 
-function darwinStore(exec: Exec, plain: FileKey): KeyStore {
+function darwinStore(exec: Exec, plain: FileKey, account: string): KeyStore {
   const find = async () => {
-    const r = await run(exec, 'security', ['find-generic-password', '-s', SERVICE, '-a', ACCOUNT, '-w']);
+    const r = await run(exec, 'security', ['find-generic-password', '-s', SERVICE, '-a', account, '-w']);
     return r.code === 0 ? r.stdout.trim() || null : null;
   };
   return {
@@ -101,16 +107,16 @@ function darwinStore(exec: Exec, plain: FileKey): KeyStore {
     async set(raw) {
       const key = needKey(raw);
       // 命令从 stdin 送入，key 不进 argv（ps 看不到）
-      const r = await run(exec, 'security', ['-i'], `add-generic-password -U -s ${SERVICE} -a ${ACCOUNT} -w ${quoteForSecurity(key)}\n`);
+      const r = await run(exec, 'security', ['-i'], `add-generic-password -U -s ${SERVICE} -a ${account} -w ${quoteForSecurity(key)}\n`);
       if (r.code === 0 && (await find()) === key) {
         plain.remove();
         return;
       }
       plain.write(key);
-      await run(exec, 'security', ['delete-generic-password', '-s', SERVICE, '-a', ACCOUNT]); // 尽力清掉旧条目
+      await run(exec, 'security', ['delete-generic-password', '-s', SERVICE, '-a', account]); // 尽力清掉旧条目
     },
     async clear() {
-      await run(exec, 'security', ['delete-generic-password', '-s', SERVICE, '-a', ACCOUNT]);
+      await run(exec, 'security', ['delete-generic-password', '-s', SERVICE, '-a', account]);
       plain.remove();
     },
   };
@@ -160,12 +166,12 @@ function fileStore(plain: FileKey): KeyStore {
 }
 
 /** 只用数据目录下的 key 文件（600 权限），不读写系统钥匙串：假模型模式用 */
-export const fileKeyStore = (dataDir: string): KeyStore => fileStore(new FileKey(dataDir, 'key'));
+export const fileKeyStore = (dataDir: string, slot: KeySlot = KEXIANG_SLOT): KeyStore => fileStore(new FileKey(dataDir, slot.file));
 
-export function createKeyStore(dataDir: string, platform: NodeJS.Platform = process.platform, exec: Exec = defaultExec): KeyStore {
-  const plain = new FileKey(dataDir, 'key');
-  if (platform === 'darwin') return darwinStore(exec, plain);
-  if (platform === 'win32') return windowsStore(exec, plain, new FileKey(dataDir, 'key.dpapi'));
+export function createKeyStore(dataDir: string, platform: NodeJS.Platform = process.platform, exec: Exec = defaultExec, slot: KeySlot = KEXIANG_SLOT): KeyStore {
+  const plain = new FileKey(dataDir, slot.file);
+  if (platform === 'darwin') return darwinStore(exec, plain, slot.account);
+  if (platform === 'win32') return windowsStore(exec, plain, new FileKey(dataDir, `${slot.file}.dpapi`));
   return fileStore(plain);
 }
 

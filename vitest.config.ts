@@ -9,6 +9,15 @@ export const SERIAL_TESTS = [
   'tests/segments.test.ts',
   'tests/runner-e2e.test.ts',
   'tests/remotion-cache-real.test.ts',
+  'tests/broll-process.test.ts',
+  'tests/layouts-render.test.ts',
+  'tests/outro-render.test.ts',
+  'tests/storyboard-render.test.ts',
+  'tests/qa-film-render.test.ts',
+  'tests/grain-render.test.ts',
+  'tests/card-wipe-render.test.ts',
+  'tests/cta-hook-render.test.ts',
+  'tests/pipeline-qa.test.ts',
 ];
 
 export default defineConfig({

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CAPTION_STYLES } from '../captions/styles.js';
 import { COVER_STYLES } from '../cover/styles.js';
-import { CardSpecSchema, VisualSchema, type TemplateId } from '../storyboard/schema.js';
+import { CardSpecSchema, LAYOUTS, VisualSchema, type TemplateId } from '../storyboard/schema.js';
 
 const keys = <T extends object>(o: T): [keyof T & string, ...(keyof T & string)[]] => Object.keys(o) as [keyof T & string, ...(keyof T & string)[]];
 const index = z.number().int().min(0);
@@ -20,8 +20,10 @@ export const EditOpSchema = z.discriminatedUnion('type', [
   /** bgm：'none' 不要配乐、'auto' 自动选曲、情绪（chill/tech/upbeat）或曲目 id */
   z.object({ type: z.literal('setBgm'), bgm: z.string().trim().min(1) }),
   z.object({ type: z.literal('replaceCard'), shotIndex: index, card: CardSpecSchema }),
-  z.object({ type: z.literal('setLayout'), shotIndex: index, layout: z.enum(['split', 'full']) }),
+  z.object({ type: z.literal('setLayout'), shotIndex: index, layout: z.enum(LAYOUTS) }),
   z.object({ type: z.literal('regenerateVisual'), shotIndex: index, visual: VisualSchema }),
+  /** 换一张 B-roll：只重做该镜头的素材（素材面板标了删除的则去掉素材），其余镜头不动 */
+  z.object({ type: z.literal('replaceBroll'), shotIndex: index }),
   z.object({ type: z.literal('editCaption'), index, text: z.string().trim().min(1).max(60) }),
   z.object({ type: z.literal('pace'), direction: z.enum(['tighter', 'looser']) }),
   /** 成片时间（用户在预览里看到的时间） */

@@ -9,6 +9,7 @@ import { mediaOf } from '../pipeline/media-deps.js';
 import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
 import { backgroundStage, throttledMatteProgress } from '../pipeline/stages.js';
+import { subjectStage } from '../pipeline/subject-step.js';
 import type { CardQaEntry } from '../qa/visual.js';
 import type { VersionEnv } from './runner.js';
 import { FINAL_FILE, isInside, LAYER_FILES, linkFile, linkIfExists, MATTE_META, readJson, writeJsonAtomic, type MatteMeta } from './runner-files.js';
@@ -22,7 +23,9 @@ export function pipelineArgs(env: VersionEnv, input: string, state: VersionState
   return {
     input, workDir: dir, output: join(dir, FINAL_FILE), cfg: ctx.cfg, llm: env.llm, task: env.task, meter,
     background: state.settings.background, captionStyle: state.settings.captionStyle, audio: state.bgm, cover,
-    broll: { enabled: broll, maxVideos, budgetYuan, ...(ctx.cfg.pexelsKey ? { pexelsKey: ctx.cfg.pexelsKey } : {}) },
+    ...(state.settings.grain === undefined ? {} : { grain: state.settings.grain }),
+    broll: { enabled: broll, maxVideos, budgetYuan, ...(ctx.cfg.pexelsKey ? { pexelsKey: ctx.cfg.pexelsKey } : {}), ...(ctx.cfg.pixabayKey ? { pixabayKey: ctx.cfg.pixabayKey } : {}) },
+    ...(state.settings.outro ? { outro: state.settings.outro } : {}),
     ...(ctx.brollDeps ? { brollDeps: ctx.brollDeps(meter) } : {}),
     coverDeps: ctx.coverDeps, qaDeps: ctx.qaDeps, media: ctx.media, cacheDir: join(env.base, 'segments'), signal: ctx.signal, onProgress: env.emit,
   };
@@ -30,12 +33,12 @@ export function pipelineArgs(env: VersionEnv, input: string, state: VersionState
 
 export interface Person { person: string; subject: SubjectBox | null }
 
-/** 没有背景：人像就是剪切结果 */
-export function cutAsPerson(env: VersionEnv, cut: string): Person {
+/** 没有背景：人像就是剪切结果；人物框抽几帧本地识别（拿不到时为 null，分屏按居中） */
+export async function cutAsPerson(env: VersionEnv, args: PipelineArgs, cut: string): Promise<Person> {
   const person = join(env.dir, 'person.mp4');
   linkFile(cut, person);
   env.record({ artifacts: { person } });
-  return { person, subject: null };
+  return { person, subject: await subjectStage(args, cut, env.complete) };
 }
 
 /** 进程被硬杀时留下的临时图层文件（取消与失败会自行清理） */

@@ -1,5 +1,11 @@
 import type { Mood } from '../assets/catalog.js';
+import type { TimedCaption } from '../captions/lines.js';
+import { completeCardTitles } from './card-title.js';
 import { unifyListNumbering } from './numbering.js';
+import { PaletteSchema, type Palette } from '../compose/palette.js';
+import { visualLayout } from '../compose/layout.js';
+import { applyStoryboardRules } from './rules.js';
+import { fitRevealToShots, revealToLocal } from './reveal.js';
 import { CANVAS, CoverTitleSchema, DEFAULT_MOOD, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, MOODS, ShotSchema, type CardSpec, type CoverTitle, type Shot, type Storyboard } from './schema.js';
 
 export interface NormalizeResult {
@@ -10,6 +16,11 @@ export interface NormalizeResult {
   demoted: number;
   /** 因超过 MAX_SHOT_SEC 被截短的带卡片镜头数 */
   capped: number;
+  /** 模型分镜违反的多样性规则（已按规则修正，见 rules.ts）；只在 fromModel 时检查 */
+  ruleFixes?: string[];
+  /** 给了字幕且是模型分镜时：话说一半的卡片标题已改成完整的（记录），以及改不了的（供重试提示用） */
+  titleFixes?: string[];
+  titleIssues?: string[];
 }
 
 const MAX_HOOKS = 3;
@@ -20,6 +31,13 @@ const CTA_MIN_SEC = 2;
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const countCards = (shots: Shot[]): number => shots.filter((s) => s.card !== undefined).length;
 const plain = (s: Shot): Shot => ({ start: s.start, end: s.end, layout: 'full' });
+/** 画面上只有人物全屏的镜头（无卡片，也不显示 B-roll 素材）：可以互相合并 */
+const isPlain = (s: Shot): boolean => !s.card && visualLayout(s) === 'full';
+/** 画面上有内容（卡片，或显示出来的 B-roll 素材）的镜头：限长、不吞并相邻短镜头时与带卡片的镜头同等对待 */
+const hasContent = (s: Shot): boolean => s.card !== undefined || !isPlain(s);
+/** 全屏插入素材单次最长 3.5 秒（与 B-roll 节拍规划一致），其余带内容的镜头 MAX_SHOT_SEC */
+const FULL_BROLL_MAX_SEC = 3.5;
+const limitOf = (s: Shot): number => (visualLayout(s) === 'broll' ? FULL_BROLL_MAX_SEC : MAX_SHOT_SEC);
 
 function omitKey<P extends object, K extends keyof P>(obj: P, key: K): Omit<P, K> {
   return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key)) as Omit<P, K>;
@@ -61,9 +79,17 @@ function sanitizeCard(card: CardSpec, files: Set<string>): CardSpec | null {
   }
 }
 
-/** 无卡片的 split 镜头变为全屏；full 镜头只有 cta 能显示卡片，带其他卡片的改为 split（保留内容，否则会为看不见的卡片白取素材）；卡片不可用则返回 null（镜头整体丢弃） */
-function sanitizeShot(shot: Shot, files: Set<string>): Shot | null {
-  if (!shot.card) return { ...shot, layout: 'full' };
+/** 镜头素材（B-roll 编排层写入）不在可用列表里就去掉；全屏插入、画中画随之降为全屏（带卡片时下面按规则变分屏） */
+function sanitizeBroll(shot: Shot, files: Set<string>): Shot {
+  if (!shot.broll || files.has(shot.broll.file)) return shot;
+  const { broll: _drop, ...rest } = shot;
+  return rest.layout === 'broll' || rest.layout === 'pip' ? { ...rest, layout: 'full' } : rest;
+}
+
+/** 无卡片的镜头除非有素材可显示（全屏插入、画中画、浮层、上半屏铺素材）否则变为全屏；full 镜头只有 cta 能显示卡片，带其他卡片的改为 split（保留内容，否则会为看不见的卡片白取素材）；卡片不可用则返回 null（镜头整体丢弃） */
+function sanitizeShot(raw: Shot, files: Set<string>): Shot | null {
+  const shot = sanitizeBroll(raw, files);
+  if (!shot.card) return shot.broll && visualLayout(shot) !== 'full' ? shot : { ...omitKey(shot, 'broll'), layout: 'full' };
   const card = sanitizeCard(shot.card, files);
   if (!card) return null;
   return { ...shot, card, layout: shot.layout === 'full' && card.template !== 'cta' ? 'split' : shot.layout };
@@ -76,8 +102,10 @@ function clampAndResolve(shots: Shot[], durationSec: number): { placed: Shot[]; 
   let dropped = 0;
   let cursor = 0;
   for (const s of sorted) {
-    const start = Math.max(round(Math.min(s.start, durationSec)), cursor);
-    const end = round(Math.min(s.end, durationSec));
+    // 提前到片尾前的 cta（placed）可以超出口播内容结尾，不裁
+    const free = isPlacedCta(s);
+    const start = Math.max(round(free ? s.start : Math.min(s.start, durationSec)), cursor);
+    const end = round(free ? s.end : Math.min(s.end, durationSec));
     if (end <= start) {
       dropped += 1;
       continue;
@@ -88,23 +116,27 @@ function clampAndResolve(shots: Shot[], durationSec: number): { placed: Shot[]; 
   return { placed, dropped };
 }
 
+/** 已提前的 cta（props.placed）：位置由 compose/ending 的 placeCta 决定，归一化不动它 */
+const isPlacedCta = (s: Shot): boolean => s.card?.template === 'cta' && s.card.props.placed === true;
+
 /** 最后一个 cta 若是结束最晚的卡片镜头，则延伸到片尾并吸收其后的无卡片镜头，保证 cta 不被补齐或合并吞掉、时间轴不重叠 */
 function extendCta(shots: Shot[], durationSec: number): Shot[] {
   const ctaIdx = shots.map((s) => s.card?.template).lastIndexOf('cta');
   if (ctaIdx < 0) return shots;
+  if (isPlacedCta(shots[ctaIdx])) return shots;
   const cardEnd = Math.max(...shots.filter((s) => s.card).map((s) => s.end));
   if (shots[ctaIdx].end < cardEnd) return shots;
   // cta 之后的镜头必然没有卡片（否则 cta 不是结束最晚的卡片镜头），整段并入 cta
   return [...shots.slice(0, ctaIdx), { ...shots[ctaIdx], end: round(durationSec) }];
 }
 
-/** 带卡片的镜头限长 MAX_SHOT_SEC：普通镜头留开头，末尾的 cta 留结尾；余下由 fillGaps 补为全屏。余下不足 MIN_SHOT_SEC 时少留一点，避免被 mergeShort 并回 */
+/** 带卡片或显示 B-roll 素材的镜头限长 MAX_SHOT_SEC：普通镜头留开头，末尾的 cta 留结尾；余下由 fillGaps 补为全屏。余下不足 MIN_SHOT_SEC 时少留一点，避免被 mergeShort 并回 */
 function capLongShots(shots: Shot[]): { shots: Shot[]; capped: number } {
   const out = shots.map((s, i): Shot => {
     const len = round(s.end - s.start);
-    if (!s.card || len <= MAX_SHOT_SEC) return s;
+    if (!hasContent(s) || len <= MAX_SHOT_SEC) return s;
     const keep = len - MAX_SHOT_SEC < MIN_SHOT_SEC ? Math.min(MAX_SHOT_SEC, len - MIN_SHOT_SEC) : MAX_SHOT_SEC;
-    const tail = s.card.template === 'cta' && i === shots.length - 1;
+    const tail = s.card?.template === 'cta' && i === shots.length - 1;
     return tail ? { ...s, start: round(s.end - keep) } : { ...s, end: round(s.start + keep) };
   });
   return { shots: out, capped: out.filter((s, i) => s !== shots[i]).length };
@@ -129,11 +161,12 @@ type Fate = 'keep' | 'prev' | 'next' | 'plain';
 /** 短于 MIN_SHOT_SEC 的镜头（末尾 cta 除外；非末尾的 cta 之后会被降级，照常合并）：先并入前一个（带卡片的不超过 MAX_SHOT_SEC），再试并入后一个（同样限长），都不行时前一个按软上限并入，最后才改为全屏；首个镜头只能并入后一个，放不下就保留 */
 function shortFate(last: Shot | undefined, s: Shot, next: Shot | undefined): Fate {
   if (round(s.end - s.start) >= MIN_SHOT_SEC || (s.card?.template === 'cta' && !next)) return 'keep';
-  const fitsNext = next !== undefined && (!next.card || round(next.end - s.start) <= MAX_SHOT_SEC);
+  const fitsNext = next !== undefined && (!hasContent(next) || round(next.end - s.start) <= limitOf(next));
   if (!last) return fitsNext ? 'next' : 'keep';
-  if (!last.card || round(s.end - last.start) <= MAX_SHOT_SEC) return 'prev';
+  if (!hasContent(last) || round(s.end - last.start) <= limitOf(last)) return 'prev';
   if (fitsNext) return 'next';
-  return round(s.end - last.start) < SOFT_MAX_SHOT_SEC ? 'prev' : 'plain';
+  // 全屏插入不走软上限（单次最长 3.5 秒），碎片改为人物全屏
+  return limitOf(last) === MAX_SHOT_SEC && round(s.end - last.start) < SOFT_MAX_SHOT_SEC ? 'prev' : 'plain';
 }
 
 /** 合并短镜头；并入后一个时不输出本镜头，后一个从已排好的末尾开始（起点提前） */
@@ -149,11 +182,11 @@ function mergeShort(shots: Shot[]): Shot[] {
   }, []);
 }
 
-/** 相邻的无卡片全屏镜头合并成一个 */
+/** 相邻的纯人物全屏镜头合并成一个（带素材的镜头不参与） */
 function mergePlain(shots: Shot[]): Shot[] {
   return shots.reduce<Shot[]>((acc, s) => {
     const last = acc[acc.length - 1];
-    return last && !last.card && !s.card ? [...acc.slice(0, -1), { ...last, end: s.end }] : [...acc, s];
+    return last && isPlain(last) && isPlain(s) ? [...acc.slice(0, -1), { ...last, end: s.end }] : [...acc, s];
   }, []);
 }
 
@@ -161,11 +194,11 @@ function mergePlain(shots: Shot[]): Shot[] {
 function ensureCtaRoom(shots: Shot[]): Shot[] {
   const last = shots[shots.length - 1];
   const prev = shots[shots.length - 2];
-  if (!prev || last.card?.template !== 'cta' || round(last.end - last.start) >= CTA_MIN_SEC) return shots;
+  if (!prev || last.card?.template !== 'cta' || isPlacedCta(last) || round(last.end - last.start) >= CTA_MIN_SEC) return shots;
   // 向下取整到帧，帧对齐后仍不短于 CTA_MIN_SEC
   const wanted = Math.floor(round(last.end - CTA_MIN_SEC) * CANVAS.fps) / CANVAS.fps;
   // 前一个是空镜头且借完不足 1 秒：整个并入 cta，再继续向更早的镜头借（镜头数递减，必然终止）
-  if (!prev.card && wanted - prev.start < MIN_SHOT_SEC) return ensureCtaRoom([...shots.slice(0, -2), { ...last, start: prev.start }]);
+  if (!hasContent(prev) && wanted - prev.start < MIN_SHOT_SEC) return ensureCtaRoom([...shots.slice(0, -2), { ...last, start: prev.start }]);
   const start = Math.max(wanted, round(prev.start + MIN_SHOT_SEC));
   return start >= last.start ? shots : [...shots.slice(0, -2), { ...prev, end: start }, { ...last, start }];
 }
@@ -175,7 +208,13 @@ const snap = (sec: number): number => Math.round(sec * CANVAS.fps) / CANVAS.fps;
 /** 内部边界对齐到帧（1/30 秒），片头 0、片尾保持片长；对齐后为零长的镜头去掉（前后仍首尾相接） */
 function snapToFrames(shots: Shot[], durationSec: number): Shot[] {
   const end = round(durationSec);
-  const at = (sec: number, i: number): number => (i === 0 ? 0 : i === shots.length ? end : Math.min(snap(sec), end));
+  // 超出口播内容结尾的 placed cta（末镜头）起止都只对齐到帧，不压回片长
+  const tail = shots.length > 0 && isPlacedCta(shots[shots.length - 1]) && shots[shots.length - 1].end > end ? shots.length - 1 : -1;
+  const at = (sec: number, i: number): number => {
+    if (i === 0) return 0;
+    if (i === tail || i === tail + 1) return round(snap(sec));
+    return i === shots.length ? end : Math.min(snap(sec), end);
+  };
   return shots.map((s, i): Shot => ({ ...s, start: at(s.start, i), end: at(s.end, i + 1) })).filter((s) => s.end > s.start);
 }
 
@@ -191,7 +230,9 @@ function applyPlacementRules(shots: Shot[]): Shot[] {
       return no === undefined ? plain(s) : { ...s, card: { template: 'hook', props: { ...card.props, index: no, total: hookIdx.length } } };
     }
     if (card.template === 'cta') {
-      return i === shots.length - 1 ? { ...s, layout: 'full' } : plain(s);
+      // 已提前的 cta 之后只能是纯人像镜头（否则位置已被改乱，当作非末尾降级）
+      const keepPlaced = isPlacedCta(s) && shots.slice(i + 1).every((t) => !t.card && !t.broll);
+      return i === shots.length - 1 || keepPlaced ? { ...s, layout: 'full' } : plain(s);
     }
     return s;
   });
@@ -212,14 +253,24 @@ function readCoverTitle(raw: unknown): CoverTitle | undefined {
   return main.success ? main.data : undefined;
 }
 
-/** 分镜里与镜头无关的附加字段（背景乐情绪、封面标题） */
-function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle'> {
-  const coverTitle = readCoverTitle(raw);
-  return { bgm: readMood(raw), ...(coverTitle ? { coverTitle } : {}) };
+/** 片色（分镜阶段推导后落盘）：合法就原样保留，归一化再整理时不丢；不合法的丢掉（按原配色） */
+function readPalette(raw: unknown): Palette | undefined {
+  const p = PaletteSchema.safeParse((raw as { palette?: unknown } | null)?.palette);
+  return p.success ? p.data : undefined;
 }
 
-/** 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜；同一组列表卡的编号统一（要么都编号要么都不编号） */
-export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[]): NormalizeResult {
+/** 分镜里与镜头无关的附加字段（背景乐情绪、封面标题、片色） */
+function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle' | 'palette'> {
+  const coverTitle = readCoverTitle(raw);
+  const palette = readPalette(raw);
+  return { bgm: readMood(raw), ...(coverTitle ? { coverTitle } : {}), ...(palette ? { palette } : {}) };
+}
+
+/**
+ * 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜；同一组列表卡的编号统一（要么都编号要么都不编号）。
+ * fromModel：输入是模型刚给的分镜时，再按多样性规则修正（rules.ts），reveal 从成片秒数换算成镜头内秒数；已归一化的分镜再整理时不要传（reveal 已是镜头内秒数，只按镜头时长再校验）
+ */
+export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[], opts: { fromModel?: boolean; captions?: TimedCaption[] } = {}): NormalizeResult {
   if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error(`分镜归一化失败：片长无效（${durationSec}）`);
   const items = (raw as { shots?: unknown } | null)?.shots;
   const extras = readExtras(raw);
@@ -230,13 +281,19 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
   const usable = valid.flatMap((s) => { const c = sanitizeShot(s, images); return c ? [c] : []; });
   const { placed, dropped: overlapDropped } = clampAndResolve(usable, durationSec);
   const { shots: capped, capped: cappedCount } = capLongShots(extendCta(placed, durationSec));
-  const merged = mergePlain(applyPlacementRules(mergeShort(fillGaps(capped, durationSec))));
-  const shots = unifyListNumbering(snapToFrames(ensureCtaRoom(merged), durationSec));
+  const placedRules = applyPlacementRules(mergeShort(fillGaps(capped, durationSec)));
+  const ruled = opts.fromModel ? applyStoryboardRules(placedRules, durationSec) : { shots: placedRules, fixes: [] };
+  // 卡片标题要是完整意思（话说一半的按字幕改写）；需要字幕，只检查模型刚给的分镜
+  const titles = opts.fromModel && opts.captions ? completeCardTitles(ruled.shots, opts.captions) : undefined;
+  const snapped = unifyListNumbering(snapToFrames(ensureCtaRoom(mergePlain(titles?.shots ?? ruled.shots)), durationSec));
+  const shots = opts.fromModel ? revealToLocal(snapped) : fitRevealToShots(snapped);
 
   return {
     storyboard: { shots, ...extras },
     dropped: items.length - usable.length + overlapDropped,
     demoted: countCards(placed) - countCards(shots),
     capped: cappedCount,
+    ...(opts.fromModel ? { ruleFixes: ruled.fixes } : {}),
+    ...(titles ? { titleFixes: titles.fixes, titleIssues: titles.unfixed } : {}),
   };
 }

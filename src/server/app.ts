@@ -14,6 +14,7 @@ import { Activity, watchIdle } from './lifecycle.js';
 import { findRoute, splitUrl } from './router.js';
 import { buildRoutes } from './routes.js';
 import { RunManager } from './runs.js';
+import { fileStockStores, keychainStockStores, StockKeys } from './stock-keys.js';
 import { countsAsActivity, guardRequest } from './security.js';
 import { pathScrubber } from './paths.js';
 
@@ -69,6 +70,7 @@ function buildApp(opts: AppOptions, portOf: () => number, requestShutdown: () =>
   const store = new SpaceStore(spacesRoot);
   const keyStore = opts.keyStore ?? createKeyStore(opts.cfg.dataDir);
   const keys = new KeyCache(opts.cfg, keyStore);
+  const stock = new StockKeys(opts.cfg, opts.stockStores ?? (opts.keyStore ? fileStockStores(opts.cfg.dataDir) : keychainStockStores(opts.cfg.dataDir)), (k) => keys.remember(k));
   const scrub = pathScrubber(spacesRoot);
   const versionExists = (id: string, n: number): boolean => {
     try {
@@ -81,7 +83,7 @@ function buildApp(opts: AppOptions, portOf: () => number, requestShutdown: () =>
   const runs = new RunManager(bus);
   const devPort = opts.devPort ?? (Number(process.env.MINGZHI_DEV_PORT) || undefined);
   const app: AppCtx = {
-    cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore, keys, scrub,
+    cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore, keys, stock, scrub,
     deps: buildDeps(opts.cfg, opts.deps), webDir: opts.webDir ?? DEFAULT_WEB_DIR, exportDir: opts.exportDir ?? defaultExportDir(), devPort, port: portOf,
     activity: new Activity(opts.idleClock), updates: opts.updates, requestShutdown,
   };

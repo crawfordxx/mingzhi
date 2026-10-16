@@ -2,13 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, relative } from 'node:path';
 import type { Transcript } from '../asr/types.js';
+import type { AppConfig } from '../config.js';
 import { toAss } from '../captions/ass.js';
 import { keptIndices, timeCaptions, type TimedCaption } from '../captions/lines.js';
 import { polishCaptions, type PolishResult } from '../captions/polish.js';
 import { PRESETS } from '../background/presets.js';
 import { resolveBackground, type BackgroundSpec, type ResolvedBackground } from '../background/resolve.js';
 import { rethrowIfCancelled } from '../cancel.js';
+import { outroProps, placeCta, planEnding, resolveOutro } from '../compose/ending.js';
+import { withOpeningHook } from '../compose/opening-hook.js';
 import { renderSegmented, type SegmentedResult } from '../compose/segments.js';
+import { stageOutroLogo } from '../compose/stage-assets.js';
 import { COVER_YUAN } from '../cost/estimate.js';
 import type { CostMeter } from '../cost/meter.js';
 import { detectCuts, type Cut } from '../cut/llm-cuts.js';
@@ -18,17 +22,21 @@ import type { LlmClient } from '../llm/kexiang.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { MatteResult } from '../matting/rvm.js';
 import type { MediaInfo } from '../media/probe.js';
+import type { Palette } from '../compose/palette.js';
 import { generateStoryboard } from '../storyboard/generate.js';
-import { DEFAULT_MOOD, type Storyboard } from '../storyboard/schema.js';
+import { DEFAULT_MOOD, type Shot, type Storyboard } from '../storyboard/schema.js';
+import { limitTailLoudness } from '../audio/loudness.js';
 import type { CardQaEntry, CardScore } from '../qa/visual.js';
 import type { HardCheck } from '../qa/hard.js';
 import { prepareAudio } from './audio-step.js';
-import { runBroll } from './broll-step.js';
+import { runBroll, type BrollContext } from './broll-step.js';
 import { cardScoreDetail, progressDetail } from './detail.js';
-import { runCover, runLoudness } from './finish-step.js';
+import { runCover, runLoudness, type CoverResult } from './finish-step.js';
 import { mediaOf } from './media-deps.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
-import { runQaCards, runQaFinal } from './qa-step.js';
+import type { FacePerson } from '../qa/face-noise-measure.js';
+import { runQaCards, runQaFilm, runQaFinal, type FilmCut } from './qa-step.js';
+import type { FilmQa } from '../qa/film-redo.js';
 import type { PipelineArgs, PipelineStep, ProgressEvent } from './run.js';
 
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
@@ -132,15 +140,16 @@ export async function captionsStage(args: PipelineArgs, a: Analysis, ass: string
   return captions;
 }
 
-/** 生成分镜；请求失败不中断，降级为整片人像全屏一个镜头，并在进度消息里写明原因 */
-async function planStoryboard(llm: LlmClient, captions: TimedCaption[], durationSec: number, complete: Complete): Promise<Storyboard> {
+/** 生成分镜；请求失败不中断，降级为整片人像全屏一个镜头，并在进度消息里写明原因；片色（有的话）随分镜一起落盘 */
+async function planStoryboard(llm: LlmClient, captions: TimedCaption[], durationSec: number, complete: Complete, palette?: Palette): Promise<Storyboard> {
+  const tint = palette ? { palette } : {};
   let res: Awaited<ReturnType<typeof generateStoryboard>>;
   try {
     res = await generateStoryboard(llm, captions, durationSec, []);
   } catch (err) {
     rethrowIfBalance(err); // 余额不足降级也没用：后面的付费步骤同样会失败
     rethrowIfCancelled(err);
-    const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }], bgm: DEFAULT_MOOD };
+    const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }], bgm: DEFAULT_MOOD, ...tint };
     complete('storyboard', `分镜生成失败，改为全程人像：${err instanceof Error ? err.message : String(err)}`, { storyboard });
     return storyboard;
   }
@@ -148,24 +157,63 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
   const retry = res.retryError ? ` · 重试失败（已用首次结果）：${res.retryError}` : '';
   const facts = res.unsupported.length > 0 ? ` · 去掉 ${res.unsupported.length} 处口播里没有的数字（${res.unsupported.join('、')}）` : '';
-  const patch = { storyboard: res.storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped };
+  const storyboard = { ...res.storyboard, ...tint };
+  const patch = { storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped };
   complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${facts}${retry}`, patch);
-  return res.storyboard;
+  return storyboard;
 }
 
-/** 分镜 → 素材（素材文件写到 brollDir/broll，缓存按需求内容命中） */
+/** 分镜 → 素材（素材文件写到 brollDir/broll，缓存按需求内容命中）；whiteBalance 为人物背景平均色（见 whiteBalanceOf），palette 为片色（见 paletteOf） */
 export async function storyboardStage(
-  args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete,
+  args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete, whiteBalance?: BrollStageExtra['whiteBalance'], palette?: Palette,
 ): Promise<Storyboard> {
-  const planned = await planStoryboard(args.llm, captions, durationSec, complete);
-  return brollStage(args, planned, durationSec, brollDir, complete);
+  const planned = placeEnding(args, await planStoryboard(args.llm, captions, durationSec, complete, palette), captions, durationSec);
+  return brollStage(args, planned, durationSec, brollDir, complete, { captions, ...(whiteBalance ? { whiteBalance } : {}) });
 }
 
-/** 只跑素材步骤（修改版本的 regenerateVisual 等也走这里，预算与 maxVideos 由 args.broll / args.meter 约束；deferShots 的需求排到最后） */
+/**
+ * B-roll 白平衡参考色：人物背景图（没换背景时用人像视频第一帧）的平均色；素材获取关闭时不量。
+ * 量不出来不影响出片（素材只套项目 LUT），在进度里说明
+ */
+export async function whiteBalanceOf(args: PipelineArgs, file: string): Promise<BrollStageExtra['whiteBalance']> {
+  if (!args.broll?.enabled) return undefined;
+  try {
+    return await mediaOf(args.media).meanColor(args.cfg.ffmpeg, file);
+  } catch (err) {
+    rethrowIfCancelled(err);
+    args.onProgress?.({ step: 'broll', message: `白平衡参考色量取失败，素材只套项目 LUT：${err instanceof Error ? err.message : String(err)}` });
+    return undefined;
+  }
+}
+
+/**
+ * 片色：人物背景图（没换背景时用人像视频第一帧）套项目 LUT 后取样推导（compose/palette）；本地 ffmpeg，不花钱。
+ * 取不到不影响出片（卡片按原配色），在进度里说明
+ */
+export async function paletteOf(args: PipelineArgs, file: string): Promise<Palette | undefined> {
+  try {
+    return await mediaOf(args.media).palette(args.cfg.ffmpeg, file);
+  } catch (err) {
+    rethrowIfCancelled(err);
+    args.onProgress?.({ step: 'storyboard', message: `片色取样失败，卡片按默认配色：${err instanceof Error ? err.message : String(err)}` });
+    return undefined;
+  }
+}
+
+/** CTA 提前到倒数第 5–8 秒（分镜阶段落盘，之后的归一化认 placed 标记不再拉回）；放不下就留在末尾 */
+export function placeEnding(args: PipelineArgs, storyboard: Storyboard, captions: TimedCaption[], contentSec: number): Storyboard {
+  return { ...storyboard, shots: placeCta(storyboard.shots, captions, contentSec, resolveOutro(args.outro).enabled) };
+}
+
+/** 素材步骤的附加输入：字幕（节拍规划要用）、排到最后取的卡片素材镜头、修改版本的重做请求（有它就不重新规划节拍）、白平衡参考色 */
+export interface BrollStageExtra { captions?: TimedCaption[]; deferShots?: number[]; edit?: BrollContext['edit']; whiteBalance?: BrollContext['whiteBalance'] }
+
+/** 只跑素材步骤（修改版本的 regenerateVisual、换一张 B-roll 也走这里，预算与 maxVideos 由 args.broll / args.meter 约束）；素材写到 brollDir/broll，credits.json 写到 args.workDir */
 export function brollStage(
-  args: PipelineArgs, storyboard: Storyboard, durationSec: number, brollDir: string, complete: Complete, deferShots?: number[],
+  args: PipelineArgs, storyboard: Storyboard, durationSec: number, brollDir: string, complete: Complete, extra: BrollStageExtra = {},
 ): Promise<Storyboard> {
-  return runBroll({ ...args, workDir: brollDir, reserveYuan: coverReserve(args), ...(deferShots ? { deferShots } : {}) }, storyboard, durationSec, complete);
+  const ctx = { ...args, workDir: brollDir, creditsDir: args.workDir, reserveYuan: coverReserve(args), ...extra };
+  return runBroll(ctx, storyboard, durationSec, complete);
 }
 
 /** 卡片自检（args.qa 为 false 时跳过）；only 给出时只检查这些镜头；keep 里的镜头只打分不重写 */
@@ -209,15 +257,21 @@ export interface ComposeInput {
 }
 
 /** 配乐音效与字幕样式落盘 → 分段渲染（命中缓存的镜头直接复用）到 raw → 响度统一得到成片；返回重渲与复用的镜头序号 */
-export async function composeStage(args: PipelineArgs, c: ComposeInput, complete: Complete): Promise<SegmentedResult> {
+export async function composeStage(args: PipelineArgs, c: ComposeInput, complete: Complete): Promise<Composed> {
   const { workDir, cfg } = args;
   const m = mediaOf(args.media);
   if (relative(workDir, c.person).startsWith('..')) throw new Error(`人像视频必须在工作目录内：${c.person}`);
   const baseInfo = await m.probe(c.person, cfg);
   // 成片时长不超过人像视频的实际时长（剪切编码后可能比方案略短），避免末尾取不到帧
-  const durationSec = Math.min(c.outputDurationSec, baseInfo.durationSec);
+  const contentSec = Math.min(c.outputDurationSec, baseInfo.durationSec);
+  // 结尾：最后一句后留白、接品牌片尾（CTA 已在分镜阶段提前，见 placeEnding）；末镜头截到人像实际时长，不改镜头数量与顺序
+  const outroOptions = resolveOutro(args.outro);
+  const ending = planEnding(c.captions, contentSec, outroOptions.enabled, c.storyboard.shots);
+  // 第一个镜头是全屏素材时叠开头钩子文字（渲染用的镜头，分镜里不存）
+  const shots = withOpeningHook(clampLastShot(c.storyboard.shots, contentSec), c.captions, c.storyboard.coverTitle);
+  const outro = ending.hasOutro ? outroProps(ending, outroOptions, await stageOutroLogo(workDir)) : undefined;
   const audioArgs = { workDir, cfg, input: args.input, audio: args.audio, captionStyle: args.captionStyle };
-  const audio = await prepareAudio(audioArgs, c.storyboard, c.captions, durationSec);
+  const audio = await prepareAudio(audioArgs, { ...c.storyboard, shots }, c.captions, ending.durationSec, outro?.startSec);
   audio.notes.forEach((note) => complete('compose', note));
   complete('compose', audio.summary, { audio: audio.info, captionStyle: audio.props.captionStyle });
   const progress = throttledRenderProgress((e) => args.onProgress?.(e));
@@ -226,7 +280,7 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
     onProgress: (done, total) => progress(total > 0 ? done / total : 1),
     props: {
       person: relative(workDir, c.person), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: c.subject,
-      captions: c.captions, shots: c.storyboard.shots, durationSec, ...audio.props,
+      captions: c.captions, shots, durationSec: ending.durationSec, contentSec, ...(c.storyboard.palette ? { palette: c.storyboard.palette } : {}), ...(outro ? { outro } : {}), ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
     },
   }).catch((err: unknown) => {
     rethrowIfCancelled(err);
@@ -235,19 +289,92 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
   progress(1);
   complete('compose', '成片渲染完成');
   await runLoudness(cfg, c.raw, c.output, complete, m.loudness);
-  return res;
+  if (outro) await runTailGuard(c.output, ending.durationSec, outro.startSec, cfg, complete, m.tail);
+  return { ...res, ...(outro ? { outroStartSec: outro.startSec } : {}) };
+}
+
+/** 末镜头不超出人像视频的实际时长（编码后可能比方案略短）；只改末镜头的结束时间（提前到片尾前的 CTA 除外） */
+function clampLastShot(shots: Shot[], contentSec: number): Shot[] {
+  const last = shots[shots.length - 1];
+  // 提前到片尾前的 CTA（placed）可以超出内容结尾，不截
+  const placedCta = last?.card?.template === 'cta' && last.card.props.placed === true;
+  return last && !placedCta && last.end > contentSec && last.start < contentSec ? [...shots.slice(0, -1), { ...last, end: contentSec }] : shots;
+}
+
+/** 响度统一后测片尾：高于上限就只衰减片尾并写进度；失败不让成片失败 */
+async function runTailGuard(output: string, durationSec: number, outroStartSec: number, cfg: AppConfig, complete: Complete, limit: typeof limitTailLoudness = limitTailLoudness): Promise<void> {
+  try {
+    const r = await limit(output, durationSec, outroStartSec, cfg);
+    if (r.attenuatedDb > 0) complete('loudness', `片尾响度 ${r.before.toFixed(1)} → ${r.after.toFixed(1)} LUFS（片尾衰减 ${r.attenuatedDb.toFixed(1)} dB，口播不动）`);
+  } catch (err) {
+    rethrowIfCancelled(err);
+    complete('loudness', `片尾响度校正失败，已保留原成片：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+export type Composed = SegmentedResult & { outroStartSec?: number };
+
+/** 人脸噪声度量要的人像信息：有人物框并且探测到视频尺寸才测；探测失败当作不测，不影响整片自检的其余指标 */
+async function facePerson(args: PipelineArgs, input: ComposeInput): Promise<FacePerson | undefined> {
+  if (!input.subject) return undefined;
+  const info = await mediaOf(args.media).probe(input.person, args.cfg).catch(() => undefined);
+  return info ? { file: input.person, width: info.width, height: info.height, subject: input.subject } : undefined;
+}
+
+/** 重做失败时成片路径回指原成片；取消时 complete 落盘后会再抛一次取消，吞掉它让原错误照常外抛 */
+function restoreArtifacts(complete: Complete, artifacts: { output: string; final: string }): void {
+  try {
+    complete('compose', '局部重做没有完成，成片保留原版本', { artifacts });
+  } catch {
+    // 已落盘；原错误由调用方外抛
+  }
+}
+
+/** 局部重做的临时成片：与成片同目录（改名是原子的），扩展名不变（ffmpeg 按扩展名选封装） */
+const redoPathOf = (output: string): string => join(dirname(output), `${basename(output, extname(output))}.redo${extname(output)}`);
+
+/**
+ * 整片自检（args.qa 为 false 时跳过）：度量成片；redo 为 true 时不达标的指标做一轮局部重做，按新分镜重渲（分段缓存只重渲受影响的镜头）。
+ * metaDir 为素材记录所在目录（工作台传 base）。返回最终分镜与最终一次渲染的结果
+ */
+export async function filmQaStage(args: PipelineArgs, input: ComposeInput, composed: Composed, complete: Complete, redo: boolean, metaDir?: string): Promise<{ storyboard: Storyboard; composed: Composed; film?: FilmQa }> {
+  if (args.qa === false) return { storyboard: input.storyboard, composed };
+  let last = composed;
+  // 重做渲染到成片旁的临时文件，成功后原子改名覆盖；渲染、响度统一失败或取消时已交付的成片原样保留
+  const rerender = async (storyboard: Storyboard): Promise<FilmCut> => {
+    const redoOutput = redoPathOf(input.output);
+    const artifacts = { output: input.output, final: input.output };
+    try {
+      const next = await composeStage(args, { ...input, storyboard, output: redoOutput }, complete);
+      renameSync(redoOutput, input.output);
+      last = next;
+    } catch (err) {
+      // 响度统一已把临时文件记成成片：改名失败或中途取消时把工程文件里的成片路径指回原成片
+      restoreArtifacts(complete, artifacts);
+      throw err;
+    } finally {
+      rmSync(redoOutput, { force: true });
+    }
+    complete('compose', `局部重做：重渲 ${last.rendered.length} 段 · 复用缓存 ${last.reused.length} 段`, { artifacts });
+    return { video: input.output, storyboard, ...(last.outroStartSec === undefined ? {} : { outroStartSec: last.outroStartSec }) };
+  };
+  const face = await facePerson(args, input);
+  const ctx = { cfg: args.cfg, workDir: args.workDir, redo, signal: args.signal, measure: args.qaDeps?.film, ...(metaDir ? { metaDir } : {}), ...(face ? { face } : {}) };
+  const cut: FilmCut = { video: input.output, storyboard: input.storyboard, ...(composed.outroStartSec === undefined ? {} : { outroStartSec: composed.outroStartSec }) };
+  const res = await runQaFilm(ctx, cut, input.captions, rerender, complete);
+  return { storyboard: res.cut.storyboard, composed: last, ...(res.film ? { film: res.film } : {}) };
 }
 
 /** 成片硬检查（args.qa 为 false 时跳过） */
-export function finalQaStage(args: PipelineArgs, video: string, storyboard: Storyboard, cards: CardQaEntry[], complete: Complete): Promise<HardCheck[]> {
+export function finalQaStage(args: PipelineArgs, video: string, storyboard: Storyboard, cards: CardQaEntry[], complete: Complete, outroStartSec?: number): Promise<HardCheck[]> {
   if (args.qa === false) return Promise.resolve([]);
-  return runQaFinal({ cfg: args.cfg, hardChecks: args.qaDeps?.hardChecks }, video, storyboard, cards, complete);
+  return runQaFinal({ cfg: args.cfg, hardChecks: args.qaDeps?.hardChecks, outroStartSec }, video, storyboard, cards, complete);
 }
 
-/** 封面（args.cover 为 false 时跳过；失败只降级为进度消息） */
+/** 封面（args.cover 为 false 时跳过；失败只降级为进度消息，原因在返回值里） */
 export function coverStage(
   args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], personVideo: string, complete: Complete,
-): Promise<void> {
+): Promise<CoverResult> {
   const ctx = { workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter };
   return runCover(ctx, args.cover, storyboard, captions, personVideo, complete);
 }

@@ -64,7 +64,7 @@ function firstScript(): Ev[] {
     { at: 7000, step: 'broll', message: '素材 3 个（截图 2 / 生图 1 / 视频 0）' }, cost(7010, 1.06),
     ...qa,
     ...[25, 50, 75, 100].map((p, i) => pct(9000 + i * 700, 'compose', p)),
-    { at: 12000, step: 'loudness', message: '响度 -18.6 → -14.0 LUFS' }, { at: 12300, step: 'qa-final', message: '成片检查：全部通过（7/7）' },
+    { at: 12000, step: 'loudness', message: '响度 -18.6 → -14.0 LUFS' }, { at: 12300, step: 'qa-final', message: '成片硬检查：全部通过（7/7）' },
     { at: 12600, step: 'cover', message: '封面已生成' }, cost(12610, 3.84), { at: 12800, step: 'done', message: 'final.mp4' },
   ];
 }
@@ -72,7 +72,7 @@ function firstScript(): Ev[] {
 const editScript = (summary: string): Ev[] => [
   { at: 0, step: 'edit', message: `修改：${summary} · 应用 1 项修改 · 重跑：成片` }, cost(10, 0),
   ...[30, 60, 100].map((p, i) => pct(800 + i * 700, 'compose', p)),
-  { at: 3200, step: 'qa-final', message: '成片检查：全部通过（7/7）' }, cost(3210, 0.16), { at: 3400, step: 'done', message: 'final.mp4' },
+  { at: 3200, step: 'qa-final', message: '成片硬检查：全部通过（7/7）' }, cost(3210, 0.16), { at: 3400, step: 'done', message: 'final.mp4' },
 ];
 
 interface Hub { logs: Map<string, WorkEvent[]>; subs: Map<string, Set<EventSink>> }

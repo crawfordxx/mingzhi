@@ -4,10 +4,12 @@ import type { TimedCaption } from '../captions/lines.js';
 import type { CoverStyleId } from '../cover/styles.js';
 import type { EditPlan as CutPlan, PlanOptions, TimeRange } from '../cut/plan.js';
 import type { AudioOptions } from '../pipeline/audio-step.js';
-import { CardSpecSchema, MOODS, type CardSpec, type Shot, type Storyboard, type Visual } from '../storyboard/schema.js';
+import { CardSpecSchema, MOODS, type CardSpec, type Layout, type Shot, type Storyboard, type Visual } from '../storyboard/schema.js';
 import type { SpaceSettings } from '../workspace/store.js';
-import { captionTooLong, checkCard } from './check.js';
+import type { BeatRecord } from '../pipeline/broll-beats.js';
+import { captionTooLong, cardHiddenIn, checkCard, layoutBlocker } from './check.js';
 import { canonicalize, layoutProblem } from './layout-rules.js';
+import { revealToLocal } from '../storyboard/reveal.js';
 import { VISUAL_SOURCES, type EditOp } from './ops.js';
 import { addRange, outputToSource, subtractRange } from './spans.js';
 
@@ -31,6 +33,8 @@ export interface VersionState {
   extraCuts: TimeRange[];
   /** 用户要求找回的片段（原片时间），重建时从 cutRanges 里扣掉，并作为语音段补回 */
   restored: TimeRange[];
+  /** B-roll 视觉节拍（完整字段与落点）：「换一张 B-roll」按原节拍重做；旧版本没有 */
+  brollBeats?: BeatRecord[];
 }
 
 export type Stage = 'cut' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose';
@@ -46,7 +50,8 @@ function stagesOf(op: EditOp): Stage[] {
   switch (op.type) {
     case 'setBackground': return ['matte', 'compose'];
     case 'setCoverStyle': return [];
-    case 'regenerateVisual': return ['broll', 'compose'];
+    case 'regenerateVisual':
+    case 'replaceBroll': return ['broll', 'compose'];
     case 'replaceCard': return needsBroll(op.card) ? ['broll', 'compose'] : ['compose'];
     // 不重做字幕文字与分镜内容：字幕重新对时、分镜平移（retimeCaptions / remapStoryboard），卡片与 B-roll 保留
     case 'pace':
@@ -95,27 +100,33 @@ function guardLayout(before: VersionState, after: VersionState): VersionState {
   return after;
 }
 
-function replaceCard(state: VersionState, i: number, card: CardSpec): VersionState {
+/** 换卡后的版式：cta 固定全屏；分屏、浮层保持；全屏改分屏（全屏只显示 cta）；全屏插入与画中画里卡片看不见，拒绝并说明 */
+function cardLayout(layout: Layout, template: CardSpec['template'], i: number): Layout {
+  if (template === 'cta') return 'full';
+  const hidden = cardHiddenIn(layout);
+  if (hidden) throw new Error(`第 ${i} 个镜头：${hidden}`);
+  return layout === 'full' ? 'split' : layout;
+}
+
+/** 换卡片；fromModel 时（对话里模型给的新卡）reveal 按目标镜头从成片秒数换算成镜头内秒数，沿用原卡片时不换算 */
+function replaceCard(state: VersionState, i: number, card: CardSpec, fromModel = true): VersionState {
   const parsed = CardSpecSchema.safeParse(card);
   if (!parsed.success) throw new Error(`新卡片不符合模板要求：${parsed.error.issues[0].path.join('.') || card.template}`);
   const bad = checkCard(parsed.data);
   if (bad) throw new Error(bad);
   const shot = shotAt(state, i);
-  // 带卡片的镜头必须是分屏（cta 例外，固定全屏）
-  const layout = parsed.data.template === 'cta' ? 'full' : 'split';
-  return guardLayout(state, withShot(state, i, { ...shot, card: parsed.data, layout }));
+  const placed: Shot = { ...shot, card: parsed.data, layout: cardLayout(shot.layout, parsed.data.template, i) };
+  return guardLayout(state, withShot(state, i, fromModel ? revealToLocal([placed])[0] : placed));
 }
 
-function setLayout(state: VersionState, i: number, layout: 'split' | 'full'): VersionState {
+/** 改版式（约束见 layoutBlocker）：分屏、浮层保留卡片；全屏只保留 cta；全屏插入与画中画看不见卡片，一并去掉；素材字段始终保留 */
+function setLayout(state: VersionState, i: number, layout: Layout): VersionState {
   const shot = shotAt(state, i);
-  if (layout === 'split') {
-    if (!shot.card) throw new Error(`第 ${i} 个镜头没有卡片，不能改成分屏`);
-    if (shot.card.template === 'cta') throw new Error('cta 卡片只能全屏');
-    return guardLayout(state, withShot(state, i, { ...shot, layout }));
-  }
-  // 全屏镜头只有 cta 能显示卡片，其余卡片一并去掉
+  const blocked = layoutBlocker(layout, { template: shot.card?.template, broll: shot.broll !== undefined });
+  if (blocked) throw new Error(`第 ${i} 个镜头：${blocked}`);
+  const keepCard = layout === 'split' || layout === 'overlay' || (layout === 'full' && shot.card?.template === 'cta');
   const { card, ...rest } = shot;
-  return guardLayout(state, withShot(state, i, card?.template === 'cta' ? { ...shot, layout } : { ...rest, layout }));
+  return guardLayout(state, withShot(state, i, keepCard && card ? { ...shot, layout } : { ...rest, layout }));
 }
 
 function regenerateVisual(state: VersionState, i: number, visual: Visual): VersionState {
@@ -123,7 +134,12 @@ function regenerateVisual(state: VersionState, i: number, visual: Visual): Versi
   if (!card) throw new Error(`第 ${i} 个镜头没有卡片，无法换素材`);
   if (!VISUAL_SOURCES[card.template]?.includes(visual.source)) throw new Error(`「${card.template}」卡片不支持这种素材（${visual.source}）`);
   const props = Object.fromEntries(Object.entries(card.props).filter(([k]) => k !== 'image' && k !== 'video'));
-  return replaceCard(state, i, { template: card.template, props: { ...props, visual } } as CardSpec);
+  return replaceCard(state, i, { template: card.template, props: { ...props, visual } } as CardSpec, false);
+}
+
+function requireBroll(state: VersionState, i: number): VersionState {
+  if (!shotAt(state, i).broll) throw new Error(`第 ${i} 个镜头没有 B-roll 素材，无法换一张`);
+  return state;
 }
 
 function editCaption(state: VersionState, index: number, text: string): VersionState {
@@ -176,6 +192,8 @@ export function applyOp(state: VersionState, op: EditOp): VersionState {
     case 'replaceCard': return replaceCard(state, op.shotIndex, op.card);
     case 'setLayout': return setLayout(state, op.shotIndex, op.layout);
     case 'regenerateVisual': return regenerateVisual(state, op.shotIndex, op.visual);
+    // 素材在素材步骤里重做（运行器按镜头时间定位），状态里先不动；这里只校验镜头带素材
+    case 'replaceBroll': return requireBroll(state, op.shotIndex);
     case 'editCaption': return editCaption(state, op.index, op.text);
     case 'pace': return { ...state, cutOptions: pace(state.cutOptions, op.direction) };
     case 'removeSpan': return removeSpan(state, op.fromSec, op.toSec);

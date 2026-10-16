@@ -28,11 +28,12 @@ vi.mock('@remotion/renderer', () => ({
     return { type: 'no-browser' };
   },
 }));
-vi.mock('../src/media/exec.js', () => ({ run: async () => '' }));
+vi.mock('../src/media/exec.js', () => ({ run: async () => '', runBuffer: async () => Buffer.alloc(0) }));
 
 const { browserOptions } = await import('../src/compose/browser.js');
 const render = await import('../src/compose/render.js');
 const { screenshotUrl } = await import('../src/broll/screenshot.js');
+const { measureReadability } = await import('../src/qa/readability.js');
 
 const ROOT = join(import.meta.dirname, '..');
 const CHROME = '/opt/mingzhi/runtime/chrome-headless-shell/149.0.7790.0/mac-arm64/chrome-headless-shell';
@@ -47,6 +48,9 @@ async function callEverything(dir: string): Promise<void> {
   await render.renderCoverStills(dir, [{ id: 'Cover34', props: {} as never, output: join(dir, 'cv.png') }]);
   await render.renderVideoSegment({ serveUrl: dir, props, output: join(dir, 's.mp4'), startFrame: 0, endFrame: 2, concurrency: 1 });
   await render.renderAudioTrack({ serveUrl: dir, props, output: join(dir, 'a.m4a'), concurrency: 1 });
+  // 铺图卡片可读性自检：分屏 + 卡片 + 底图才会渲染静帧
+  const shot = { start: 0, end: 2, layout: 'split', card: { template: 'title', props: {} }, broll: { file: 'b.jpg' } };
+  await measureReadability({ workDir: dir, storyboard: { shots: [shot] } as never, ffmpeg: 'ffmpeg' });
   const page = join(dir, 'p.html');
   writeFileSync(page, '<html></html>');
   await expect(screenshotUrl(pathToFileURL(page).href, join(dir, 'p.png'), { allowFile: true })).rejects.toThrow('无头浏览器');
@@ -96,9 +100,9 @@ describe('Remotion 调用带上启动器的 Chrome', () => {
   it('MINGZHI_CHROME 存在时 selectComposition / renderMedia / renderStill / ensureBrowser 都传 browserExecutable', async () => {
     process.env.MINGZHI_CHROME = CHROME;
     await callEverything(dir);
-    expect(calls.select.length).toBeGreaterThanOrEqual(7);
+    expect(calls.select.length).toBeGreaterThanOrEqual(9);
     expect(calls.media).toHaveLength(3);
-    expect(calls.still.length).toBeGreaterThanOrEqual(6);
+    expect(calls.still.length).toBeGreaterThanOrEqual(8);
     expect(calls.ensure).toHaveLength(1);
     for (const c of allCalls()) expect(c).toMatchObject({ browserExecutable: CHROME });
   });

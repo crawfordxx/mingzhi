@@ -1,8 +1,10 @@
 import { rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { finalVideoArgs } from '../media/encode.js';
 import { run } from '../media/exec.js';
 import { probe } from '../media/probe.js';
+import { TAIL_MAX_LUFS, measureTailLufs, tailFrom } from '../qa/hard.js';
 
 /** 成片响度目标：-14 LUFS 积分响度，真峰值 ≤ -1.5 dBTP，响度范围 11 LU */
 export const TARGET = { I: -14, TP: -1.5, LRA: 11 } as const;
@@ -76,7 +78,7 @@ async function measure(input: string, filter: string, cfg: AppConfig): Promise<L
   return parseLoudnormJson(stderr);
 }
 
-/** 第二遍：视频流拷贝，音频按第一遍的测量值归一，写到 dest（调用方传临时文件） */
+/** 第二遍：视频按成片最终编码参数重编码（限制码率），音频按第一遍的测量值归一，写到 dest（调用方传临时文件） */
 async function applyPass(input: string, dest: string, first: LoudnormMeasure, linear: boolean, cfg: AppConfig): Promise<void> {
   const filter =
     `${BASE_FILTER}:measured_I=${first.input_i}:measured_TP=${first.input_tp}:measured_LRA=${first.input_lra}` +
@@ -84,7 +86,7 @@ async function applyPass(input: string, dest: string, first: LoudnormMeasure, li
   // 只映射第一路视频：流水线成片必有视频；纯音频输入不在支持范围
   await run(cfg.ffmpeg, [
     '-y', '-hide_banner', '-nostats', '-i', input, '-map', '0:v', '-map', '0:a:0',
-    '-c:v', 'copy', '-af', filter, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', ...FASTSTART, dest,
+    ...finalVideoArgs(), '-af', filter, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', ...FASTSTART, dest,
   ]);
 }
 
@@ -96,7 +98,7 @@ function meetsTarget(m: LoudnormMeasure): boolean {
 async function normalizeInto(input: string, tmp: string, cfg: AppConfig): Promise<LoudnessResult> {
   const first = await measure(input, `${BASE_FILTER}:print_format=json`, cfg);
   if (!Number.isFinite(first.input_i)) {
-    await run(cfg.ffmpeg, ['-y', '-hide_banner', '-i', input, '-c', 'copy', ...FASTSTART, '-f', 'mp4', tmp]);
+    await run(cfg.ffmpeg, ['-y', '-hide_banner', '-i', input, ...finalVideoArgs(), '-c:a', 'copy', ...FASTSTART, '-f', 'mp4', tmp]);
     return { before: first.input_i, after: first.input_i, truePeak: first.input_tp, mode: 'linear' };
   }
   const verifyFilter = `${BASE_FILTER}:print_format=json`;
@@ -112,10 +114,10 @@ async function normalizeInto(input: string, tmp: string, cfg: AppConfig): Promis
 }
 
 /**
- * 两遍 loudnorm 把音轨统一到 -14 LUFS：视频流直接拷贝，音频重编码为 AAC 192k/48kHz，输出带 faststart。
+ * 两遍 loudnorm 把音轨统一到 -14 LUFS：视频按 FINAL_ENCODE 重编码（crf + maxrate，成片体积在这里定下来），音频重编码为 AAC 192k/48kHz，输出带 faststart。
  * 先走 linear 模式；成片复测达不到目标（响度偏差 > 1 LU 或真峰值 > -1.0 dBTP）时，
  * 从原始输入改用动态模式（linear=false，并接限幅器）重做并再次复测，mode 报告最终采用的模式。
- * 静音音轨无法归一：重封装（faststart）后原样输出，before 与 after 均为 -Infinity。
+ * 静音音轨无法归一：音轨原样拷贝（视频同样重编码、faststart），before 与 after 均为 -Infinity。
  * 所有遍次与复测都写 `<output>.tmp.mp4`，最后才改名为 output；失败时 output 不会出现，临时文件被清掉。
  */
 export async function normalizeLoudness(input: string, output: string, cfg: AppConfig): Promise<LoudnessResult> {
@@ -128,6 +130,53 @@ export async function normalizeLoudness(input: string, output: string, cfg: AppC
     await rename(tmp, output);
     return result;
   } finally {
+    await rm(tmp, { force: true });
+  }
+}
+
+/** 衰减时多压的余量与片尾衰减的渐入时长（避免卡在 -18 边缘、避免衰减起点爆音） */
+const TAIL_MARGIN_DB = 1;
+const TAIL_RAMP_SEC = 0.4;
+const TAIL_MAX_TRIES = 3;
+
+export interface TailResult {
+  /** 衰减前、后的片尾响度 */
+  before: number;
+  after: number;
+  /** 片尾衰减的分贝数（0 表示没动） */
+  attenuatedDb: number;
+}
+
+/**
+ * 响度统一之后测成片最后 TAIL_SEC 秒（片尾更短时只测片尾，见 tailFrom），高于 TAIL_MAX_LUFS 就只对片尾（outroStartSec 起）做渐入式衰减，直到达标：
+ * 口播不动；每次从衰减前的成片重新编码，最多 TAIL_MAX_TRIES 次，仍不达标则保留最后一次（after 如实返回）。
+ * 成片没有音轨、或片尾没有声音（-70）时原样返回。durationSec 是成片时长
+ */
+export async function limitTailLoudness(video: string, durationSec: number, outroStartSec: number, cfg: AppConfig): Promise<TailResult> {
+  const from = tailFrom(durationSec, outroStartSec);
+  const before = await measureTailLufs(video, from, cfg);
+  if (!(before > TAIL_MAX_LUFS)) return { before, after: before, attenuatedDb: 0 };
+  const src = `${video}.pre-tail.mp4`;
+  const tmp = `${video}.tail.mp4`;
+  await rename(video, src);
+  try {
+    let db = before - TAIL_MAX_LUFS + TAIL_MARGIN_DB;
+    let after = before;
+    for (let i = 0; i < TAIL_MAX_TRIES; i += 1) {
+      const gain = `if(lt(t,${outroStartSec}),1,pow(10,-${db.toFixed(2)}*min(1,(t-${outroStartSec})/${TAIL_RAMP_SEC})/20))`;
+      await run(cfg.ffmpeg, ['-y', '-hide_banner', '-nostats', '-i', src, '-map', '0:v', '-map', '0:a:0', '-c:v', 'copy',
+        '-af', `volume=eval=frame:volume='${gain}'`, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart', tmp]);
+      after = await measureTailLufs(tmp, from, cfg);
+      if (after <= TAIL_MAX_LUFS) break;
+      db += after - TAIL_MAX_LUFS + TAIL_MARGIN_DB;
+    }
+    await rename(tmp, video);
+    return { before, after, attenuatedDb: db };
+  } catch (err) {
+    await rename(src, video).catch(() => undefined);
+    throw err;
+  } finally {
+    await rm(src, { force: true });
     await rm(tmp, { force: true });
   }
 }

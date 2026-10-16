@@ -4,6 +4,8 @@ import { CANVAS } from '../../src/storyboard/schema.js';
 import { THEME } from '../theme.js';
 import { readableOn, toRgba } from '../../src/qa/contrast.js';
 import { Cursor, cursorAt, type Click } from './cursor.js';
+import { usePalette } from '../palette.js';
+import { ctaIdle } from '../../src/compose/palette.js';
 import { Reveal, easeAt, fitFontSize, springAt, type TemplateProps } from './parts.js';
 
 /** 胶囊行顶边在画布上的 y（全屏镜头的上方，避开平台状态栏；胶囊中心约 280，与参考片一致） */
@@ -40,15 +42,16 @@ const CheckIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
-/** 一个胶囊：白底灰字；被点后翻成彩底（字色按底色取深/浅）带 ✓，按下时轻微缩一下 */
+/** 一个胶囊：未点时是片色的半透明底（亮色片白底灰字、暗色片深色玻璃底浅灰字）；被点后翻成彩底（字色按底色取深/浅）带 ✓，按下时轻微缩一下 */
 const Pill: React.FC<{ text: string; color: string; flip: number; press: number }> = ({ text, color, flip, press }) => {
   const px = fitFontSize(text, PILL_W - 60 - CHECK_PX, 38, 24);
   const face: React.CSSProperties = { position: 'absolute', inset: 0, borderRadius: PILL_H / 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
     fontSize: px, fontWeight: 800, letterSpacing: '0.06em', whiteSpace: 'nowrap' };
   const ink = readableOn(color);
+  const idle = ctaIdle(usePalette());
   return (
     <div style={{ position: 'relative', width: PILL_W, height: PILL_H, transform: `scale(${1 - press * 0.08})`, boxShadow: '0 12px 30px rgba(0, 0, 0, 0.22)', borderRadius: PILL_H / 2 }}>
-      <div style={{ ...face, background: toRgba(THEME.cta.idle.bg, THEME.cta.idle.alpha), color: THEME.cta.idle.fg }}>{text}</div>
+      <div style={{ ...face, background: toRgba(idle.bg, idle.alpha), color: idle.fg, boxShadow: idle.edge }}>{text}</div>
       <div style={{ ...face, background: color, color: ink, opacity: flip }}><CheckIcon color={ink} />{text}</div>
     </div>
   );

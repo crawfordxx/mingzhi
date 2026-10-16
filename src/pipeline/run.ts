@@ -10,18 +10,22 @@ import { CancelledError, throwIfCancelled } from '../cancel.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
 import { validateBroll, type BrollOptions } from './broll-step.js';
+import { writeStoryboardCredits } from '../broll/credit-store.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { BrollDeps } from '../broll/fulfill.js';
 import type { Storyboard } from '../storyboard/schema.js';
+import { subjectStage } from './subject-step.js';
 import { validateAudio, type AudioOptions } from './audio-step.js';
 import { validateStyles, type CoverDeps, type CoverOptions } from './finish-step.js';
 import type { CaptionStyleId } from '../captions/styles.js';
+import type { OutroOptions } from '../compose/ending.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
 import { costDetail, detailOfStep, type ProgressDetail } from './detail.js';
 import type { PipelineQa, QaDeps } from './qa-step.js';
+import type { FilmQa } from '../qa/film-redo.js';
 import type { MediaDeps } from './media-deps.js';
 import {
-  analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, finalQaStage, matteStage, qaCardsStage, storyboardStage,
+  analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, filmQaStage, finalQaStage, matteStage, paletteOf, qaCardsStage, storyboardStage, whiteBalanceOf,
   type Analysis, type Complete,
 } from './stages.js';
 
@@ -30,7 +34,7 @@ export { throttledMatteProgress, throttledRenderProgress } from './stages.js';
 /** edit：工作台修改版本的说明（应用了哪些修改、复用了什么）；runPipeline 不发 */
 export type PipelineStep =
   | 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll'
-  | 'qa-cards' | 'compose' | 'loudness' | 'qa-final' | 'cover' | 'edit' | 'done';
+  | 'qa-cards' | 'compose' | 'loudness' | 'qa-film' | 'qa-final' | 'cover' | 'edit' | 'done';
 /** detail 是给工作台「剪辑直播」用的结构化数据（可选，旧调用方可以忽略；message 文本不变） */
 export interface ProgressEvent { step: PipelineStep; message: string; detail?: ProgressDetail }
 export interface PipelineArgs {
@@ -39,6 +43,10 @@ export interface PipelineArgs {
   audio?: AudioOptions;
   /** 字幕样式；缺省 blade */
   captionStyle?: CaptionStyleId;
+  /** 品牌片尾；缺省开启，默认 logo + 「用明知AI剪辑制作」 */
+  outro?: Partial<OutroOptions>;
+  /** 颗粒质感层开关；缺省时按分镜是否用到 B-roll 决定（旧项目不变） */
+  grain?: boolean;
   /** 封面；缺省按默认风格生成，false 关闭 */
   cover?: CoverOptions;
   /** 仅供测试注入的封面实现 */
@@ -57,7 +65,8 @@ export interface PipelineArgs {
   signal?: AbortSignal;
   onProgress?: (e: ProgressEvent) => void;
 }
-export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard; qa: PipelineQa }
+/** coverMissing：封面没生成的原因（成片已完成、不受影响；关闭封面或已生成时缺省）；film：整片自检结果（跳过自检时缺省） */
+export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard; qa: PipelineQa; film?: FilmQa; coverMissing?: string }
 
 /** 上限说明：给了项目上限（工作台）时写项目上限与剩余额度，否则计费器上限就是上限（CLI） */
 function limitText(meter: CostMeter, budget: number | null, capYuan?: number): string {
@@ -139,13 +148,19 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
   await cutStage(args, a.plan.keep, cut, complete);
   let base = cut;
   let subject: SubjectBox | null = null;
+  let bgPath: string | undefined;
   if (args.background) {
     const bg = await backgroundStage(args, args.background, complete);
+    bgPath = bg.path;
     base = join(args.workDir, 'person.mp4');
     subject = (await matteStage(args, cut, bg.path, { person: base }, complete)).subject;
+  } else {
+    subject = await subjectStage(args, cut, complete);
   }
   const captions = await captionsStage(args, a, join(args.workDir, 'captions.ass'), complete);
-  const storyboard = await storyboardStage(args, captions, a.plan.outputDurationSec, args.workDir, complete);
+  const whiteBalance = await whiteBalanceOf(args, bgPath ?? base);
+  const palette = await paletteOf(args, bgPath ?? base);
+  const storyboard = await storyboardStage(args, captions, a.plan.outputDurationSec, args.workDir, complete, whiteBalance, palette);
   return { captions, storyboard, base, subject };
 }
 
@@ -153,14 +168,18 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
 async function runSteps(args: PipelineArgs, projectPath: string, complete: Complete, meter: CostMeter): Promise<PipelineResult> {
   const analysis = await analyzeStage(args, join(args.workDir, 'audio16k.wav'), complete);
   const p = await produce(args, analysis, complete);
-  const { storyboard, cards } = await qaCardsStage(args, meter, p.storyboard, p.captions, complete);
+  const checked = await qaCardsStage(args, meter, p.storyboard, p.captions, complete);
   const raw = join(args.workDir, 'final.raw.mp4');
   const cacheDir = args.cacheDir ?? join(args.workDir, 'segments');
   const outputDurationSec = analysis.plan.outputDurationSec;
-  const input = { person: p.base, subject: p.subject, captions: p.captions, storyboard, outputDurationSec, raw, output: args.output, cacheDir };
-  await composeStage(args, input, complete);
-  const hard = await finalQaStage(args, args.output, storyboard, cards, complete);
-  await coverStage(args, meter, storyboard, p.captions, p.base, complete);
+  const input = { person: p.base, subject: p.subject, captions: p.captions, storyboard: checked.storyboard, outputDurationSec, raw, output: args.output, cacheDir };
+  const film = await filmQaStage(args, input, await composeStage(args, input, complete), complete, true);
+  const { storyboard } = film;
+  const cards = checked.cards;
+  // 授权记录按卡片自检、整片自检之后的最终分镜重写（自检可能改掉带图的卡、去掉复用的素材）；与工作台一样每次都写（关了素材也写一份空的）
+  writeStoryboardCredits(storyboard, args.workDir, args.workDir);
+  const hard = await finalQaStage(args, args.output, storyboard, cards, complete, film.composed.outroStartSec);
+  const cover = await coverStage(args, meter, storyboard, p.captions, p.base, complete);
   complete('done', args.output);
-  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: p.captions, storyboard, qa: { cards, hard } };
+  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: p.captions, storyboard, qa: { cards, hard }, ...(film.film ? { film: film.film } : {}), ...(cover.missing ? { coverMissing: cover.missing } : {}) };
 }

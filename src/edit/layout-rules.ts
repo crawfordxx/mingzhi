@@ -1,11 +1,11 @@
 import { normalizeStoryboard, type NormalizeResult } from '../storyboard/normalize.js';
 import { HOOK_WINDOW_SEC, MAX_SHOT_SEC, type Storyboard } from '../storyboard/schema.js';
 
-/** 分镜里已经引用的素材文件名：归一化时视为可用，避免把现有卡片当成素材缺失 */
+/** 分镜里已经引用的素材文件名（卡片图片/视频与镜头 B-roll）：归一化时视为可用，避免把现有卡片与素材当成缺失 */
 function filesOf(sb: Storyboard): string[] {
   return sb.shots.flatMap((s) => {
     const p = (s.card?.props ?? {}) as { image?: string; video?: string };
-    return [p.image, p.video].filter((f): f is string => typeof f === 'string');
+    return [p.image, p.video, s.broll?.file].filter((f): f is string => typeof f === 'string');
   });
 }
 

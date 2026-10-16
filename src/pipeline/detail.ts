@@ -3,12 +3,13 @@ import type { CaptionLine } from '../captions/lines.js';
 import type { Cut } from '../cut/llm-cuts.js';
 import type { HardCheck } from '../qa/hard.js';
 import type { CardQaEntry, CardScore } from '../qa/visual.js';
+import type { FilmQa } from '../qa/film-redo.js';
 import type { CardSpec, Storyboard } from '../storyboard/schema.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
 
 /** 进度事件携带的结构化数据，供工作台「剪辑直播」画界面；kind 决定 data 的形状 */
 export interface ProgressDetail {
-  kind: 'transcript' | 'cut' | 'captions' | 'shot' | 'qa' | 'cost' | 'progress';
+  kind: 'transcript' | 'cut' | 'captions' | 'shot' | 'qa' | 'cost' | 'progress' | 'broll';
   data: unknown;
 }
 
@@ -123,9 +124,24 @@ export function hardDetail(hard: HardCheck[]): ProgressDetail {
   return { kind: 'qa', data: { phase: 'hard', ok: hard.every((c) => c.ok), checks: hard.map((c) => ({ id: c.id, ok: c.ok, detail: c.detail })) } };
 }
 
+/** 整片自检：各指标（以复测为准，没重做时为首次度量）与局部重做；data: { phase: 'film', ok, metrics, actions, unfixed, redone } */
+export function filmDetail(film: FilmQa): ProgressDetail {
+  const r = film.after ?? film.before;
+  const metrics = r.metrics.map((m) => ({ id: m.id, label: m.label, value: m.value, limit: m.limit, ok: m.ok, detail: m.detail, shots: m.shots }));
+  return { kind: 'qa', data: { phase: 'film', ok: r.ok, metrics, actions: film.actions, unfixed: film.unfixed, redone: film.after !== undefined } };
+}
+
 /** 当前总花费与上限（元）；不限预算时 budget 为 null；工作台另带项目上限 cap（budget 是本版开始时的剩余额度） */
 export function costDetail(total: number, budget: number | null, cap?: number): ProgressDetail {
   return { kind: 'cost', data: { total, budget, ...(cap !== undefined ? { cap } : {}) } };
+}
+
+/**
+ * B-roll 编排直播：phase 为 plan（节拍表：beats 数与每个节拍的时间、呈现、画面）、beat（某个节拍：候选数、各来源候选数、入选来源与版式或跳过原因）、
+ * done（汇总：放进镜头的数量、各来源数量、花费）；spentYuan 是 B-roll 步骤至今的花费
+ */
+export function brollDetail(data: { phase: 'plan' | 'beat' | 'done'; spentYuan: number } & Record<string, unknown>): ProgressDetail {
+  return { kind: 'broll', data };
 }
 
 /** 抠像 / 渲染百分比；抠像另带帧数 */
@@ -142,5 +158,8 @@ export function detailOfStep(step: string, patch: ProjectPatch, project: Project
   if ((step === 'storyboard' || step === 'broll') && patch.storyboard) return shotsDetail(patch.storyboard);
   if (step === 'qa-cards' && patch.qa && patch.qa.cards.length > 0) return cardsDetail(patch.qa.cards);
   if (step === 'qa-final' && patch.qa && patch.qa.hard.length > 0) return hardDetail(patch.qa.hard);
+  if (step === 'qa-film' && patch.film) return filmDetail(patch.film);
+  // 整片自检局部重做改了分镜（拆镜头、换版式）：再发一次镜头列表
+  if (step === 'qa-film' && patch.storyboard) return shotsDetail(patch.storyboard);
   return undefined;
 }
