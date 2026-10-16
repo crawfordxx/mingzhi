@@ -122,7 +122,7 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(project.film?.before.metrics.map((m) => m.id)).toEqual(['static', 'blank', 'firstFrame', 'diversity', 'coverage', 'reuse', 'sfx', 'readability']);
     expect(project.film?.before.skipped).toEqual([]);
     expect(events.find((e) => e.step === 'qa-film')?.message).toMatch(/^整片自检 \d\/8 达标/);
-    expect(events.find((e) => e.step === 'qa-final')?.message).toMatch(/^成片检查/);
+    expect(events.find((e) => e.step === 'qa-final')?.message).toMatch(/^成片硬检查/);
     expect(res.qa).toEqual(project.qa);
     expect(project.storyboardDropped).toBe(0);
     expect(project.storyboardDemoted).toBe(0);
@@ -178,6 +178,26 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
   }, 240_000);
 });
 
+
+  it('封面一步余额不足（假封面抛 InsufficientBalanceError）：成片照常交付，runPipeline 不抛错，结果带封面缺失原因，project.json 记 coverError 且保留自检结果', async () => {
+    const cfg = { ...loadConfig({}), dataDir: mkdtempSync(join(tmpdir(), 'mz-empty-')) };
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-bal-cover-'));
+    const output = join(workDir, 'out.mp4');
+    const llm: LlmClient = { chatJson: async (o) => (o.system.includes('分镜') ? FAKE_STORYBOARD : o.system.includes('剪辑师') ? { cuts: [] } : { lines: [] }) };
+    const coverDeps = { makeCovers: async () => { throw new InsufficientBalanceError(); } };
+    const events: ProgressEvent[] = [];
+    const res = await runPipeline({ input: CLIP, workDir, output, cfg, llm, coverDeps: coverDeps as never, qaDeps: fakeQa().deps, onProgress: (e) => events.push(e) });
+    expect(existsSync(output)).toBe(true);
+    expect(res.coverMissing).toMatch(/余额不足/);
+    expect(events.find((e) => e.step === 'cover' && e.message.startsWith('封面未生成'))).toBeDefined();
+    expect(events.at(-1)?.step).toBe('done');
+    const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
+    expect(project.coverError).toMatch(/余额不足/);
+    expect(project.cover).toBeUndefined();
+    expect(project.film?.before).toBeDefined();
+    expect(res.film).toEqual(project.film);
+    expect(project.artifacts.final).toBe(output);
+  }, 240_000);
 describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR 与 RVM 模型）', () => {
   it('剪切后抠像换背景再渲染成片；project.json 记录背景、取景框与 person 中间文件；进度含 background、matte', async () => {
     const cfg = loadConfig({});
@@ -249,7 +269,7 @@ describe.skipIf(!hasModels())('runPipeline 自检步骤（需要本地模型）'
     expect(seen[0].meter).toMatchObject({ total: 0, budget: Number.POSITIVE_INFINITY });
     expect(rendered).toEqual([true]);
     expect(events.find((e) => e.step === 'qa-cards')?.message).toBe('卡片自检 1 张：通过 1、重写 1 次、跳过 0');
-    expect(events.find((e) => e.step === 'qa-final')?.message).toBe('成片检查 1/2 通过，未通过：loudness（积分响度 -20.0 LUFS（要求 -14 ± 1））');
+    expect(events.find((e) => e.step === 'qa-final')?.message).toBe('成片硬检查 1/2 通过，未通过：loudness（积分响度 -20.0 LUFS（要求 -14 ± 1））');
     expect(events.at(-1)?.step).toBe('done');
   }, 240_000);
 
@@ -261,7 +281,7 @@ describe.skipIf(!hasModels())('runPipeline 自检步骤（需要本地模型）'
     const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm, cover: false, meter,
       qaDeps: { ...deps, hardChecks: async () => { throw new Error('ffmpeg 崩了'); } }, onProgress: (e) => events.push(e) });
     expect(seen[0].meter).toBe(meter);
-    expect(events.find((e) => e.step === 'qa-final')?.message).toBe('成片检查失败，已跳过（成片不受影响）：ffmpeg 崩了');
+    expect(events.find((e) => e.step === 'qa-final')?.message).toBe('成片硬检查失败，已跳过（成片不受影响）：ffmpeg 崩了');
     expect(res.qa.hard).toEqual([]);
     expect(existsSync(res.output)).toBe(true);
   }, 240_000);

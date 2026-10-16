@@ -25,6 +25,8 @@ export interface VersionMeta {
   changedShots: number[];
   costYuan: number;
   qaScore?: number;
+  /** 版本已完成但有需要知道的事（如封面没生成：余额不足）；成片可用 */
+  warnings?: string[];
   status: 'running' | 'done' | 'failed';
 }
 

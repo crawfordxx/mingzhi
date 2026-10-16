@@ -124,11 +124,11 @@ export function hardDetail(hard: HardCheck[]): ProgressDetail {
   return { kind: 'qa', data: { phase: 'hard', ok: hard.every((c) => c.ok), checks: hard.map((c) => ({ id: c.id, ok: c.ok, detail: c.detail })) } };
 }
 
-/** 整片自检：各指标（以复测为准，没重做时为首次度量）与局部重做；data: { phase: 'film', ok, metrics, actions, redone } */
+/** 整片自检：各指标（以复测为准，没重做时为首次度量）与局部重做；data: { phase: 'film', ok, metrics, actions, unfixed, redone } */
 export function filmDetail(film: FilmQa): ProgressDetail {
   const r = film.after ?? film.before;
   const metrics = r.metrics.map((m) => ({ id: m.id, label: m.label, value: m.value, limit: m.limit, ok: m.ok, detail: m.detail, shots: m.shots }));
-  return { kind: 'qa', data: { phase: 'film', ok: r.ok, metrics, actions: film.actions, redone: film.after !== undefined } };
+  return { kind: 'qa', data: { phase: 'film', ok: r.ok, metrics, actions: film.actions, unfixed: film.unfixed, redone: film.after !== undefined } };
 }
 
 /** 当前总花费与上限（元）；不限预算时 budget 为 null；工作台另带项目上限 cap（budget 是本版开始时的剩余额度） */

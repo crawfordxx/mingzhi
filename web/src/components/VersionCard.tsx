@@ -76,6 +76,7 @@ export function VersionCard({ spaceId, said, thumbSec, meta, parent, totalShots,
           {viewing && <motion.span layoutId={`now-${spaceId}`} className="now" transition={SOFT}>预览中</motion.span>}
         </div>
         {said && <Said text={said} />}
+        {meta.warnings?.map((w) => <p key={w} className="ver-warn" title={w}>{w}</p>)}
         <div className="facts">
           {facts.map(([b, s]) => <div key={s}><b>{b}</b><span className={trendOf(s)}>{s}</span></div>)}
         </div>

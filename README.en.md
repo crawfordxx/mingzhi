@@ -182,7 +182,7 @@ Open the address printed in the terminal (the port moves up if it is taken). On 
 export MINGZHI_KX_KEY=<your Kexiang key>
 pnpm mingzhi edit <video.mp4> [-o out.mp4] [--work workdir] [--bg preset-id|image] [--bg-prompt "one-line background"] \
   [--no-broll] [--max-videos N] [--budget yuan] [--bgm auto|none|track-id] [--caption-style id] [--cover-style id] \
-  [--no-cover] [--no-qa] [--yes]
+  [--no-cover] [--no-qa] [--cover-only] [--yes]
 ```
 
 It prints the cost estimate and waits for confirmation (`--yes` skips it). Without `-o` the result goes to `work/<name>/<name>_精剪.mp4`; the work directory also keeps `project.json` (transcript, cuts, captions, storyboard, ...), `cut.mp4` and `captions.ass`.
@@ -197,6 +197,9 @@ It prints the cost estimate and waits for confirmation (`--yes` skips it). Witho
 | `--caption-style` | `blade` (default), `wenkai`, `smiley`, `minimal`, `kuaile`, `song` |
 | `--cover-style` | `bauhaus` (default), `swiss`, `memphis`, `editorial`, `neon`, `guochao`, `risograph`, `neobrutal`, `y2k`, `japanese` |
 | `--no-cover` / `--no-qa` | No covers / no card self-check |
+| `--cover-only` | The film is already in `--work` and only the cover is missing (e.g. the account ran out of balance at the cover step): generate just the cover, leave the film untouched |
+
+The cover is optional: if it fails (including an insufficient balance) the film is still delivered. The command prints the film path as usual, warns on stderr ("cover not generated: <reason>" plus the command to redo it) and **still exits 0**; exit code 1 means no film was delivered, or `--cover-only` could not make the cover.
 
 Background presets: `study`, `studio`, `cafe`, `night-window`, `tech-dark`, `japanese`, `balcony`, `library`, `rooftop`, `concrete`.
 

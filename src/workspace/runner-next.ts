@@ -19,7 +19,8 @@ import type { CardQaEntry } from '../qa/visual.js';
 import type { CardSpec, Storyboard } from '../storyboard/schema.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
 import { ANALYSIS_FILE, COVER_FILES, FINAL_FILE, MARKS_FILE, linkBroll, linkFile, linkIfExists, readJson, STATE_FILE, type BaseAnalysis } from './runner-files.js';
-import { makeCover } from './runner-cover.js';
+import { coverWarnings, makeCover } from './runner-cover.js';
+import type { CoverResult } from '../pipeline/finish-step.js';
 import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, resolveBg, reusePerson, sameBackground, type Person } from './runner-media.js';
 import { recut, retime, writeAss } from './runner-retime.js';
 
@@ -63,7 +64,7 @@ function editMessage(summary: string, c: Change): string {
 /** project.json 先沿用父版本的分析与制作结果（本版重跑的步骤会覆盖），账目、自检、封面、素材记录与文件路径不沿用 */
 function seedProject(env: VersionEnv, p: ProjectFile | null): void {
   if (!p) return;
-  const { version: _v, input: _i, createdAt: _c, artifacts: _a, costs: _co, qa: _q, cover: _cv, broll: _b, ...rest } = p;
+  const { version: _v, input: _i, createdAt: _c, artifacts: _a, costs: _co, qa: _q, cover: _cv, coverError: _ce, broll: _b, ...rest } = p;
   env.record(rest);
 }
 
@@ -210,11 +211,13 @@ async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change,
 }
 
 /** 封面只在换了封面风格时重做，否则引用父版本的封面 */
-async function cover(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, m: Made): Promise<void> {
+async function cover(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, m: Made): Promise<CoverResult> {
   if (c.newCover) return makeCover(env, args, c.next.coverStyle, m.storyboard, m.captions, m.person);
   const [cover34, cover43] = COVER_FILES.map((f) => join(env.dir, f));
   const linked = COVER_FILES.filter((f) => linkIfExists(join(p.dir, f), join(env.dir, f)));
   if (linked.length === COVER_FILES.length) env.record({ artifacts: { cover34, cover43 }, ...(p.project?.cover ? { cover: p.project.cover } : {}) });
+  // 父版本没有封面（当时没生成成功）：这一版同样没有，沿用它的原因
+  return linked.length < COVER_FILES.length && p.project?.coverError ? { missing: p.project.coverError } : {};
 }
 
 /** 修改版本：校验应用 → 只重跑受影响的阶段 → 只检查改动过的卡片 → 渲染（复用缓存）→ 整片自检（只检查）→ 成片检查（每版都做）→ 封面 */
@@ -230,11 +233,11 @@ export async function produceNext(env: VersionEnv, input: string, parentN: numbe
   const m = { ...made, storyboard };
   const rendered = await render(env, args, p, c, m);
   await finalQaStage(args, join(env.dir, FINAL_FILE), storyboard, cards, env.complete, rendered.outroStartSec);
-  await cover(env, args, p, c, m);
+  const coverResult = await cover(env, args, p, c, m);
   env.record({ plan: m.plan, captions: m.captions, storyboard });
   const qaScore = qaScoreOf(cards) ?? env.space.versions.find((v) => v.n === parentN)?.qaScore;
   // 授权记录按卡片自检之后的最终分镜写
   writeStoryboardCredits(storyboard, env.base, env.dir);
   const state = { ...c.next, plan: m.plan, captions: m.captions, storyboard, ...(m.brollBeats ? { brollBeats: m.brollBeats } : {}) };
-  return { state, changedShots: rendered.changed, rerenderedShots: rendered.rerendered, ...(rendered.hashes ? { shotHashes: rendered.hashes } : {}), ...(rendered.contents ? { contentHashes: rendered.contents } : {}), ...(qaScore !== undefined ? { qaScore } : {}) };
+  return { state, changedShots: rendered.changed, rerenderedShots: rendered.rerendered, ...(rendered.hashes ? { shotHashes: rendered.hashes } : {}), ...(rendered.contents ? { contentHashes: rendered.contents } : {}), ...(qaScore !== undefined ? { qaScore } : {}), ...coverWarnings(coverResult) };
 }

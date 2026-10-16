@@ -55,6 +55,8 @@ export interface ProjectFile {
   captionStyle?: CaptionStyleId;
   /** 封面（P3c）：风格、花费（元）、标题核对未通过的比例、直接复用已有底图的比例；封面关闭或失败时缺省 */
   cover?: { style: CoverStyleId; costYuan: number; unverified: CoverAspect[]; reused: CoverAspect[] };
+  /** 封面没生成的原因（关闭封面时缺省；预算不足、可想 AI 余额不足、生图失败都记在这里，成片不受影响）；重新生成成功后清掉 */
+  coverError?: string;
   /** 响度统一（P3c）：处理前后的综合响度（LUFS）；音轨静音无法归一时缺省 */
   loudness?: { before: number; after: number };
   /** 本次出片的实际花费（P4）：累计、预算上限（不限时为 null）与逐条账目 */
@@ -68,9 +70,9 @@ export interface ProjectFile {
 
 export type ProjectPatch = Partial<Omit<ProjectFile, 'version' | 'input' | 'createdAt' | 'artifacts'>> & { artifacts?: ProjectArtifacts };
 
-/** 返回一个记录函数：每次合并补丁生成新的工程对象并整份写盘，返回最新对象 */
-export function projectRecorder(path: string, input: string): (patch: ProjectPatch) => ProjectFile {
-  let current: ProjectFile = { version: 1, input, createdAt: new Date().toISOString(), artifacts: {} };
+/** 返回一个记录函数：每次合并补丁生成新的工程对象并整份写盘，返回最新对象；seed 为已有的工程（接着已有内容补记，如只补封面） */
+export function projectRecorder(path: string, input: string, seed?: ProjectFile): (patch: ProjectPatch) => ProjectFile {
+  let current: ProjectFile = seed ?? { version: 1, input, createdAt: new Date().toISOString(), artifacts: {} };
   return (patch) => {
     current = { ...current, ...patch, artifacts: { ...current.artifacts, ...patch.artifacts } };
     writeFileSync(path, JSON.stringify(current, null, 2));

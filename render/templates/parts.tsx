@@ -86,8 +86,9 @@ export const Reveal: React.FC<{ p: number; dx?: number; dy?: number; from?: numb
 /**
  * 卡片画在什么底上：paper 米色卡片区（默认）；image 分屏上半屏的素材图上（内容贴安全区底部、压在渐变暗部，白卡变磨砂玻璃）；
  * float 人物全屏上的浮层（胸前下三分之一，贴底、白卡变磨砂玻璃）。玻璃卡内部重新回到 paper（深色字照常可读）
+ * imageTop 同 image，但内容贴安全区顶部（整片自检的「换文字位置」）；
  */
-export type Surface = 'paper' | 'image' | 'float';
+export type Surface = 'paper' | 'image' | 'imageTop' | 'float';
 export const SurfaceContext = React.createContext<Surface>('paper');
 
 /** 磨砂玻璃卡：浅暖白半透明 + 背景模糊 + 内描边高光 + 深一点的投影（压在图像或人物上） */

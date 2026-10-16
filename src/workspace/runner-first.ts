@@ -11,7 +11,7 @@ import {
 } from '../pipeline/stages.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
 import { ANALYSIS_FILE, FINAL_FILE, LAYER_FILES, MATTE_META, linkBroll, linkFile, writeJsonAtomic, type BaseAnalysis } from './runner-files.js';
-import { makeCover } from './runner-cover.js';
+import { coverWarnings, makeCover } from './runner-cover.js';
 import { writeStoryboardCredits } from '../broll/credit-store.js';
 import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, type Person } from './runner-media.js';
 
@@ -87,9 +87,9 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   // 节拍记录在整片自检之后读：局部重做去掉的素材已同步成跳过
   const brollBeats = env.record({}).broll?.beats;
   await finalQaStage(args, final, storyboard, cards, env.complete, res.outroStartSec);
-  await makeCover(env, args, init.coverStyle, storyboard, captions, person);
+  const cover = await makeCover(env, args, init.coverStyle, storyboard, captions, person);
   const state: VersionState = { ...init, plan: a.plan, captions, storyboard, ...(brollBeats ? { brollBeats } : {}) };
   const qaScore = qaScoreOf(cards);
   // 首个版本没有父版本可比，本版改动为空（界面显示「首版」）
-  return { state, changedShots: [], rerenderedShots: [], shotHashes: res.hashes, contentHashes: res.contents, ...(qaScore !== undefined ? { qaScore } : {}) };
+  return { state, changedShots: [], rerenderedShots: [], shotHashes: res.hashes, contentHashes: res.contents, ...(qaScore !== undefined ? { qaScore } : {}), ...coverWarnings(cover) };
 }

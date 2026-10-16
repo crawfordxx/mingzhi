@@ -29,13 +29,14 @@ import type { HardCheck } from '../qa/hard.js';
 import { prepareAudio } from './audio-step.js';
 import { runBroll, type BrollContext } from './broll-step.js';
 import { cardScoreDetail, progressDetail } from './detail.js';
-import { runCover, runLoudness } from './finish-step.js';
+import { runCover, runLoudness, type CoverResult } from './finish-step.js';
 import { mediaOf } from './media-deps.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
 import type { FacePerson } from '../qa/face-noise-measure.js';
 import { runQaCards, runQaFilm, runQaFinal, type FilmCut } from './qa-step.js';
 import type { PipelineArgs, PipelineStep, ProgressEvent } from './run.js';
 
+import type { FilmQa } from '../qa/film-redo.js';
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
 export type Complete = (step: PipelineStep, message: string, patch?: ProjectPatch) => ProjectFile;
 export interface Analysis { media: MediaInfo; transcript: Transcript; cuts: Cut[]; plan: EditPlan }
@@ -303,7 +304,7 @@ async function facePerson(args: PipelineArgs, input: ComposeInput): Promise<Face
  * 整片自检（args.qa 为 false 时跳过）：度量成片；redo 为 true 时不达标的指标做一轮局部重做，按新分镜重渲（分段缓存只重渲受影响的镜头）。
  * metaDir 为素材记录所在目录（工作台传 base）。返回最终分镜与最终一次渲染的结果
  */
-export async function filmQaStage(args: PipelineArgs, input: ComposeInput, composed: Composed, complete: Complete, redo: boolean, metaDir?: string): Promise<{ storyboard: Storyboard; composed: Composed }> {
+export async function filmQaStage(args: PipelineArgs, input: ComposeInput, composed: Composed, complete: Complete, redo: boolean, metaDir?: string): Promise<{ storyboard: Storyboard; composed: Composed; film?: FilmQa }> {
   if (args.qa === false) return { storyboard: input.storyboard, composed };
   let last = composed;
   const rerender = async (storyboard: Storyboard): Promise<FilmCut> => {
@@ -315,7 +316,7 @@ export async function filmQaStage(args: PipelineArgs, input: ComposeInput, compo
   const ctx = { cfg: args.cfg, workDir: args.workDir, redo, signal: args.signal, measure: args.qaDeps?.film, ...(metaDir ? { metaDir } : {}), ...(face ? { face } : {}) };
   const cut: FilmCut = { video: input.output, storyboard: input.storyboard, ...(composed.outroStartSec === undefined ? {} : { outroStartSec: composed.outroStartSec }) };
   const res = await runQaFilm(ctx, cut, input.captions, rerender, complete);
-  return { storyboard: res.cut.storyboard, composed: last };
+  return { storyboard: res.cut.storyboard, composed: last, ...(res.film ? { film: res.film } : {}) };
 }
 
 /** 成片硬检查（args.qa 为 false 时跳过） */
@@ -324,10 +325,10 @@ export function finalQaStage(args: PipelineArgs, video: string, storyboard: Stor
   return runQaFinal({ cfg: args.cfg, hardChecks: args.qaDeps?.hardChecks, outroStartSec }, video, storyboard, cards, complete);
 }
 
-/** 封面（args.cover 为 false 时跳过；失败只降级为进度消息） */
+/** 封面（args.cover 为 false 时跳过；失败只降级为进度消息，原因在返回值里） */
 export function coverStage(
   args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], personVideo: string, complete: Complete,
-): Promise<void> {
+): Promise<CoverResult> {
   const ctx = { workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter };
   return runCover(ctx, args.cover, storyboard, captions, personVideo, complete);
 }

@@ -10,7 +10,7 @@ import { CAPTION_STYLES, type CaptionStyleId } from '../captions/styles.js';
 import { COVER_STYLES, DEFAULT_COVER_STYLE, type CoverStyleId } from '../cover/styles.js';
 import { coverTitle, makeCovers, type MakeCoversOptions, type MakeCoversResult } from '../cover/generate.js';
 import { rethrowIfCancelled } from '../cancel.js';
-import { rethrowIfBalance } from '../llm/errors.js';
+import { InsufficientBalanceError } from '../llm/errors.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
 import type { Storyboard } from '../storyboard/schema.js';
@@ -84,12 +84,19 @@ async function copyBesideOutput(workDir: string, output: string | undefined, res
   return targets.map(([, to]) => to);
 }
 
-/** 封面步骤：任何失败（无 key、生图失败、抠像失败）都只降级为一条进度消息，绝不让成片失败 */
-export async function runCover(ctx: CoverContext, cover: CoverOptions | undefined, storyboard: Storyboard, captions: TimedCaption[], personVideo: string, complete: Complete): Promise<void> {
-  if (cover === false) return;
+/** 封面步骤的结果：封面是可选产物，没生成时给出原因（由调用方提示用户、版本状态仍是完成）；关闭或已生成为空对象 */
+export interface CoverResult { missing?: string }
+
+/**
+ * 封面步骤：任何失败（无 key、生图失败、抠像失败、预算不足、可想 AI 余额不足）都只降级为一条进度消息并返回原因，绝不让成片失败。
+ * 余额不足也不外抛：成片此时已经写完，抛错会让用户以为整条白跑；只有取消照常外抛
+ */
+export async function runCover(ctx: CoverContext, cover: CoverOptions | undefined, storyboard: Storyboard, captions: TimedCaption[], personVideo: string, complete: Complete): Promise<CoverResult> {
+  if (cover === false) return {};
   if (ctx.meter && !ctx.meter.canSpend(COVER_YUAN)) {
-    complete('cover', `预算不足，已跳过封面（剩余 ¥${ctx.meter.remaining().toFixed(2)}，封面约需 ¥${COVER_YUAN.toFixed(2)}）`);
-    return;
+    const reason = `预算不足（剩余 ¥${ctx.meter.remaining().toFixed(2)}，封面约需 ¥${COVER_YUAN.toFixed(2)}）`;
+    complete('cover', `预算不足，已跳过封面（剩余 ¥${ctx.meter.remaining().toFixed(2)}，封面约需 ¥${COVER_YUAN.toFixed(2)}）`, { coverError: reason });
+    return { missing: reason };
   }
   try {
     const { make, task } = resolveCover(ctx);
@@ -104,11 +111,17 @@ export async function runCover(ctx: CoverContext, cover: CoverOptions | undefine
     complete('cover', coverSummary(res, extra), {
       artifacts: { cover34: res.cover34, cover43: res.cover43 },
       cover: { style, costYuan: res.costYuan, unverified: res.unverified, reused: res.reused },
+      coverError: undefined,
     });
+    return {};
   } catch (err) {
-    rethrowIfBalance(err);
     rethrowIfCancelled(err);
-    complete('cover', `封面生成失败，已跳过（成片不受影响）：${errText(err)}`);
+    if (err instanceof InsufficientBalanceError) {
+      complete('cover', `封面未生成：${err.message}（成片已完成，不受影响）`, { coverError: err.message });
+      return { missing: err.message };
+    }
+    complete('cover', `封面生成失败，已跳过（成片不受影响）：${errText(err)}`, { coverError: errText(err) });
+    return { missing: errText(err) };
   }
 }
 

@@ -36,6 +36,8 @@ export interface VersionMeta {
   contentHashes?: string[];
   costYuan: number;
   qaScore?: number;
+  /** 版本已完成但有需要用户知道的事（如「封面未生成：可想 AI 账户余额不足」）；成片不受影响 */
+  warnings?: string[];
   status: 'running' | 'done' | 'failed';
 }
 

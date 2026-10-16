@@ -22,6 +22,7 @@ import type { OutroOptions } from '../compose/ending.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
 import { costDetail, detailOfStep, type ProgressDetail } from './detail.js';
 import type { PipelineQa, QaDeps } from './qa-step.js';
+import type { FilmQa } from '../qa/film-redo.js';
 import type { MediaDeps } from './media-deps.js';
 import {
   analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, filmQaStage, finalQaStage, matteStage, qaCardsStage, storyboardStage, whiteBalanceOf,
@@ -64,7 +65,8 @@ export interface PipelineArgs {
   signal?: AbortSignal;
   onProgress?: (e: ProgressEvent) => void;
 }
-export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard; qa: PipelineQa }
+/** coverMissing：封面没生成的原因（成片已完成、不受影响；关闭封面或已生成时缺省）；film：整片自检结果（跳过自检时缺省） */
+export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard; qa: PipelineQa; film?: FilmQa; coverMissing?: string }
 
 /** 上限说明：给了项目上限（工作台）时写项目上限与剩余额度，否则计费器上限就是上限（CLI） */
 function limitText(meter: CostMeter, budget: number | null, capYuan?: number): string {
@@ -176,7 +178,7 @@ async function runSteps(args: PipelineArgs, projectPath: string, complete: Compl
   // 授权记录按卡片自检、整片自检之后的最终分镜重写（自检可能改掉带图的卡、去掉复用的素材）
   if (args.broll?.enabled) writeStoryboardCredits(storyboard, args.workDir, args.workDir);
   const hard = await finalQaStage(args, args.output, storyboard, cards, complete, film.composed.outroStartSec);
-  await coverStage(args, meter, storyboard, p.captions, p.base, complete);
+  const cover = await coverStage(args, meter, storyboard, p.captions, p.base, complete);
   complete('done', args.output);
-  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: p.captions, storyboard, qa: { cards, hard } };
+  return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: p.captions, storyboard, qa: { cards, hard }, ...(film.film ? { film: film.film } : {}), ...(cover.missing ? { coverMissing: cover.missing } : {}) };
 }

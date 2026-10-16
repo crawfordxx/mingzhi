@@ -34,7 +34,7 @@ export interface LiveView {
 export const STEP_LABEL: Record<string, string> = {
   queued: '排队', probe: '探测', audio: '抽音频', asr: '识别', cuts: '剪口误', plan: '剪辑方案', render: '剪切', background: '背景',
   matte: '抠像', captions: '字幕', storyboard: '分镜', broll: '素材', 'qa-cards': '卡片自检', compose: '渲染', loudness: '响度',
-  'qa-film': '整片自检', 'qa-final': '成片检查', cover: '封面', edit: '修改', done: '完成', failed: '失败',
+  'qa-film': '整片自检', 'qa-final': '成片硬检查', cover: '封面', edit: '修改', done: '完成', failed: '失败',
 };
 
 export const EMPTY_LIVE: LiveView = { status: 'idle', steps: [], transcript: [], cuts: [], captions: [], shots: [], qa: {} };

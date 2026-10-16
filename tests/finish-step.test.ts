@@ -140,7 +140,7 @@ describe('runCover', () => {
     expect(events).toHaveLength(1);
     expect(events[0].message).toContain('封面生成失败');
     expect(events[0].message).toContain('MINGZHI_KX_KEY');
-    expect(events[0].patch).toBeUndefined();
+    expect(events[0].patch).toEqual({ coverError: expect.stringContaining('MINGZHI_KX_KEY') });
   });
 
   it('预算不够封面（剩余 < ¥1.25）：不调用封面实现，降级为一条「预算不足」提示', async () => {

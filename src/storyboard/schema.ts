@@ -71,6 +71,8 @@ export type CardSpec = z.infer<typeof CardSpecSchema>;
 export const LAYOUTS = ['split', 'full', 'broll', 'pip', 'overlay'] as const;
 export type Layout = (typeof LAYOUTS)[number];
 
+/** 素材整体压暗量的上限：再暗图就看不出来了，到这一步该撤图 */
+export const MAX_SHADE = 0.8;
 const unit = z.number().min(0).max(1);
 /** 裁框容差：浮点误差内视为合法 */
 const RECT_EPS = 1e-6;
@@ -98,6 +100,10 @@ export const BrollSchema = z.object({
   label: MediaLabelSchema.optional(),
   /** 铺图变体：卡片铺在这张素材上时底部压暗加深、玻璃卡几乎不透明（整片自检发现图上文字对比度不够时切换） */
   legible: z.boolean().optional(),
+  /** 压暗加深：铺图变体仍看不清时，在压暗渐变之外再整体叠一层暗色（0–0.8，越大越暗；整片自检按台阶逐级加深） */
+  shade: z.number().min(0).max(MAX_SHADE).optional(),
+  /** 换文字位置：卡片文字排在上半屏（缺省贴底排），压暗渐变同步翻转，让文字落在更暗的一端 */
+  textTop: z.boolean().optional(),
 }).refine((b) => (BROLL_EXTS[b.kind] as readonly string[]).includes(extOf(b.file)), '素材扩展名与类型不符');
 export type Broll = z.infer<typeof BrollSchema>;
 

@@ -8,6 +8,8 @@ import { THEME } from '../theme.js';
 import { renderBackdrop, renderCard } from '../templates/index.js';
 import { FLOAT_SCALE, GLASS, SolidGlassContext, SurfaceContext } from '../templates/parts.js';
 import { BrollMedia } from './BrollLayer.js';
+import { MediaBadge } from '../templates/MediaBadge.js';
+import { splitShadeBackground } from './shade.js';
 
 /** 进场：从下方 80px、0.94 缩放、透明度 0 弹入（约 0.5 秒收敛）；全片第一个镜头不从空白开始，内容第 0 帧就完整，只从 1.035 轻轻收回 */
 const ENTER_DY = 80;
@@ -60,17 +62,27 @@ type Part = { shot: Shot; local: number; dur: number; motion: Motion; lead?: num
 /** 铺图变体（broll.legible）的压暗：中段起就压下去，卡片与直接压在图上的浅色字（面包屑、钩子标题）都落在深色上 */
 const SPLIT_SHADE_LEGIBLE = 'linear-gradient(180deg, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.2) 20%, rgba(10, 9, 8, 0.4) 40%, rgba(10, 9, 8, 0.74) 62%, rgba(10, 9, 8, 0.88) 100%)';
 
-/** 分屏的底：有素材时素材铺满 + 渐变压暗（铺图变体压得更深），否则米色底 + 模板固定底（钩子黑底、图片） */
-const SplitBase: React.FC<Part> = ({ shot, local, dur }) => (
-  <div style={{ ...SEAM_BOX, background: THEME.stage }}>
-    {shot.broll ? <><BrollMedia broll={shot.broll} local={local} dur={dur} /><AbsoluteFill style={{ background: shot.broll.legible ? SPLIT_SHADE_LEGIBLE : SPLIT_SHADE }} /></> : shot.card ? renderBackdrop(shot.card, local, dur) : null}
-  </div>
-);
+/**
+ * 分屏的底：有素材时素材铺满 + 渐变压暗（铺图变体压得更深），否则米色底 + 模板固定底（钩子黑底、图片）。
+ * 画面角标（AI 生成、来源）画在压暗层之上：压暗是为了让文字看清，不能把必须标注的角标一起压暗
+ */
+const SplitBase: React.FC<Part> = ({ shot, local, dur }) => {
+  const label = shot.broll?.label;
+  return (
+    <div style={{ ...SEAM_BOX, background: THEME.stage }}>
+      {shot.broll ? <>
+        <BrollMedia broll={{ ...shot.broll, label: undefined }} local={local} dur={dur} />
+        <AbsoluteFill style={{ background: splitShadeBackground(shot.broll.legible ? SPLIT_SHADE_LEGIBLE : SPLIT_SHADE, shot.broll) }} />
+        {label ? <MediaBadge label={label} /> : null}
+      </> : shot.card ? renderBackdrop(shot.card, local, dur) : null}
+    </div>
+  );
+};
 
 /** 分屏的卡片：有素材时贴底排在图上（白卡变玻璃；铺图变体用几乎不透明的玻璃） */
 const SplitContent: React.FC<Part> = ({ shot, local, dur, motion, lead }) => (
   <div style={SEAM_BOX}>
-    <SurfaceContext.Provider value={shot.broll ? 'image' : 'paper'}>
+    <SurfaceContext.Provider value={shot.broll ? (shot.broll.textTop ? 'imageTop' : 'image') : 'paper'}>
       <SolidGlassContext.Provider value={Boolean(shot.broll?.legible)}>
         {shot.card ? <CardMotion card={shot.card} local={local} dur={dur} motion={motion} lead={lead} /> : null}
       </SolidGlassContext.Provider>

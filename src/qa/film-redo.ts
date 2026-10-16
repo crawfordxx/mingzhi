@@ -2,7 +2,7 @@
  * 整片自检的局部重做（最多 1 轮）：按不达标的指标定位到镜头，只改这些镜头，不动其余镜头与时间轴（拆分只在目标镜头内部切一刀）。
  * - 首帧空 → 第一个镜头改成钩子（原卡片标题或第一句字幕做标题，本地图形兜底）
  * - 素材复用 → 后出现的镜头去掉重复素材
- * - 铺图卡片看不清 → 切到铺图变体（底部压暗加深、玻璃卡几乎不透明）；变体也不达标才取消底图
+ * - 铺图卡片看不清 → 按台阶处理：铺图变体（底部压暗加深、玻璃卡几乎不透明）→ 整体压暗加深 → 文字挪到上方；台阶都不达标才取消底图（最后一步，付过费的图不轻易撤）
  * - 空白过多 → 紧凑卡改浮层（人物全屏 + 浮卡）
  * - 静止过长 → 演进卡把条目铺开逐条出现；其余卡片在静止段里按字幕边界切开，后半段换版式（紧凑卡改浮层，其余回人物全屏）
  * - 模板单调 → 套用 Task 6 的分镜规则（编排后的分镜上复检修正，带素材的镜头不降级）
@@ -11,12 +11,16 @@
 import type { TimedCaption } from '../captions/lines.js';
 import type { BeatRecord } from '../pipeline/broll-beats.js';
 import { cardLead } from '../compose/card-carry.js';
+import { kenBurnsRects } from '../compose/layout.js';
 import { cardTitle } from '../pipeline/detail.js';
 import { fillReveal, fitReveal, fitRevealToShots, revealItems, REVEAL_TAIL_SEC } from '../storyboard/reveal.js';
 import { applyStoryboardRules } from '../storyboard/rules.js';
-import type { CardSpec, Shot, Storyboard, TemplateId } from '../storyboard/schema.js';
+import type { Broll, CardSpec, Shot, Storyboard, TemplateId } from '../storyboard/schema.js';
 import { dominantShot, shotFiles, type FilmMetric, type FilmReport } from './film.js';
-import { MIN_CONTRAST } from './readability.js';
+import { MIN_CONTRAST, type BrollTweak } from './readability.js';
+
+/** 局部重做只报告、不改的指标（planRedo 已经在 unfixed 里写了原因） */
+export const REPORT_ONLY: readonly FilmMetric['id'][] = ['coverage', 'faceNoise'];
 
 export type RedoKind = 'hook' | 'dedupe' | 'legible' | 'unbacked' | 'overlay' | 'reveal' | 'split' | 'rules';
 export interface RedoAction { shotIndex: number; kind: RedoKind; detail: string }
@@ -118,18 +122,46 @@ function dedupe(w: Work, m: FilmMetric): Work {
 
 // ---------- 可读性 ----------
 
-/** 铺图卡片看不清：先切到铺图变体（量过变体达标）；变体也不达标才取消底图 */
+/** 处理的中文说明：铺图变体、压暗量、文字位置 */
+function tweakText(t: BrollTweak): string {
+  const parts = [t.legible ? '铺图变体（底部压暗加深、玻璃卡不透明）' : '', t.shade ? `整体再压暗 ${Math.round(t.shade * 100)}%` : '', t.textTop ? '文字挪到上方' : ''];
+  return parts.filter(Boolean).join('、');
+}
+
+/** 推近幅度上限（相对起点裁框的放大比例） */
+const PUSH_MAX = 0.5;
+/**
+ * 压暗之后图上的推近运动在成片帧差里被一起压低（压得越深越小），上半屏会被判静止（帧差 < 0.8 超过 3 秒）。
+ * 所以换铺图变体或再压暗时同步加大推近幅度，让画面仍在动：实测钩子底图（3.9 秒）压暗 45% 后帧差只有原来的一半，推近 0.36 时回到原水平以上。
+ * 静图才有推近；已经比这更强的不改
+ */
+export function boostMotion(broll: Broll): Broll {
+  if (broll.kind !== 'photo') return broll;
+  const push = Math.min(PUSH_MAX, 0.16 + 0.45 * (broll.shade ?? 0));
+  const kb = broll.kenBurns ?? kenBurnsRects(broll.focal);
+  const wTo = kb.from.w / (1 + push);
+  if (wTo >= kb.to.w - 1e-9) return broll;
+  const cx = kb.to.x + kb.to.w / 2;
+  const cy = kb.to.y + kb.to.h / 2;
+  const at = (c: number): number => Math.min(1 - wTo, Math.max(0, c - wTo / 2));
+  return { ...broll, kenBurns: { from: kb.from, to: { x: at(cx), y: at(cy), w: wTo, h: wTo } } };
+}
+
+/** 铺图卡片看不清：按台阶处理——铺图变体 → 压暗加深 → 换文字位置，哪一级达标就停在哪一级、底图保留；台阶都不够才撤图（最后一步） */
 function readable(w: Work, r: FilmReport): Work {
   const bad = (r.contrasts ?? []).filter((c) => c.contrast < MIN_CONTRAST);
   return bad.reduce((acc, c) => {
     const s = acc.shots[c.shotIndex];
     if (!s?.broll || acc.claimed.has(c.shotIndex)) return acc;
-    if (c.legible !== undefined && c.legible >= MIN_CONTRAST) {
-      return edit(acc, c.shotIndex, { ...s, broll: { ...s.broll, legible: true } }, 'legible', `文字对比度 ${c.contrast.toFixed(1)}，改铺图变体（压暗加深、玻璃卡不透明）后 ${c.legible.toFixed(1)}`);
+    // 旧数据只量了铺图变体：达标就等价于第一级台阶
+    const fix = c.fix ?? (c.legible !== undefined && c.legible >= MIN_CONTRAST ? { tweak: { legible: true } as BrollTweak, contrast: c.legible } : undefined);
+    if (fix) {
+      return edit(acc, c.shotIndex, { ...s, broll: boostMotion({ ...s.broll, ...fix.tweak }) }, 'legible', `文字对比度 ${c.contrast.toFixed(1)}，改${tweakText(fix.tweak)}后 ${fix.contrast.toFixed(1)}，底图保留`);
     }
     const { broll: _b, ...rest } = s;
-    const why = c.legible === undefined ? '' : `，铺图变体也只有 ${c.legible.toFixed(1)}`;
-    return edit(acc, c.shotIndex, rest, 'unbacked', `文字对比度 ${c.contrast.toFixed(1)}${why}，取消底图`);
+    const best = c.ladderBest ?? c.legible;
+    const why = best === undefined ? '' : `，铺图变体、压暗加深、换文字位置都试过，最高只有 ${best.toFixed(1)}`;
+    return edit(acc, c.shotIndex, rest, 'unbacked', `文字对比度 ${c.contrast.toFixed(1)}${why}，最后一步：取消底图`);
   }, w);
 }
 

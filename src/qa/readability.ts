@@ -10,11 +10,30 @@ import { renderStill, selectComposition } from '@remotion/renderer';
 import { throwIfCancelled } from '../cancel.js';
 import { withBundle } from '../compose/render.js';
 import { runBuffer } from '../media/exec.js';
-import { CANVAS, type Shot, type Storyboard } from '../storyboard/schema.js';
+import { CANVAS, type Broll, type Shot, type Storyboard } from '../storyboard/schema.js';
 
 export const MIN_CONTRAST = 4.5;
-/** polarity：文字比底亮（light）还是比底暗（dark）；legible：不达标时换成铺图变体（broll.legible）后量到的对比度 */
-export interface ShotContrast { shotIndex: number; contrast: number; polarity: 'light' | 'dark'; legible?: number }
+/** 对底图的一次处理：铺图变体、整体压暗量、文字挪到上方（都只加不减，逐级叠加） */
+export type BrollTweak = Pick<Broll, 'legible' | 'shade' | 'textTop'>;
+/** 台阶：先铺图变体，再整体压暗加深（由浅到深），再换文字位置（挪到上方，同时压暗）；都不够才撤图（局部重做的最后一步） */
+export const LEGIBLE_LADDER: readonly BrollTweak[] = [
+  { legible: true },
+  { legible: true, shade: 0.25 },
+  { legible: true, shade: 0.45 },
+  { legible: true, shade: 0.45, textTop: true },
+  { legible: true, shade: 0.65, textTop: true },
+];
+
+/** 当前镜头还没用过的台阶：已经在用的变体、已经压到这个程度的不重复试 */
+export function ladderSteps(broll: Broll): BrollTweak[] {
+  return LEGIBLE_LADDER.filter((t) => (t.shade ?? 0) > (broll.shade ?? 0) || (t.textTop === true && broll.textTop !== true) || (t.legible === true && broll.legible !== true));
+}
+
+/**
+ * polarity：文字比底亮（light）还是比底暗（dark）；legible：不达标时换成铺图变体后量到的对比度；
+ * fix：台阶里第一个达标的处理（连同它的对比度）；ladderBest：整个台阶试完都不达标时量到的最高对比度
+ */
+export interface ShotContrast { shotIndex: number; contrast: number; polarity: 'light' | 'dark'; legible?: number; fix?: { tweak: BrollTweak; contrast: number }; ladderBest?: number }
 
 /** 两张图同一像素三个通道的差之和超过它才算文字像素（排除编码噪声） */
 const TEXT_DIFF = 40;
@@ -94,12 +113,26 @@ async function contrastOf(env: Env, shot: Shot, name: string): Promise<{ contras
   return textContrast(await stillRgb(env.ffmpeg, a), await stillRgb(env.ffmpeg, b), CANVAS.width, CANVAS.seam);
 }
 
-/** 一个铺图卡片：量对比度；不达标且还不是铺图变体时，再量一次变体的对比度（局部重做据此选变体或取消底图） */
+/**
+ * 一个铺图卡片：量对比度；不达标时沿台阶逐级试（铺图变体 → 压暗加深 → 换文字位置），第一个达标的台阶写进 fix。
+ * 深色字压在不透明玻璃卡上时压暗与换位置都没有用，量到深色极性就不再往下试
+ */
 async function measureShot(env: Env, shot: Shot, i: number): Promise<ShotContrast | null> {
   const r = await contrastOf(env, shot, `${i}`);
-  if (!r || r.contrast >= MIN_CONTRAST || !shot.broll || shot.broll.legible) return r ? { shotIndex: i, ...r } : null;
-  const v = await contrastOf(env, { ...shot, broll: { ...shot.broll, legible: true } }, `${i}-v`);
-  return { shotIndex: i, ...r, ...(v ? { legible: v.contrast } : {}) };
+  if (!r) return null;
+  const base: ShotContrast = { shotIndex: i, ...r };
+  if (r.contrast >= MIN_CONTRAST || !shot.broll) return base;
+  let best = 0;
+  let first: number | undefined;
+  for (const [k, tweak] of ladderSteps(shot.broll).entries()) {
+    const v = await contrastOf(env, { ...shot, broll: { ...shot.broll, ...tweak } }, `${i}-${k}`);
+    if (!v) break;
+    if (k === 0 && tweak.legible && !shot.broll.legible) first = v.contrast;
+    if (v.contrast >= MIN_CONTRAST) return { ...base, ...(first !== undefined ? { legible: first } : {}), fix: { tweak, contrast: v.contrast } };
+    best = Math.max(best, v.contrast);
+    if (v.polarity === 'dark') break;
+  }
+  return { ...base, ...(first !== undefined ? { legible: first } : {}), ladderBest: best };
 }
 
 /** 逐个铺图卡片渲染静帧并量对比度（一次打包）；workDir 是素材所在的工作目录（打包的 publicDir） */

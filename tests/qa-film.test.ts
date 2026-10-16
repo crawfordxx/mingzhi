@@ -5,7 +5,7 @@ import {
   blankMetric, coverageMetric, diversityMetric, filmReport, firstFrameMetric, LIMITS, photoSeconds, readabilityMetric, reuseMetric, sfxMetric, staticLimit, staticMetric, templateSeconds,
   type FilmMetric, type FilmReport,
 } from '../src/qa/film.js';
-import { planRedo, syncBeats } from '../src/qa/film-redo.js';
+import { boostMotion, planRedo, syncBeats } from '../src/qa/film-redo.js';
 import { measureFilm } from '../src/qa/film-measure.js';
 import { FLOAT_MIN_PX, FLOAT_SCALE } from '../render/templates/parts.js';
 import { chipLabelPx, chipPillPx, chipsZoom } from '../render/templates/Chips.js';
@@ -309,7 +309,7 @@ describe('局部重做：按指标定位镜头，只改目标镜头', () => {
     const contrasts = [{ shotIndex: 0, contrast: 3.2, polarity: 'light' as const, legible: 6.1 }, { shotIndex: 2, contrast: 3.8, polarity: 'dark' as const, legible: 4.1 }];
     const plan = planRedo(sb(shots), report([metric('readability', [0, 2])], { contrasts }), caps, 20);
     expect(plan.actions.map((a) => [a.shotIndex, a.kind])).toEqual([[0, 'legible'], [2, 'unbacked']]);
-    expect(plan.storyboard.shots[0]).toEqual({ ...shots[0], broll: { ...photo('broll/h.jpg'), legible: true } });
+    expect(plan.storyboard.shots[0]).toEqual({ ...shots[0], broll: boostMotion({ ...photo('broll/h.jpg'), legible: true }) });
     expect(plan.storyboard.shots[2]).toEqual(split(6, 13, ev(2)));
     expect(plan.storyboard.shots[1]).toEqual(shots[1]);
   });

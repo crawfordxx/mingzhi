@@ -179,7 +179,7 @@ pnpm serve          # 启动本机服务，默认 http://127.0.0.1:4321
 export MINGZHI_KX_KEY=<你的可想 AI key>
 pnpm mingzhi edit <口播视频.mp4> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] \
   [--no-broll] [--max-videos N] [--budget 元] [--bgm auto|none|曲目id] [--caption-style 样式id] [--cover-style 风格id] \
-  [--no-cover] [--no-qa] [--yes]
+  [--no-cover] [--no-qa] [--cover-only] [--yes]
 ```
 
 开始前会打印预估花费并等你确认（`--yes` 跳过）。不指定 `-o` 时，成片写到 `work/<视频名>/<视频名>_精剪.mp4`；工作目录里还留着 `project.json`（识别稿、剪切点、字幕、分镜等）、`cut.mp4` 和 `captions.ass`。
@@ -194,6 +194,9 @@ pnpm mingzhi edit <口播视频.mp4> [-o 输出.mp4] [--work 工作目录] [--bg
 | `--caption-style` | `blade` 刀锋（默认）、`wenkai` 文楷、`smiley` 得意、`minimal` 简约、`kuaile` 快乐、`song` 宋韵 |
 | `--cover-style` | `bauhaus`（默认）、`swiss`、`memphis`、`editorial`、`neon`、`guochao`、`risograph`、`neobrutal`、`y2k`、`japanese` |
 | `--no-cover` / `--no-qa` | 不生成封面 / 不做卡片自检 |
+| `--cover-only` | 成片已在 `--work` 目录里、只缺封面时（例如封面一步余额不足）只补封面，成片不动 |
+
+封面是可选产物：它失败（含账户余额不足）不影响成片。成片已写完时命令照常打印成片路径，并在 stderr 提示「封面未生成：<原因>」和补封面的命令，**退出码仍是 0**；成片没交付（任何一步出错）才是 1，`--cover-only` 补不成封面也是 1。
 
 背景预设：`study` 书房、`studio` 极简工作室、`cafe` 咖啡馆、`night-window` 夜景落地窗、`tech-dark` 科技暗色、`japanese` 日式和室、`balcony` 绿植阳台、`library` 图书馆、`rooftop` 黄昏天台、`concrete` 水泥灰墙。
 
