@@ -26,7 +26,7 @@ describe('attributionText', () => {
       entry({ file: 'b', source: 'wikimedia', author: 'Eve', license: 'CC BY 4.0', attributionRequired: true, page: 'https://commons.wikimedia.org/wiki/File:B.jpg' }),
       entry({ file: 'c', source: 'generated', aiGenerated: true, license: 'AI 生成', author: undefined }),
     ]);
-    expect(text).toBe('素材：Pexels @Ann、Wikimedia Commons（CC BY 4.0）@Eve；部分画面为 AI 生成');
+    expect(text).toBe('素材：Pexels @Ann、Wikimedia Commons（CC BY 4.0）@Eve；部分素材已裁切调色；部分画面为 AI 生成');
   });
 
   it('同来源多作者合并去重；同一素材来源不同许可分开写', () => {
@@ -35,7 +35,7 @@ describe('attributionText', () => {
       entry({ file: 'w1', source: 'wikimedia', author: 'Eve', license: 'CC BY 4.0', attributionRequired: true }),
       entry({ file: 'w2', source: 'wikimedia', author: 'Fay', license: 'CC0' }),
     ]);
-    expect(text).toBe('素材：Pexels @Ann、@Bob、Wikimedia Commons（CC BY 4.0）@Eve、Wikimedia Commons（CC0）@Fay');
+    expect(text).toBe('素材：Pexels @Ann @Bob、Wikimedia Commons（CC BY 4.0）@Eve、Wikimedia Commons（CC0）@Fay；部分素材已裁切调色');
   });
 
   it('Pixabay 无作者时只写来源；截图写出处域名', () => {
@@ -43,11 +43,16 @@ describe('attributionText', () => {
       entry({ source: 'pixabay', author: undefined, license: 'Pixabay Content License' }),
       entry({ file: 's', source: 'screenshot', page: 'https://openai.com/index/x', author: undefined, license: '引用' }),
     ]);
-    expect(text).toBe('素材：Pixabay；部分画面截自 openai.com');
+    expect(text).toBe('素材：Pixabay；部分素材已裁切调色；部分画面截自 openai.com');
+  });
+
+  it('带作者主页链接时写在作者后；只做变速的不写已裁切调色', () => {
+    const text = attributionText([entry({ authorUrl: 'https://www.pexels.com/@ann', modified: ['speed0.5'] })]);
+    expect(text).toBe('素材：Pexels @Ann（https://www.pexels.com/@ann）');
   });
 
   it('只有 AI 生成；空列表返回空串', () => {
-    expect(attributionText([entry({ source: 'generated', aiGenerated: true, author: undefined })])).toBe('部分画面为 AI 生成');
+    expect(attributionText([entry({ source: 'generated', aiGenerated: true, author: undefined, modified: [] })])).toBe('部分画面为 AI 生成');
     expect(attributionText([])).toBe('');
   });
 });

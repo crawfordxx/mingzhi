@@ -12,9 +12,13 @@ export interface Candidate {
   height: number;
   durationSec?: number;
   fps?: number;
+  /** 原文件体积（字节），来源给得出时才有，下载前用来判断要不要拉 */
+  sizeBytes?: number;
   /** 作品页 */
   page: string;
   author?: string;
+  /** 作者主页，署名时附上 */
+  authorUrl?: string;
   license: string;
   licenseUrl?: string;
   attributionRequired: boolean;
@@ -32,18 +36,12 @@ export type Source = (q: SourceQuery, signal?: AbortSignal) => Promise<Candidate
 
 export interface SourceOptions {
   fetchImpl?: typeof fetch;
+  /** 限流重试前的等待，测试里注入以免真等 */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** 视频目标短边：低于它画面放到 1080 宽的版面里会糊 */
 export const MIN_SHORT_EDGE = 1080;
-const REQUEST_TIMEOUT_MS = 30_000;
-
-/** 请求超时与外部取消合并成一个 signal */
-export function requestSignal(signal?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
-}
-
 /** 视频文件挑选：短边 ≥ 1080 里最接近的；都不够就取最大的 */
 export function pickClosest<T extends { width: number; height: number }>(files: readonly T[]): T | undefined {
   const short = (f: T) => Math.min(f.width, f.height);

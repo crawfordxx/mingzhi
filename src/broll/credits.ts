@@ -8,6 +8,8 @@ export interface CreditEntry {
   source: Candidate['source'];
   page: string;
   author?: string;
+  /** 作者主页，有则随署名附上 */
+  authorUrl?: string;
   license: string;
   licenseUrl?: string;
   attributionRequired: boolean;
@@ -35,27 +37,49 @@ function hostOf(page: string): string {
   }
 }
 
+interface SourceGroup { label: string; authors: Map<string, string | undefined> }
+
+function groupLabel(e: CreditEntry): string | undefined {
+  const name = SOURCE_NAME[e.source];
+  if (!name) return undefined;
+  return e.source === 'wikimedia' ? `${name}（${e.license}）` : name;
+}
+
+function authorMention(name: string, url: string | undefined): string {
+  return url ? `@${name}（${url}）` : `@${name}`;
+}
+
+function renderGroup(g: SourceGroup): string {
+  const authors = [...g.authors].map(([name, url]) => authorMention(name, url));
+  if (authors.length === 0) return g.label;
+  // 括号收尾的标签后不加空格，作者之间用空格分隔，避免和来源间的顿号混淆
+  return `${g.label}${g.label.endsWith('）') ? '' : ' '}${authors.join(' ')}`;
+}
+
 /** 同一来源（Wikimedia 还按许可区分）合并作者，保持首次出现的顺序 */
 function sourceItems(entries: readonly CreditEntry[]): string[] {
-  const groups = new Map<string, { label: string; authors: string[] }>();
+  const groups = new Map<string, SourceGroup>();
   for (const e of entries) {
-    const name = SOURCE_NAME[e.source];
-    if (!name) continue;
-    const label = e.source === 'wikimedia' ? `${name}（${e.license}）` : name;
-    const group = groups.get(label) ?? { label, authors: [] };
-    if (e.author && !group.authors.includes(e.author)) group.authors.push(e.author);
+    const label = groupLabel(e);
+    if (!label) continue;
+    const group = groups.get(label) ?? { label, authors: new Map() };
+    if (e.author && !group.authors.has(e.author)) group.authors.set(e.author, e.authorUrl);
     groups.set(label, group);
   }
-  return [...groups.values()].map((g) => (g.authors.length > 0 ? `${g.label}${g.label.endsWith('）') ? '' : ' '}${g.authors.map((a) => `@${a}`).join('、')}` : g.label));
+  return [...groups.values()].map(renderGroup);
 }
+
+const PROCESSED = /crop|lut|grade|color/;
 
 /** 发布正文末尾的中文署名段落 */
 export function attributionText(entries: readonly CreditEntry[]): string {
   const items = sourceItems(entries);
   const hosts = [...new Set(entries.filter((e) => e.source === 'screenshot').map((e) => hostOf(e.page)))];
+  const processed = entries.some((e) => e.source !== 'generated' && e.modified.some((m) => PROCESSED.test(m)));
   const ai = entries.some((e) => e.aiGenerated || e.source === 'generated');
   return [
     items.length > 0 ? `素材：${items.join('、')}` : '',
+    processed ? '部分素材已裁切调色' : '',
     hosts.length > 0 ? `部分画面截自 ${hosts.join('、')}` : '',
     ai ? '部分画面为 AI 生成' : '',
   ].filter(Boolean).join('；');

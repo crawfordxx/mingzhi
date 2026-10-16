@@ -12,14 +12,14 @@ const VIDEO_TIMEOUT_MS = 25 * 60_000;
 export const STYLE_TEMPLATE = ', editorial photography, soft window light, warm neutral palette, 50mm, shallow depth of field, matte film look, subtle grain, no text';
 /** 禁用词：全息、机器人、霓虹、发光这类「AI 科技感」套路 */
 export const AVOID_TERMS = ', avoid hologram, robot, neon, glowing (避免全息、机器人、霓虹、发光)';
-const NO_TEXT_SUFFIX = `${STYLE_TEMPLATE}${AVOID_TERMS}, no watermark, no logos`;
+const STYLE_SUFFIX = `${STYLE_TEMPLATE}${AVOID_TERMS}, no watermark, no logos`;
 
 export type Download = (url: string, dest: string) => Promise<void>;
 
 /** 文生图：1:1 / 1k / medium / jpeg，约 ¥0.2 一张 */
 export async function generateImage(task: TaskClient, prompt: string, dest: string, download: Download = downloadTo): Promise<{ cost?: number }> {
   const { url, cost } = await task.run(
-    { modelName: IMAGE_MODEL, modelType: 'text2img', prompt: `${prompt}${NO_TEXT_SUFFIX}`, size: '1:1', resolution: '1k', quality: 'medium', output_format: 'jpeg' },
+    { modelName: IMAGE_MODEL, modelType: 'text2img', prompt: `${prompt}${STYLE_SUFFIX}`, size: '1:1', resolution: '1k', quality: 'medium', output_format: 'jpeg' },
     { kind: 'image', label: 'B-roll 生图' },
   );
   await download(url, dest);
