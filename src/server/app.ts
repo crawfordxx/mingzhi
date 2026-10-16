@@ -10,10 +10,11 @@ import { buildDeps, defaultExportDir, type AppCtx, type AppOptions } from './con
 import { serveStatic } from './media.js';
 import { asHttpError, HttpError, sendJson } from './http.js';
 import { KeyCache } from './keys.js';
+import { Activity, watchIdle } from './lifecycle.js';
 import { findRoute, splitUrl } from './router.js';
 import { buildRoutes } from './routes.js';
 import { RunManager } from './runs.js';
-import { guardRequest } from './security.js';
+import { countsAsActivity, guardRequest } from './security.js';
 import { pathScrubber } from './paths.js';
 
 export const HOST = '127.0.0.1';
@@ -22,8 +23,17 @@ const PORT_TRIES = 20;
 const API_PREFIXES = new Set(['api', 'media', 'thumbs', 'previews']);
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PATCH', 'DELETE']);
 const DEFAULT_WEB_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
+/** 退出时等运行中任务收尾的上限：启动器的看门狗 4 秒后会强制退出 */
+const STOP_WAIT_MS = 3000;
+const IDLE_CHECK_MS = 60_000;
 
-export interface RunningApp { url: string; port: number; app: AppCtx; close: () => Promise<void> }
+export interface RunningApp {
+  url: string; port: number; app: AppCtx;
+  /** 只关监听与连接（测试用） */
+  close: () => Promise<void>;
+  /** 优雅停止：结束任务、关闭连接（含 SSE）；不退出进程，重复调用返回同一个 Promise */
+  shutdown: () => Promise<void>;
+}
 
 export const INTERRUPTED = '服务重启，任务中断';
 
@@ -53,7 +63,7 @@ function failInterrupted(app: AppCtx): void {
   }
 }
 
-function buildApp(opts: AppOptions, portOf: () => number): AppCtx {
+function buildApp(opts: AppOptions, portOf: () => number, requestShutdown: () => void): AppCtx {
   const spacesRoot = join(opts.cfg.dataDir, 'spaces');
   mkdirSync(spacesRoot, { recursive: true });
   const store = new SpaceStore(spacesRoot);
@@ -73,6 +83,7 @@ function buildApp(opts: AppOptions, portOf: () => number): AppCtx {
   const app: AppCtx = {
     cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore, keys, scrub,
     deps: buildDeps(opts.cfg, opts.deps), webDir: opts.webDir ?? DEFAULT_WEB_DIR, exportDir: opts.exportDir ?? defaultExportDir(), devPort, port: portOf,
+    activity: new Activity(opts.idleClock), updates: opts.updates, requestShutdown,
   };
   runs.attach(app);
   failInterrupted(app);
@@ -118,17 +129,33 @@ async function dispatch(app: AppCtx, routes: ReturnType<typeof buildRoutes>, req
   }
 }
 
+const closeServer = (server: Server): Promise<void> => new Promise((resolve) => {
+  server.close(() => resolve());
+  server.closeAllConnections();
+});
+
 /** 创建服务（未监听）。端口在 listen 之后才确定，守卫通过 port() 读取 */
-export function createApp(opts: AppOptions): { server: Server; app: AppCtx } {
+export function createApp(opts: AppOptions): { server: Server; app: AppCtx; shutdown: () => Promise<void> } {
   let server!: Server;
-  const app = buildApp(opts, () => (server.address() as AddressInfo).port);
+  let stopping: Promise<void> | undefined;
+  // 先结束任务（运行器把版本记为失败并写盘），再关监听和所有连接（SSE 随之断开）
+  const shutdown = (): Promise<void> => (stopping ??= app.runs.stopAll(STOP_WAIT_MS).then(() => closeServer(server)));
+  let exiting = false;
+  const requestShutdown = (): void => {
+    if (exiting) return;
+    exiting = true;
+    void shutdown().then(() => opts.onExit?.(0));
+  };
+  const app = buildApp(opts, () => (server.address() as AddressInfo).port, requestShutdown);
   const routes = buildRoutes(app);
   server = createServer((req, res) => {
+    // 只有通过同源校验的请求才算活动：别的网页用 <img src=…/api/ping> 之类发来的跨站请求不能让服务一直不退出
+    if (countsAsActivity(req, { port: app.port(), devPort: app.devPort })) res.on('close', app.activity.begin());
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     dispatch(app, routes, req, res).catch((err: unknown) => sendError(app, res, err));
   });
   server.requestTimeout = 0; // 上传大视频可能超过默认的 5 分钟（本机服务，不防慢速攻击）
-  return { server, app };
+  return { server, app, shutdown };
 }
 
 function listenOn(server: Server, port: number): Promise<void> {
@@ -144,7 +171,7 @@ function listenOn(server: Server, port: number): Promise<void> {
 
 /** 只监听 127.0.0.1；端口被占用时顺延（port 为 0 时由系统分配，测试用） */
 export async function startApp(opts: AppOptions, port: number = DEFAULT_PORT): Promise<RunningApp> {
-  const { server, app } = createApp(opts);
+  const { server, app, shutdown } = createApp(opts);
   for (let i = 0; i < PORT_TRIES; i += 1) {
     try {
       await listenOn(server, port === 0 ? 0 : port + i);
@@ -154,9 +181,13 @@ export async function startApp(opts: AppOptions, port: number = DEFAULT_PORT): P
     }
   }
   const actual = (server.address() as AddressInfo).port;
-  const close = (): Promise<void> => new Promise((resolve) => {
-    server.close(() => resolve());
-    server.closeAllConnections();
-  });
-  return { url: `http://${HOST}:${actual}`, port: actual, app, close };
+  const stopIdle = opts.idleExitMs
+    ? watchIdle({ activity: app.activity, busy: () => app.runs.busy(), idleMs: opts.idleExitMs, checkMs: opts.idleCheckMs ?? IDLE_CHECK_MS, onIdle: app.requestShutdown })
+    : () => undefined;
+  server.once('close', stopIdle);
+  const close = (): Promise<void> => {
+    stopIdle();
+    return server.listening ? closeServer(server) : Promise.resolve();
+  };
+  return { url: `http://${HOST}:${actual}`, port: actual, app, close, shutdown };
 }

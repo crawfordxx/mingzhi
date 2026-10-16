@@ -6,6 +6,7 @@ import './styles/setup.css';
 import './styles/stage.css';
 import './styles/live.css';
 import './styles/versions.css';
+import './styles/appbar.css';
 import { App } from './App';
 
 const root = document.getElementById('root');

@@ -8,6 +8,7 @@ export const SERIAL_TESTS = [
   'tests/cover.test.ts',
   'tests/segments.test.ts',
   'tests/runner-e2e.test.ts',
+  'tests/remotion-cache-real.test.ts',
 ];
 
 export default defineConfig({

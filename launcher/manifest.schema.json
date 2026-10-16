@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crawfordxx/mingzhi/launcher/manifest.schema.json",
+  "title": "明知AI剪辑 首次运行下载清单（dist/manifest.json）",
+  "description": "由 scripts/build-manifest.mjs 从 launcher/manifest.lock.json 生成。启动器按 items 数组顺序逐项安装（app 排在最前）。url 按优先级排列，失败时依次尝试下一个；host 为 github.com / raw.githubusercontent.com 的 url，若用户在进度页填了代理前缀，启动器在该 url 前插入 `<前缀><原 url>`（不内置任何第三方代理）。所有 dest / marker.path / entries[].dest 都是相对 AppRoot 的路径，用 / 分隔；首段若是 {app}，启动器展开为 app/<顶层 version>。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "items"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+([-+][\\w.]+)?$", "description": "应用版本（语义化）；{app} 展开为 app/<version>" },
+    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } }
+  },
+  "$defs": {
+    "relPath": {
+      "type": "string",
+      "description": "相对 AppRoot 的路径：不以 / 开头，不含反斜杠、盘符、空段、. 与 ..；{app} 只能作首段",
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(^|/)\\.{1,2}(/|$))(?!.*//)(?!.*/$)(\\{app\\}|[^{}]+)(/[^{}]+)*$"
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "platform", "sha256", "size", "dest", "urls"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$", "description": "清单内唯一" },
+        "kind": { "enum": ["node", "ffmpeg", "chrome", "model", "asset", "app"] },
+        "platform": { "enum": ["darwin-arm64", "darwin-x64", "win32-x64", "any"], "description": "node / ffmpeg / chrome / app 必须是具体平台；model / asset 为 any。清单含三个平台，启动器只取自己平台与 any 的项" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "下载文件（压缩包，不是解压后）的 sha256" },
+        "size": { "type": "integer", "minimum": 1, "description": "下载文件的字节数，用于进度条与续传校验" },
+        "dest": { "$ref": "#/$defs/relPath", "description": "无 unpack：下载文件的落点（文件）；有 unpack：解压目标目录，gz 时为解出文件的路径；有 entries：输出所在目录（逐个文件见 entries[].dest）" },
+        "unpack": { "enum": ["tar.gz", "tar.xz", "zip", "tar.zst", "gz"], "description": "gz 是单文件 gunzip（ffmpeg / ffprobe）；其余为归档" },
+        "strip": { "type": "integer", "minimum": 0, "maximum": 8, "description": "解包时剥掉前 N 层目录（缺省 0）；Node 官方包带顶层目录，填 1。仅归档可用" },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "description": "只从归档里取这些文件（而不是整个解包）：zip 内路径 entry → AppRoot 下 dest。transcode=mp3 表示取出后用 data/bin/ffmpeg 转码为 128k 立体声 44.1kHz mp3（配乐）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["entry", "dest"],
+            "properties": {
+              "entry": { "type": "string", "minLength": 1 },
+              "dest": { "$ref": "#/$defs/relPath" },
+              "transcode": { "const": "mp3" }
+            }
+          }
+        },
+        "executable": { "type": "boolean", "description": "安装后对 dest 设置可执行位（macOS；Windows 忽略）" },
+        "exec": { "$ref": "#/$defs/relPath", "description": "安装后的可执行文件路径（必须在 dest 目录内）。Chrome Headless Shell 用它：启动器据此设置服务的环境变量 MINGZHI_CHROME；macOS 上启动器对它设可执行位；Windows 带 .exe" },
+        "optional": { "type": "boolean", "description": "true = 下载或安装失败不阻塞启动（配乐、字体等素材：缺失时产品降级出片），启动器可在后台补下" },
+        "urls": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "uri", "pattern": "^https://" }, "description": "按优先级排列，国内镜像在前" },
+        "license": { "type": "string", "description": "许可说明，供「关于」页展示" }
+      }
+    }
+  }
+}

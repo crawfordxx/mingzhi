@@ -1,0 +1,337 @@
+# 发布流水线：三平台各自打应用本体包、编译启动器（内置含 app 项的清单）、用启动器解包烟测，
+# 最后汇总三平台产物与合并后的清单，创建草稿 Release（需要人工检查后再发布）。
+# 触发：推送 v* 标签（必须与 package.json 的版本一致），或在 Actions 页手动运行（用 package.json 的版本）。
+# 第三方 action 固定到 commit sha（注释里是对应版本）；Node 与 Rust 固定到具体版本，产物可复现。
+# 产物：macOS 为 Mingzhi-macos.zip（arm64+x64 通用二进制 + 明知AI剪辑.command，package-macos 任务用 scripts/macos-sign.sh 打包；
+# 配了 Apple secrets 才签名公证），Windows 为单个 Mingzhi.exe（控制台程序，本期不签名）；每个产物都带 .sha256。
+# 注意：仓库公开之后，Release 里的应用包与启动器才能被匿名下载（启动器按 github.com/.../releases/download 下载 app 包）。
+name: 发布
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PNPM_VERSION: 9.15.0
+  # 与清单里锁定的 Node 运行时同版本（launcher/manifest.lock.json 的 node 项）
+  NODE_VERSION: 22.23.3
+  RUST_TOOLCHAIN: 1.94.1
+
+jobs:
+  build:
+    name: 构建 ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          # Intel Mac：GitHub 已下线 macos-13 镜像，x64 改用 macos-15-intel
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: windows-latest
+            platform: win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      # 所有 cargo 调用（编译启动器、跑烟测例子）都用同一份含 app 项的清单；release 构建缺了它会直接编译失败
+      MINGZHI_MANIFEST_FILE: ${{ github.workspace }}/dist/manifest.json
+    steps:
+      # Windows 上默认把 LF 转成 CRLF，打进包的源码会与其它平台不一致
+      - name: 保持换行符原样
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: launcher
+
+      - name: 版本号
+        id: ver
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与 package.json 的版本 $VERSION 不一致"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建工作台前端
+        run: pnpm build:web
+
+      - name: 打应用本体包
+        run: |
+          # 包内文件的 mtime 取提交时间，同一提交重复打包结果一致
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) node scripts/bundle-app.mjs
+
+      - name: 生成清单（含本平台 app 项）
+        run: node scripts/build-manifest.mjs --app "$PLATFORM=dist/mingzhi-app-$PLATFORM.tar.zst"
+
+      - name: 编译启动器（内置 dist/manifest.json）
+        working-directory: launcher
+        run: cargo build --release --locked
+
+      - name: 核对：启动器二进制里内置的是含本平台 app 项的清单
+        run: |
+          EXE=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then EXE=".exe"; fi
+          BIN="launcher/target/release/mingzhi-launcher$EXE"
+          SHA=$(node -p "require('./dist/manifest.json').items.find((i) => i.id === 'app-' + process.env.PLATFORM).sha256")
+          grep -a -q "$SHA" "$BIN" || { echo "::error::启动器里没有本平台 app 包的 sha256 $SHA"; exit 1; }
+          grep -a -q "mingzhi-app-$PLATFORM.tar.zst" "$BIN" || { echo "::error::启动器里没有 mingzhi-app-$PLATFORM.tar.zst"; exit 1; }
+          echo "内置清单含 app-$PLATFORM（sha256 $SHA）"
+
+      # 启动器安装流程装 app 包与清单里的 Chrome → 只靠包内依赖起服务 → 包内 Remotion 打包并经 MINGZHI_CHROME 渲染一张静帧
+      - name: 烟测：启动器解包 + 起服务 + 渲染链路
+        run: |
+          APP_ROOT="$RUNNER_TEMP/mingzhi root"
+          cargo run --release --locked --manifest-path launcher/Cargo.toml --example install_app -- \
+            dist/manifest.json dist "$APP_ROOT" | tee "$RUNNER_TEMP/install.log"
+          CHROME=$(sed -n 's/^MINGZHI_CHROME=//p' "$RUNNER_TEMP/install.log" | tr -d '\r')
+          node scripts/smoke-app.mjs "$APP_ROOT/app/${{ steps.ver.outputs.version }}" --chrome "$CHROME"
+
+      - name: 整理产物（应用包、清单）
+        run: |
+          mkdir -p out
+          cp "dist/mingzhi-app-$PLATFORM.tar.zst" "dist/mingzhi-app-$PLATFORM.tar.zst.sha256" out/
+          cp dist/manifest.json "out/manifest-$PLATFORM.json"
+
+      # ---- macOS：原始启动器二进制交给下面的 package-macos 合成通用二进制并签名（名字不以 mingzhi- 开头，不会进 Release）
+      - name: 保存 macOS 启动器二进制
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: launcher-bin-${{ matrix.platform }}
+          path: launcher/target/release/mingzhi-launcher
+          if-no-files-found: error
+          retention-days: 1
+
+      # ---- Windows：单个 Mingzhi.exe（控制台子系统：双击会有一个命令行窗口，关闭即退出；图标与版本信息已由 build.rs 嵌入）；本期不签名
+      - name: 整理 Windows 产物
+        if: runner.os == 'Windows'
+        run: |
+          cp launcher/target/release/mingzhi-launcher.exe out/Mingzhi.exe
+          (cd out && sha256sum Mingzhi.exe > Mingzhi.exe.sha256)
+
+      - name: 产物清单
+        run: ls -l out
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mingzhi-${{ matrix.platform }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  # macOS 产物：两个架构的启动器合成通用二进制，与 .command 一起打成 Mingzhi-macos.zip。
+  # 配了 Developer ID secrets 才签名并公证，否则只做 ad-hoc 签名。需要的 secrets：
+  #   APPLE_CERTIFICATE_P12（Developer ID Application 证书导出的 .p12，base64）、APPLE_CERTIFICATE_PASSWORD、
+  #   APPLE_SIGN_IDENTITY（如 "Developer ID Application: 名字 (TEAMID)"）、APPLE_ID、APPLE_TEAM_ID、APPLE_APP_PASSWORD（App 专用密码）
+  package-macos:
+    name: 打 macOS 包（签名与公证）
+    needs: build
+    runs-on: macos-14
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: launcher-bin-*
+
+      - name: 检查 macOS 签名 secrets
+        id: sign
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+        run: |
+          # 只判断能不能签名；公证凭据是否齐全由 macos-sign.sh 自己判断并打印说明
+          if [[ -n "$CERT" && -n "$SIGN_IDENTITY" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配置 Apple 签名 secrets：macOS 启动器只做 ad-hoc 签名，不公证（用户首次打开需要放行）"
+          fi
+
+      - name: 导入签名证书到临时钥匙串
+        if: steps.sign.outputs.enabled == 'true'
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/mingzhi-signing.keychain-db"
+          KC_PASS="$(uuidgen)"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          trap 'rm -f "$RUNNER_TEMP/cert.p12"' EXIT
+          printf '%s' "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -T /usr/bin/codesign -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KEYCHAIN" > /dev/null
+          # 把临时钥匙串加进搜索列表（保留原有的）
+          KEYCHAINS=("$KEYCHAIN")
+          while IFS= read -r k; do KEYCHAINS+=("$k"); done < <(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')
+          security list-keychains -d user -s "${KEYCHAINS[@]}"
+
+      - name: 打 Mingzhi-macos.zip（签名与公证见 scripts/macos-sign.sh）
+        env:
+          APPLE_SIGN_IDENTITY: ${{ steps.sign.outputs.enabled == 'true' && secrets.APPLE_SIGN_IDENTITY || '' }}
+          APPLE_ID: ${{ steps.sign.outputs.enabled == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_TEAM_ID: ${{ steps.sign.outputs.enabled == 'true' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_APP_PASSWORD: ${{ steps.sign.outputs.enabled == 'true' && secrets.APPLE_APP_PASSWORD || '' }}
+        run: |
+          bash scripts/macos-sign.sh \
+            --bin launcher-bin-darwin-arm64/mingzhi-launcher \
+            --bin launcher-bin-darwin-x64/mingzhi-launcher \
+            --out out
+
+      - name: 核对 macOS 产物（解开后确认文件、两个架构、可执行位与签名）
+        env:
+          SIGNED: ${{ steps.sign.outputs.enabled }}
+        run: |
+          CHECK="$RUNNER_TEMP/check"
+          rm -rf "$CHECK" && mkdir -p "$CHECK"
+          ditto -x -k out/Mingzhi-macos.zip "$CHECK"
+          DIR="$CHECK/明知AI剪辑"
+          test -x "$DIR/明知AI剪辑.command"
+          test -x "$DIR/mingzhi-launcher"
+          lipo -archs "$DIR/mingzhi-launcher" | tee "$RUNNER_TEMP/archs.txt"
+          grep -q arm64 "$RUNNER_TEMP/archs.txt" && grep -q x86_64 "$RUNNER_TEMP/archs.txt"
+          codesign --verify --strict --verbose=2 "$DIR/mingzhi-launcher"
+          if [[ "$SIGNED" == "true" ]]; then
+            INFO="$(codesign -dvv "$DIR/mingzhi-launcher" 2>&1)"
+            grep -q "Authority=Developer ID Application" <<< "$INFO"
+            grep -q "flags=.*runtime" <<< "$INFO"
+          fi
+          ls -l out
+
+      - name: 清理临时钥匙串
+        if: always() && steps.sign.outputs.enabled == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/mingzhi-signing.keychain-db" || true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mingzhi-macos
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: 汇总并创建草稿 Release
+    needs: [build, package-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # 只为 build-manifest 用到的 zod；不跑安装脚本（onnxruntime-node 在 Linux 上会去下 CUDA 组件）
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: out
+          pattern: mingzhi-*
+          merge-multiple: true
+
+      - name: 校验各产物的 .sha256
+        run: |
+          cd out
+          for f in *.sha256; do sha256sum -c "$f"; done
+          for f in Mingzhi-macos.zip Mingzhi.exe; do
+            test -f "$f" && test -f "$f.sha256" || { echo "::error::缺少 $f 或它的 .sha256"; exit 1; }
+          done
+
+      - name: 合并清单
+        run: |
+          node scripts/build-manifest.mjs --out out/manifest.json \
+            --app darwin-arm64=out/mingzhi-app-darwin-arm64.tar.zst \
+            --app darwin-x64=out/mingzhi-app-darwin-x64.tar.zst \
+            --app win32-x64=out/mingzhi-app-win32-x64.tar.zst
+
+      - name: 核对：各平台启动器内置的清单与合并清单一致
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const merged = JSON.parse(readFileSync('out/manifest.json', 'utf8'));
+            for (const p of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+              const own = JSON.parse(readFileSync('out/manifest-' + p + '.json', 'utf8'));
+              const pick = (m) => JSON.stringify(m.items.filter((i) => i.platform === p || i.platform === 'any'));
+              if (own.version !== merged.version || pick(own) !== pick(merged)) throw new Error(p + ' 的内置清单与合并清单不一致');
+            }
+            console.log('三平台内置清单与合并清单一致');
+          "
+          rm out/manifest-*.json
+
+      # 启动器二进制静态链接的 Rust 库的许可声明，随 Release 一起发布（cargo 取源码读各库的 LICENSE）
+      - name: 生成第三方许可声明
+        run: node scripts/third-party-notices.mjs --out out/THIRD_PARTY_NOTICES.md
+
+      - name: 创建草稿 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          cd out
+          ls -l
+          if gh release view "$TAG" --json isDraft --jq .isDraft > is_draft.txt 2>/dev/null; then
+            if [[ "$(cat is_draft.txt)" != "true" ]]; then
+              echo "::error::$TAG 已正式发布，不能覆盖"
+              exit 1
+            fi
+            gh release upload "$TAG" --clobber mingzhi-* Mingzhi* manifest.json THIRD_PARTY_NOTICES.md
+          else
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "明知AI剪辑 $TAG" --generate-notes \
+              mingzhi-* Mingzhi* manifest.json THIRD_PARTY_NOTICES.md
+          fi
+          rm -f is_draft.txt
