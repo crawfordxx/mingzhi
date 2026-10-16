@@ -30,6 +30,11 @@ xattr -d com.apple.quarantine "$SELF" 2>/dev/null
 chmod +x ./mingzhi-launcher 2>/dev/null
 ./mingzhi-launcher
 code=$?
+# 退出码 10：已经有一个明知AI剪辑在运行，页面已交给它（启动器自己打印了说明）。
+# 这个窗口不是「退出」，别再显示「已退出」，免得用户以为程序关了。
+if [ "$code" -eq 10 ]; then
+  exit 0
+fi
 echo
 echo "明知AI剪辑已退出，可以关闭这个窗口。"
 exit "$code"

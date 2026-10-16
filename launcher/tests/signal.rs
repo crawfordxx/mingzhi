@@ -165,3 +165,35 @@ fn sighup_终端已断开_stderr不可写时仍然退出并带走服务() {
 fn sigint_终端已断开_stderr不可写时仍然退出并带走服务() {
     check(libc::SIGINT, false);
 }
+
+/// 第二次双击：把页面交给已在运行的启动器，自己以专用退出码 10 退出，
+/// 并在终端里说「已在运行……这个窗口可以关闭」（.command 据此不再打印「已退出」）；第一个启动器照常运行。
+#[test]
+fn 第二次启动交接后以退出码10退出且原实例不受影响() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start();
+    let (mut first, _service_pid) = spawn_launcher(tmp.path(), &server, true);
+
+    let second = Command::new(env!("CARGO_BIN_EXE_mingzhi-launcher"))
+        .env("MINGZHI_APP_ROOT", tmp.path().join("root"))
+        .env("MINGZHI_MANIFEST", tmp.path().join("manifest.json"))
+        .env("MINGZHI_APP_DIR", tmp.path().join("appdir"))
+        .env("MINGZHI_NO_BROWSER", "1")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&second.stderr);
+    assert_eq!(second.status.code(), Some(10), "{err}");
+    assert!(
+        err.contains("明知AI剪辑已在运行，已为你打开浏览器；这个窗口可以关闭"),
+        "{err}"
+    );
+    assert!(!err.contains("已退出"), "{err}");
+    assert!(first.try_wait().unwrap().is_none(), "原实例应继续运行");
+
+    // SAFETY：向刚起的子进程发信号
+    unsafe { libc::kill(first.id() as i32, libc::SIGINT) };
+    if !exits_within(&mut first, Duration::from_secs(12)) {
+        let _ = first.kill();
+    }
+}

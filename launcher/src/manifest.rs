@@ -195,6 +195,18 @@ impl Item {
         Ok(paths)
     }
 
+    /// state.json 里的记录键：`<id>@<展开后的 dest>`。
+    /// 同一个 id 在不同版本的清单里 dest 不同（如 `app/0.1.0`、`app/0.2.0`），各有各的记录，
+    /// 新旧启动器交替运行时不会互相作废。dest 统一用 `/` 分隔。
+    pub fn record_key(&self, version: &str) -> Result<String> {
+        let rel = rel_path(&self.id, &self.dest, version)?;
+        let parts: Vec<String> = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        Ok(format!("{}@{}", self.id, parts.join("/")))
+    }
+
     fn rel_dest(&self) -> Result<PathBuf> {
         rel_path(&self.id, &self.dest, "0")
     }

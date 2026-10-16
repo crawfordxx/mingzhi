@@ -76,7 +76,13 @@ fn prepare(shared: &Shared, plan: &Plan, rx: &Receiver<Command>) -> Flow<()> {
         |i| plan.includes(i) && !i.optional,
     );
     match required {
-        Ok(_) => Flow::Next(()),
+        Ok(_) => {
+            // 必需项都装好了再清理旧版本（失败时旧的可能还要回退用）
+            for dir in crate::prune::prune(&plan.root, &plan.manifest, &plan.platform) {
+                crate::signal::say(&format!("已清理旧版本：{}", dir.display()));
+            }
+            Flow::Next(())
+        }
         Err(e) => {
             shared.set(Stage::Failed, Some(friendly(&e.to_string())), None);
             wait_for(rx, &[Command::Retry])

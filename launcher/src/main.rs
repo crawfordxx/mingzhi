@@ -12,6 +12,7 @@
 use mingzhi_launcher::app::{self, Info, Plan, Shared};
 use mingzhi_launcher::browser;
 use mingzhi_launcher::catalog::licenses;
+use mingzhi_launcher::dataver;
 use mingzhi_launcher::download::Downloader;
 use mingzhi_launcher::errmap::friendly;
 use mingzhi_launcher::error::{Error, Result};
@@ -36,6 +37,8 @@ const EMBEDDED_MANIFEST: &str = include_str!(concat!(env!("OUT_DIR"), "/manifest
 const UI_PORT: u16 = 4310;
 /// 第二次双击时等主实例公布地址的最长时间
 const SECONDARY_WAIT: Duration = Duration::from_secs(5);
+/// Windows 上交接后窗口保留的时间
+const HANDOFF_LINGER: Duration = Duration::from_secs(3);
 
 fn load_manifest() -> Result<Manifest> {
     if let Some(path) = std::env::var_os("MINGZHI_MANIFEST") {
@@ -50,20 +53,29 @@ fn load_manifest() -> Result<Manifest> {
     Manifest::parse(&value.to_string())
 }
 
-/// 抢单实例锁；已有启动器在运行时打开它的进度页（或提示），返回 None。
-fn primary_or_hand_off(root: &AppRoot) -> Result<Option<InstanceGuard>> {
+/// 抢单实例锁的结果。
+enum Role {
+    Primary(InstanceGuard),
+    /// 已有启动器在运行，页面已交给它；本进程应以 `HANDOFF_EXIT_CODE` 退出
+    HandedOff,
+    /// 已有启动器但没有应答（已弹窗提示），本进程直接退出
+    Unresponsive,
+}
+
+/// 抢单实例锁；已有启动器在运行时打开它的进度页（或提示）。
+fn primary_or_hand_off(root: &AppRoot) -> Result<Role> {
     match instance::acquire(root.root(), SECONDARY_WAIT)? {
-        Acquire::Primary(g) => Ok(Some(g)),
+        Acquire::Primary(g) => Ok(Role::Primary(g)),
         Acquire::Secondary(Some(url)) => {
             open_page(&url);
-            Ok(None)
+            Ok(Role::HandedOff)
         }
         Acquire::Secondary(None) => {
             notify::alert(
                 "明知AI剪辑 已经在运行",
                 "已经有一个明知AI剪辑在启动中，但暂时没有响应。请等几秒再双击一次；一直这样的话，重启电脑后再试。",
             );
-            Ok(None)
+            Ok(Role::Unresponsive)
         }
     }
 }
@@ -71,18 +83,29 @@ fn primary_or_hand_off(root: &AppRoot) -> Result<Option<InstanceGuard>> {
 /// 启动提示（macOS 的 .command 自己先打印同一句，所以只有 Windows 在这里打印）。
 const BANNER: &str = "明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出。";
 
-fn run() -> Result<()> {
+fn run() -> Result<ExitCode> {
     signal::install();
     signal::spawn_watcher();
     if cfg!(windows) {
         signal::say(BANNER);
     }
     let root = AppRoot::resolve()?;
-    let Some(guard) = primary_or_hand_off(&root)? else {
-        return Ok(());
+    let guard = match primary_or_hand_off(&root)? {
+        Role::Primary(g) => g,
+        Role::HandedOff => {
+            signal::say(instance::HANDOFF_MESSAGE);
+            if cfg!(windows) {
+                // 控制台程序一退出窗口就关了：多留几秒让用户看到这句话
+                std::thread::sleep(HANDOFF_LINGER);
+            }
+            return Ok(ExitCode::from(instance::HANDOFF_EXIT_CODE));
+        }
+        Role::Unresponsive => return Ok(ExitCode::SUCCESS),
     };
 
     let manifest = load_manifest()?;
+    // 数据被更新版本用过时，旧启动器不碰它
+    dataver::ensure(&root, &manifest.version)?;
     let app_dir = std::env::var_os("MINGZHI_APP_DIR").map(PathBuf::from);
     let settings = Arc::new(RwLock::new(State::load(&root.state_file())?.settings()));
     let proxy = ProxyConfig::from_env();
@@ -116,7 +139,7 @@ fn run() -> Result<()> {
     app::run(shared, plan, rx);
     signal::mark_finished();
     drop(guard);
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 /// 打开进度页；打不开浏览器时弹窗告诉用户手动访问的地址。
@@ -131,7 +154,7 @@ fn open_page(url: &str) {
 
 fn main() -> ExitCode {
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(e) => {
             // 进度页还没出来，用户看不到 stderr：弹窗说明原因与建议
             let f = friendly(&e.to_string());

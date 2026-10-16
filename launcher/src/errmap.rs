@@ -14,6 +14,10 @@ pub enum Kind {
     Proxy,
     Network,
     Unavailable,
+    /// 应用本体（只有 GitHub Release 一个地址）下载不了：多半是发布地址还没公开
+    AppUnavailable,
+    /// 数据已被更新版本使用过，旧版启动器不能再用
+    Outdated,
     Other,
 }
 
@@ -29,7 +33,9 @@ pub struct Friendly {
 /// 磁盘满、文件占用、端口冲突、证书、校验不符这些「明确的原因」优先；
 /// 其次是代理（失败信息里带「经代理」或代理警告）；最后才是笼统的网络不通 / 地址失效。
 /// 例：写盘失败后会换镜像，最终信息里常同时带网络字样，仍应判为磁盘满。
-const RULES: [(Kind, &[&str]); 8] = [
+const RULES: [(Kind, &[&str]); 9] = [
+    // 数据版本比启动器新：不是下载问题，最优先
+    (Kind::Outdated, &["请使用最新版启动器"]),
     (
         Kind::DiskFull,
         &[
@@ -101,13 +107,24 @@ const RULES: [(Kind, &[&str]); 8] = [
     ),
 ];
 
+/// 应用本体（id 以 `app-` 开头）所有地址都是 4xx（代理认证 407 除外）：
+/// 它只有 GitHub Release 一个地址，换下载源没有用，要单独说。
+fn app_unreachable(lower: &str) -> bool {
+    lower.starts_with("app-") && lower.contains("服务器返回 4") && !lower.contains("服务器返回 407")
+}
+
 pub fn classify(raw: &str) -> Kind {
     let lower = raw.to_lowercase();
-    RULES
-        .iter()
-        .find(|(_, pats)| pats.iter().any(|p| lower.contains(p)))
-        .map(|(k, _)| *k)
-        .unwrap_or(Kind::Other)
+    for (kind, pats) in RULES.iter() {
+        // 排在代理之前：明确的原因（磁盘满、证书、校验……）仍优先，但不被笼统的代理提示盖过
+        if *kind == Kind::Proxy && app_unreachable(&lower) {
+            return Kind::AppUnavailable;
+        }
+        if pats.iter().any(|p| lower.contains(p)) {
+            return *kind;
+        }
+    }
+    Kind::Other
 }
 
 pub fn friendly(raw: &str) -> Friendly {
@@ -115,7 +132,7 @@ pub fn friendly(raw: &str) -> Friendly {
     let (title, hint) = match kind {
         Kind::DiskFull => (
             "磁盘空间不足",
-            "首次需要约 1 GB 空间。清理一些文件（比如清空废纸篓 / 回收站）后点「重试」。",
+            "首次安装约 1.1 GB，下载中的临时文件还要多占一些，建议留出 1.5 GB。清理一些文件（比如清空废纸篓 / 回收站）后点「重试」。",
         ),
         Kind::Busy => (
             "文件被占用，暂时写不进去",
@@ -144,6 +161,14 @@ pub fn friendly(raw: &str) -> Friendly {
         Kind::Unavailable => (
             "下载地址暂时不可用",
             "在下载设置里换一个下载源后点「重试」，或者过一会儿再试。",
+        ),
+        Kind::AppUnavailable => (
+            "暂时无法下载应用本体（发布地址不可用）",
+            "应用本体只发布在 GitHub，目前这个地址打不开（项目可能还没有公开发布）。请稍后再试，或者从源码运行（见项目 README）；换下载源对它没有用。",
+        ),
+        Kind::Outdated => (
+            "请使用最新版启动器",
+            "你电脑上的数据已被更新版本的明知AI剪辑使用过，旧版启动器再去读写可能会出错。请到项目的 Release 页面下载最新版启动器，数据不会受影响。",
         ),
         Kind::Other => (
             "出了点意外",

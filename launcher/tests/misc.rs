@@ -188,13 +188,13 @@ fn 回环与no_proxy直连() {
     assert_eq!(cfg.proxy_for("https://example.com"), Some("http://p:1"));
 }
 
-const SCUTIL: &str = "<dictionary> {\n  ExceptionsList : <array> {\n    0 : *.local\n  }\n  HTTPEnable : 1\n  HTTPPort : 7897\n  HTTPProxy : 127.0.0.1\n  HTTPSEnable : 1\n  HTTPSPort : 7898\n  HTTPSProxy : 10.0.0.2\n}\n";
+const SCUTIL: &str = "<dictionary> {\n  ExceptionsList : <array> {\n    0 : *.local\n  }\n  HTTPEnable : 1\n  HTTPPort : 8080\n  HTTPProxy : 127.0.0.1\n  HTTPSEnable : 1\n  HTTPSPort : 8081\n  HTTPSProxy : 10.0.0.2\n}\n";
 
 #[test]
 fn 解析scutil系统代理() {
     let (http, https) = parse_scutil(SCUTIL);
-    assert_eq!(http.as_deref(), Some("http://127.0.0.1:7897"));
-    assert_eq!(https.as_deref(), Some("http://10.0.0.2:7898"));
+    assert_eq!(http.as_deref(), Some("http://127.0.0.1:8080"));
+    assert_eq!(https.as_deref(), Some("http://10.0.0.2:8081"));
 
     let disabled = SCUTIL.replace("HTTPEnable : 1", "HTTPEnable : 0");
     assert_eq!(parse_scutil(&disabled).0, None);
@@ -206,11 +206,11 @@ fn 环境变量缺失时用系统代理兜底() {
     let cfg = ProxyConfig::from_sources(get(&[]), || Some(SCUTIL.to_string()));
     assert_eq!(
         cfg.proxy_for("https://example.com"),
-        Some("http://10.0.0.2:7898")
+        Some("http://10.0.0.2:8081")
     );
     assert_eq!(
         cfg.proxy_for("http://example.com"),
-        Some("http://127.0.0.1:7897")
+        Some("http://127.0.0.1:8080")
     );
 }
 

@@ -141,9 +141,9 @@ fn socks代理警告加网络错误归为代理而不是端口() {
 
 #[test]
 fn 经代理的网络错误归为代理() {
-    let raw = "node 下载失败，所有镜像均不可用（最后一次：https://x：网络错误（经代理 http://127.0.0.1:7897）：Connection Failed: tls connection init failed: unexpected end of file）";
+    let raw = "node 下载失败，所有镜像均不可用（最后一次：https://x：网络错误（经代理 http://127.0.0.1:8080）：Connection Failed: tls connection init failed: unexpected end of file）";
     assert_eq!(friendly(raw).kind, Kind::Proxy);
-    let raw = "https://x：45 秒没有收到数据，已换下一个地址（经代理 http://127.0.0.1:7897）";
+    let raw = "https://x：45 秒没有收到数据，已换下一个地址（经代理 http://127.0.0.1:8080）";
     assert_eq!(friendly(raw).kind, Kind::Proxy);
 }
 
@@ -177,4 +177,40 @@ fn 更具体的规则优先() {
 fn 意外退出文案不提重试按钮() {
     let f = friendly("某种奇怪的错误");
     assert!(!f.hint.contains("「重试」"), "{}", f.hint);
+}
+
+// ---- 终审修复：应用本体 4xx、数据版本过新 ----
+
+#[test]
+fn 应用本体下载404时不建议换下载源() {
+    let raw = "app-darwin-arm64 下载失败，所有镜像均不可用（最后一次：https://github.com/o/r/releases/download/v1/app.tar.zst：服务器返回 404）";
+    let f = friendly(raw);
+    assert_eq!(f.kind, Kind::AppUnavailable);
+    assert!(f.title.contains("暂时无法下载应用本体"), "{}", f.title);
+    assert!(
+        f.hint.contains("稍后再试") && f.hint.contains("源码运行"),
+        "{}",
+        f.hint
+    );
+    assert!(!f.hint.contains("换一个下载源后"), "{}", f.hint);
+    assert_eq!(f.detail, raw);
+}
+
+#[test]
+fn 其它组件的4xx仍可换下载源() {
+    let raw = "node 下载失败，所有镜像均不可用（最后一次：https://x/node.tar.xz：服务器返回 404）";
+    assert_eq!(friendly(raw).kind, Kind::Unavailable);
+}
+
+#[test]
+fn 应用本体的代理认证失败仍归为代理() {
+    let raw = "app-win32-x64 下载失败，所有镜像均不可用（最后一次：https://x：服务器返回 407；经代理 http://p:1）";
+    assert_eq!(friendly(raw).kind, Kind::Proxy);
+}
+
+#[test]
+fn 数据版本过新归为请使用最新版启动器() {
+    let f = friendly("请使用最新版启动器：这份数据已被 0.3.0 版使用过，当前启动器是 0.2.0 版");
+    assert_eq!(f.kind, Kind::Outdated);
+    assert_eq!(f.title, "请使用最新版启动器");
 }

@@ -5,6 +5,8 @@
 //!   size 对但 mtime 变了才全量算一次 sha。
 //! - 解包项（目录）：记录里的压缩包 sha 与清单一致且目录仍在 → 跳过。
 //!
+//! 记录键为 `<id>@<dest>`（见 `Item::record_key`），旧版只按 id 存的记录读到时仍可用并在下次写入时迁移。
+//!
 //! 文件里除 `installed` 外的字段（如 Task 3 的用户设置）原样保留。
 
 use crate::error::{Context, Error, Result};
@@ -105,19 +107,46 @@ impl State {
         next
     }
 
-    /// 返回登记了该项的新状态。
-    pub fn with_installed(&self, id: &str, record: InstalledItem) -> Self {
+    /// 返回登记了该项的新状态。`key` 见 `Item::record_key`。
+    /// 旧版只按 id 记录：旧记录的 sha 与新记录相同（说明它描述的正是这份内容）时顺手迁移掉；
+    /// 不同的保留（它描述的是别的版本，那个版本的启动器还要用）。
+    pub fn with_installed(&self, key: &str, record: InstalledItem) -> Self {
         let mut next = self.clone();
-        next.installed.insert(id.to_string(), record);
+        if let Some((id, _)) = key.split_once('@') {
+            let same = next
+                .installed
+                .get(id)
+                .is_some_and(|old| old.sha256.eq_ignore_ascii_case(&record.sha256));
+            if same {
+                next.installed.remove(id);
+            }
+        }
+        next.installed.insert(key.to_string(), record);
         next
     }
 
-    /// 快速判定：不读文件内容。
-    pub fn check(&self, item: &Item, dest: &Path) -> Check {
-        let record_matches = self
-            .installed
-            .get(&item.id)
-            .filter(|rec| rec.sha256.eq_ignore_ascii_case(&item.sha256));
+    /// 去掉 dest 落在 `rel_prefix`（相对 AppRoot，`/` 分隔）之内的全部记录。
+    pub fn without_under(&self, rel_prefix: &str) -> Self {
+        let mut next = self.clone();
+        let under = format!("{}/", rel_prefix.trim_end_matches('/'));
+        next.installed.retain(|key, _| {
+            key.split_once('@')
+                .is_none_or(|(_, dest)| dest != rel_prefix && !dest.starts_with(&under))
+        });
+        next
+    }
+
+    /// 取该项的记录：先按新键，找不到再看旧版只按 id 存的记录（sha 对得上才算）。
+    fn record_of(&self, key: &str, item: &Item) -> Option<&InstalledItem> {
+        self.installed
+            .get(key)
+            .or_else(|| self.installed.get(&item.id))
+            .filter(|rec| rec.sha256.eq_ignore_ascii_case(&item.sha256))
+    }
+
+    /// 快速判定：不读文件内容。`key` 见 `Item::record_key`。
+    pub fn check(&self, key: &str, item: &Item, dest: &Path) -> Check {
+        let record_matches = self.record_of(key, item);
 
         // 取 entry 的项：各输出文件的位置由 entries 决定，dest 目录不一定存在，
         // 输出是否齐全由调用方检查

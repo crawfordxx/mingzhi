@@ -43,6 +43,8 @@ pub struct SyncReport {
 
 struct Job<'a> {
     item: &'a Item,
+    /// state.json 里的记录键（id + 展开后的 dest）
+    key: String,
     dest: PathBuf,
     /// dest、entries、exec 全部会写入的路径
     footprint: Vec<PathBuf>,
@@ -157,6 +159,7 @@ fn build_jobs<'a>(root: &AppRoot, version: &str, items: &[&'a Item]) -> Result<V
         .map(|&item| {
             Ok(Job {
                 item,
+                key: item.record_key(version)?,
                 dest: item.resolve_dest(root, version)?,
                 footprint: item.footprint(root, version)?,
             })
@@ -181,7 +184,7 @@ fn decide(root: &AppRoot, jobs: &[Job], progress: &Progress) -> Result<Vec<bool>
     let mut verified = Vec::new();
     for job in jobs {
         let item = job.item;
-        let up_to_date = match state.check(item, &job.dest) {
+        let up_to_date = match state.check(&job.key, item, &job.dest) {
             Check::UpToDate => outputs_present(job),
             Check::Missing => false,
             Check::NeedHash => {
@@ -189,7 +192,7 @@ fn decide(root: &AppRoot, jobs: &[Job], progress: &Progress) -> Result<Vec<bool>
                 let same = sha256_file(&job.dest)?.eq_ignore_ascii_case(&item.sha256);
                 progress.clear_active(&item.id);
                 if same {
-                    verified.push((item.id.clone(), State::record_for(item, &job.dest)));
+                    verified.push((job.key.clone(), State::record_for(item, &job.dest)));
                 }
                 same
             }
@@ -198,8 +201,8 @@ fn decide(root: &AppRoot, jobs: &[Job], progress: &Progress) -> Result<Vec<bool>
     }
     force_nested(jobs, &mut todo);
     State::update(&root.state_file(), |disk| {
-        verified.iter().fold(disk.clone(), |s, (id, rec)| {
-            s.with_installed(id, rec.clone())
+        verified.iter().fold(disk.clone(), |s, (key, rec)| {
+            s.with_installed(key, rec.clone())
         })
     })?;
     Ok(todo)
@@ -271,7 +274,7 @@ fn install_and_record(ctx: &Ctx, job: &Job, outcomes: &Outcomes) -> bool {
             // 每装完一项立即落盘（读-改-写，不覆盖别处写入的设置）
             let record = State::record_for(job.item, &job.dest);
             State::update(&ctx.root.state_file(), |s| {
-                s.with_installed(&job.item.id, record)
+                s.with_installed(&job.key, record)
             })
             .map(|_| ())
         });

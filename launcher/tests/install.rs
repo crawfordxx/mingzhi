@@ -15,6 +15,9 @@ use std::io::Write;
 use std::time::Duration;
 
 const PLATFORM: &str = "darwin-arm64";
+/// 记录键：id@展开后的 dest（见 Item::record_key）
+const MODEL_KEY: &str = "model@data/models/model.bin";
+const APP_KEY: &str = "app@app/1.2.3";
 
 fn downloader() -> Downloader {
     Downloader::new(ProxyConfig::none(), Progress::new()).with_retry_delay(Duration::ZERO)
@@ -139,13 +142,13 @@ fn state_记录了安装项且保留未知字段() {
     sync(&fx.root, &fx.manifest, PLATFORM, &downloader()).unwrap();
 
     let state = State::load(&fx.root.state_file()).unwrap();
-    assert!(state.installed.contains_key("model") && state.installed.contains_key("app"));
+    assert!(state.installed.contains_key(MODEL_KEY) && state.installed.contains_key(APP_KEY));
     assert_eq!(
         state.extra["settings"]["githubProxy"],
         "https://example.test/"
     );
-    assert!(state.installed["model"].mtime_ms.is_some());
-    assert!(state.installed["app"].mtime_ms.is_none());
+    assert!(state.installed[MODEL_KEY].mtime_ms.is_some());
+    assert!(state.installed[APP_KEY].mtime_ms.is_none());
 }
 
 #[test]
@@ -173,7 +176,7 @@ fn mtime变了但内容一致时只重算哈希不重下() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
-    assert_eq!(state.installed["model"].mtime_ms, Some(meta_ms));
+    assert_eq!(state.installed[MODEL_KEY].mtime_ms, Some(meta_ms));
 }
 
 #[test]
@@ -671,7 +674,7 @@ fn 必需项失败时其余项照常装完() {
     let err = sync(&fx.root, &manifest, PLATFORM, &dl).unwrap_err();
     assert!(err.to_string().contains("broken"));
     let state = State::load(&fx.root.state_file()).unwrap();
-    assert!(state.installed.contains_key("model") && state.installed.contains_key("app"));
+    assert!(state.installed.contains_key(MODEL_KEY) && state.installed.contains_key(APP_KEY));
     let rows = dl.progress().items();
     let phase = |id: &str| rows.iter().find(|r| r.id == id).unwrap().phase;
     assert_eq!(phase("broken"), Phase::Failed);
@@ -734,5 +737,107 @@ fn 安装途中写入的设置不会被覆盖() {
     });
     let state = State::load(&state_path).unwrap();
     assert_eq!(state.settings(), s);
-    assert!(state.installed.contains_key("slow"));
+    assert!(state.installed.contains_key("slow@data/slow.bin"));
+}
+
+// ---- 终审修复：记录按 id + dest，新旧启动器交替运行不重下 ----
+
+/// 只含 app 项的清单；`seed` 不同则包内容、sha 不同
+fn app_manifest(server: &TestServer, version: &str, seed: u8) -> Manifest {
+    let mut b = tar::Builder::new(Vec::new());
+    let body = format!("v{version}-{seed}");
+    let mut h = tar::Header::new_gnu();
+    h.set_size(body.len() as u64);
+    h.set_mode(0o644);
+    h.set_cksum();
+    b.append_data(&mut h, "pkg/src/index.js", body.as_bytes())
+        .unwrap();
+    let tar = b.into_inner().unwrap();
+    let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    e.write_all(&tar).unwrap();
+    let gz = e.finish().unwrap();
+    let path = format!("/app-{version}.tar.gz");
+    server.route(&path, vec![Behavior::Serve(gz.clone())]);
+    Manifest {
+        version: version.to_string(),
+        items: vec![archive_item(
+            "app-darwin-arm64",
+            &gz,
+            "{app}",
+            UnpackKind::TarGz,
+            1,
+            vec![server.url(&path)],
+        )],
+    }
+}
+
+#[test]
+fn 新旧版本的清单交替同步不重复下载() {
+    let server = TestServer::start();
+    let old = app_manifest(&server, "0.1.0", 1);
+    let new = app_manifest(&server, "0.2.0", 2);
+    let tmp = tempfile::tempdir().unwrap();
+    let root = AppRoot::new(tmp.path().join("Mingzhi"));
+
+    assert_eq!(
+        sync(&root, &old, PLATFORM, &downloader())
+            .unwrap()
+            .installed,
+        vec!["app-darwin-arm64"]
+    );
+    assert_eq!(
+        sync(&root, &new, PLATFORM, &downloader())
+            .unwrap()
+            .installed,
+        vec!["app-darwin-arm64"]
+    );
+    let after_both = server.total_requests();
+    assert_eq!(after_both, 2);
+
+    // 再换回来：两边都已装好，只应跳过，不再有任何请求
+    for manifest in [&old, &new, &old, &new] {
+        let report = sync(&root, manifest, PLATFORM, &downloader()).unwrap();
+        assert!(report.installed.is_empty(), "{report:?}");
+        assert_eq!(report.skipped, vec!["app-darwin-arm64"]);
+    }
+    assert_eq!(server.total_requests(), after_both);
+    assert_eq!(
+        fs::read_to_string(root.app().join("0.1.0/src/index.js")).unwrap(),
+        "v0.1.0-1"
+    );
+    assert_eq!(
+        fs::read_to_string(root.app().join("0.2.0/src/index.js")).unwrap(),
+        "v0.2.0-2"
+    );
+    let state = State::load(&root.state_file()).unwrap();
+    assert!(state.installed.contains_key("app-darwin-arm64@app/0.1.0"));
+    assert!(state.installed.contains_key("app-darwin-arm64@app/0.2.0"));
+}
+
+#[test]
+fn 旧版按id存的记录能沿用并迁移() {
+    let server = TestServer::start();
+    let manifest = app_manifest(&server, "0.1.0", 1);
+    let tmp = tempfile::tempdir().unwrap();
+    let root = AppRoot::new(tmp.path().join("Mingzhi"));
+    sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    let requests = server.total_requests();
+
+    // 改写成旧格式：只按 id 存
+    let mut legacy = State::load(&root.state_file()).unwrap();
+    let rec = legacy.installed["app-darwin-arm64@app/0.1.0"].clone();
+    legacy.installed.clear();
+    legacy.installed.insert("app-darwin-arm64".to_string(), rec);
+    legacy.save(&root.state_file()).unwrap();
+
+    let report = sync(&root, &manifest, PLATFORM, &downloader()).unwrap();
+    assert!(report.installed.is_empty(), "旧记录应沿用：{report:?}");
+    assert_eq!(server.total_requests(), requests);
+
+    // 下次写入该项记录时，同 sha 的旧键被迁移掉
+    let item = &manifest.items[0];
+    let key = item.record_key("0.1.0").unwrap();
+    let migrated = legacy.with_installed(&key, State::record_for(item, &root.app().join("0.1.0")));
+    assert!(!migrated.installed.contains_key("app-darwin-arm64"));
+    assert!(migrated.installed.contains_key(&key));
 }

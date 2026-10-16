@@ -59,7 +59,21 @@ pub struct License {
     pub license: String,
 }
 
-/// 「关于」里的许可列表：启动器自身 + 清单各项（同名或同许可合并）+ 进度页字体。
+/// 不在下载清单里、但随应用本体或启动器分发的第三方内容：(名称, 许可)。
+/// 与 README「许可证」一节保持一致。
+const BUNDLED: [(&str, &str); 3] = [
+    (
+        "Remotion（渲染引擎，在应用本体里）",
+        "Remotion 许可（个人与不超过 3 人的公司免费，更大的公司需购买公司许可证）",
+    ),
+    ("界面音效（Kenney Interface Sounds）", "CC0 1.0"),
+    (
+        "启动器用到的 Rust 库",
+        "MIT / Apache-2.0 等（许可全文见 Release 里的 THIRD_PARTY_NOTICES.md）",
+    ),
+];
+
+/// 「关于」里的许可列表：启动器自身 + 清单各项（同名或同许可合并）+ 随应用本体分发的内容 + 进度页字体。
 pub fn licenses(items: &[&Item]) -> Vec<License> {
     let mut out = vec![License {
         name: "明知AI剪辑（含本启动器）".into(),
@@ -86,6 +100,12 @@ pub fn licenses(items: &[&Item]) -> Vec<License> {
                 license: license.to_string(),
             });
         }
+    }
+    for (name, license) in BUNDLED {
+        out.push(License {
+            name: name.into(),
+            license: license.into(),
+        });
     }
     out.push(License {
         name: "IBM Plex 字体（本页面）".into(),

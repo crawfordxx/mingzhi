@@ -12,6 +12,13 @@ const INFO_FILE: &str = "launcher.json";
 /// 进度页 /api/ping 的应答，用来确认地址背后确实是启动器
 pub const PING_REPLY: &str = "mingzhi-launcher";
 
+/// 第二次双击把页面交给已在运行的启动器后的退出码；macOS 的 .command 据此不打印「已退出」
+/// （窗口里的程序其实还在另一个终端窗口里运行）。
+pub const HANDOFF_EXIT_CODE: u8 = 10;
+
+/// 第二次双击成功交接后在终端里显示的话。
+pub const HANDOFF_MESSAGE: &str = "明知AI剪辑已在运行，已为你打开浏览器；这个窗口可以关闭。";
+
 pub enum Acquire {
     /// 本进程是主实例
     Primary(InstanceGuard),

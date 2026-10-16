@@ -102,6 +102,27 @@ fn 名称分组与许可() {
         // 配乐如有，合并成一行（配乐项可能从清单移走，不要求一定有）
         assert!(list.iter().filter(|l| l.name.starts_with("配乐")).count() <= 1);
         assert_eq!(list[0].license, "MIT");
+        // 与 README「许可证」一节一致：这些都要在「关于」里出现
+        for needle in [
+            "Remotion",
+            "Kenney",
+            "FunASR Model Open Source License",
+            "GPL-3.0（RobustVideoMatting",
+            "BSD-3-Clause（Chromium",
+            "MIT（Node.js）",
+            "SIL OFL 1.1",
+            "CC0 1.0",
+            "THIRD_PARTY_NOTICES.md",
+        ] {
+            let all: Vec<String> = list
+                .iter()
+                .map(|l| format!("{} {}", l.name, l.license))
+                .collect();
+            assert!(
+                all.iter().any(|t| t.contains(needle)),
+                "{platform} 的关于页缺 {needle}：{all:?}"
+            );
+        }
         for item in m.for_platform(platform) {
             assert_ne!(name_of(&item.id), item.id, "{} 缺中文名", item.id);
         }
