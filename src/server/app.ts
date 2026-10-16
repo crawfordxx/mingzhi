@@ -14,7 +14,7 @@ import { Activity, watchIdle } from './lifecycle.js';
 import { findRoute, splitUrl } from './router.js';
 import { buildRoutes } from './routes.js';
 import { RunManager } from './runs.js';
-import { guardRequest } from './security.js';
+import { countsAsActivity, guardRequest } from './security.js';
 import { pathScrubber } from './paths.js';
 
 export const HOST = '127.0.0.1';
@@ -83,7 +83,7 @@ function buildApp(opts: AppOptions, portOf: () => number, requestShutdown: () =>
   const app: AppCtx = {
     cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore, keys, scrub,
     deps: buildDeps(opts.cfg, opts.deps), webDir: opts.webDir ?? DEFAULT_WEB_DIR, exportDir: opts.exportDir ?? defaultExportDir(), devPort, port: portOf,
-    activity: new Activity(), updates: opts.updates, requestShutdown,
+    activity: new Activity(opts.idleClock), updates: opts.updates, requestShutdown,
   };
   runs.attach(app);
   failInterrupted(app);
@@ -149,7 +149,8 @@ export function createApp(opts: AppOptions): { server: Server; app: AppCtx; shut
   const app = buildApp(opts, () => (server.address() as AddressInfo).port, requestShutdown);
   const routes = buildRoutes(app);
   server = createServer((req, res) => {
-    res.on('close', app.activity.begin());
+    // 只有通过同源校验的请求才算活动：别的网页用 <img src=…/api/ping> 之类发来的跨站请求不能让服务一直不退出
+    if (countsAsActivity(req, { port: app.port(), devPort: app.devPort })) res.on('close', app.activity.begin());
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     dispatch(app, routes, req, res).catch((err: unknown) => sendError(app, res, err));
   });

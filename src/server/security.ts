@@ -40,3 +40,17 @@ export function guardRequest(req: IncomingMessage, o: GuardOptions): void {
   const site = req.headers['sec-fetch-site'];
   if (write && typeof site === 'string' && site !== 'same-origin' && site !== 'none') throw new HttpError(403, '拒绝跨源请求');
 }
+
+/**
+ * 这个请求算不算「有人在用」（空闲退出的判定依据）：Host 合法，Origin（若带）是本机当前端口，
+ * Sec-Fetch-Site（若带）是 same-origin / none（地址栏直接访问）。
+ * 没有这些头的请求（curl、测试、启动器的就绪探测）照常算；跨站网页发来的 GET 不算。
+ * 校验不通过的请求本来就会被 guardRequest 拒绝，不会被当成活动。
+ */
+export function countsAsActivity(req: IncomingMessage, o: GuardOptions): boolean {
+  if (!hostAllowed(req.headers.host, o)) return false;
+  const origin = req.headers.origin;
+  if (origin !== undefined && !originAllowed(origin, o)) return false;
+  const site = req.headers['sec-fetch-site'];
+  return typeof site !== 'string' || site === 'same-origin' || site === 'none';
+}

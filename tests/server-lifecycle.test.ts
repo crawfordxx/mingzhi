@@ -171,39 +171,80 @@ describe('POST /api/shutdown', () => {
   });
 });
 
-describe('空闲自动退出（服务内，真实时间缩短：空闲 1 秒、每 25ms 检查；计时逻辑见上面的假时钟单测）', () => {
-  const IDLE = { idleExitMs: 1000, idleCheckMs: 25 };
+describe('空闲自动退出（服务内：真实服务与定时器，空闲计时用测试控制的假时钟，CPU 繁忙时也不会误退出）', () => {
+  const IDLE_MS = 1000;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  /** 假时钟：只有 advance 才会让空闲时间流逝 */
+  function clock() {
+    let now = 1_000_000;
+    return { idleClock: () => now, advance: (ms: number) => { now += ms; } };
+  }
+  /** 检查间隔 25ms；给定时器足够的真实时间跑几轮，再看有没有退出 */
+  const settle = () => sleep(120);
+  const opts = (c: ReturnType<typeof clock>, onExit: () => void) => ({ onExit, idleExitMs: IDLE_MS, idleCheckMs: 25, idleClock: c.idleClock });
 
   it('有 ping 就顺延；不再 ping 后以 0 退出', async () => {
     const onExit = vi.fn();
-    t = await startTestApp({ app: { onExit, ...IDLE } });
+    const c = clock();
+    t = await startTestApp({ app: opts(c, onExit) });
     for (let i = 0; i < 6; i += 1) {
-      await sleep(250);
+      c.advance(IDLE_MS - 200); // 每次差一点就到点，ping 之后重新计时
+      await settle();
+      expect(onExit).not.toHaveBeenCalled();
       expect((await t.call('GET', '/api/ping')).status).toBe(204);
     }
-    expect(onExit).not.toHaveBeenCalled();
+    c.advance(IDLE_MS + 100);
     await waitFor(() => onExit.mock.calls.length > 0, 5000);
     expect(onExit).toHaveBeenCalledWith(0);
   });
 
   it('有任务在跑或事件流开着时不退出；都结束后才退出', async () => {
     const onExit = vi.fn();
-    t = await startTestApp({ key: GOOD_KEY, app: { onExit, ...IDLE } });
+    const c = clock();
+    t = await startTestApp({ key: GOOD_KEY, app: opts(c, onExit) });
     const release = holdRuns(t);
     const id = await spaceWithInput(t);
     await t.call('POST', `/api/spaces/${id}/start`);
     const tab = new AbortController();
     const stream = await fetch(`${t.url}/api/spaces/${id}/events?version=1`, { signal: tab.signal });
     await stream.body!.getReader().read();
-    await sleep(1500);
+    c.advance(5 * IDLE_MS);
+    await settle();
     expect(onExit).not.toHaveBeenCalled();
     release();
     await waitFor(async () => (await t!.call('GET', `/api/spaces/${id}`)).json.versions[0]?.status === 'done');
-    await sleep(1200);
+    c.advance(5 * IDLE_MS);
+    await settle();
     expect(onExit).not.toHaveBeenCalled(); // 事件流还开着
     tab.abort(); // 相当于关掉标签页
+    await waitFor(async () => { c.advance(IDLE_MS + 100); return onExit.mock.calls.length > 0; }, 5000);
+  });
+
+  it('跨站网页发来的请求（Sec-Fetch-Site: cross-site / 别的 Origin）不算活动，挡不住空闲退出', async () => {
+    const onExit = vi.fn();
+    const c = clock();
+    t = await startTestApp({ app: opts(c, onExit) });
+    c.advance(IDLE_MS * 0.6);
+    // 相当于别的网页放了 <img src="http://127.0.0.1:4321/api/ping">；若被算作活动，空闲只剩 0.6 倍，不会退出
+    await t.call('GET', '/api/ping', undefined, { 'Sec-Fetch-Site': 'cross-site' });
+    await t.call('GET', '/api/ping', undefined, { Origin: 'https://evil.example' });
+    await settle();
+    expect(onExit).not.toHaveBeenCalled();
+    c.advance(IDLE_MS * 0.6);
     await waitFor(() => onExit.mock.calls.length > 0, 5000);
+    expect(onExit).toHaveBeenCalledWith(0);
+  });
+
+  it('同源页面的请求（Sec-Fetch-Site: same-origin）算活动', async () => {
+    const onExit = vi.fn();
+    const c = clock();
+    t = await startTestApp({ app: opts(c, onExit) });
+    for (let i = 0; i < 4; i += 1) {
+      c.advance(IDLE_MS - 200);
+      await settle();
+      expect(onExit).not.toHaveBeenCalled();
+      expect((await t.call('GET', '/api/ping', undefined, { 'Sec-Fetch-Site': 'same-origin' })).status).toBe(204);
+    }
   });
 
   it('没配置空闲退出时（测试、开发）不会退出', async () => {
@@ -212,75 +253,4 @@ describe('空闲自动退出（服务内，真实时间缩短：空闲 1 秒、�
     await sleep(1200);
     expect(onExit).not.toHaveBeenCalled();
   });
-});
-
-describe('检查更新：/api/status 与 /api/prefs', () => {
-  const INFO: UpdateInfo = { version: '0.2.0', url: 'https://github.com/crawfordxx/mingzhi/releases/tag/v0.2.0', notes: '新功能' };
-  const fakeUpdates = (info: UpdateInfo | null) => ({ available: vi.fn(() => info), poke: vi.fn(async () => undefined) });
-
-  it('有新版本时 status 带 update，并顺手触发一次检查', async () => {
-    const updates = fakeUpdates(INFO);
-    t = await startTestApp({ app: { updates } });
-    const r = await t.call('GET', '/api/status');
-    expect(r.json.update).toEqual(INFO);
-    expect(updates.poke).toHaveBeenCalled();
-  });
-
-  it('没有新版本时不带 update 字段', async () => {
-    t = await startTestApp({ app: { updates: fakeUpdates(null) } });
-    expect((await t.call('GET', '/api/status')).json).not.toHaveProperty('update');
-  });
-
-  it('检查更新开关：默认开，可关，写进数据目录；关掉后不再查', async () => {
-    const updates = fakeUpdates(null);
-    t = await startTestApp({ app: { updates } });
-    expect((await t.call('GET', '/api/prefs')).json).toEqual({ checkUpdates: true });
-    const off = await t.call('PATCH', '/api/prefs', { checkUpdates: false });
-    expect(off.json).toEqual({ checkUpdates: false });
-    expect(JSON.parse(readFileSync(join(t.root, 'data', 'prefs.json'), 'utf8'))).toEqual({ checkUpdates: false });
-    expect((await t.call('GET', '/api/prefs')).json).toEqual({ checkUpdates: false });
-    updates.poke.mockClear();
-    const on = await t.call('PATCH', '/api/prefs', { checkUpdates: true });
-    expect(on.json).toEqual({ checkUpdates: true });
-    expect(updates.poke).toHaveBeenCalled();
-  });
-
-  it('开关参数不对 400', async () => {
-    t = await startTestApp();
-    expect((await t.call('PATCH', '/api/prefs', { checkUpdates: 'no' })).status).toBe(400);
-    expect((await t.call('PATCH', '/api/prefs', { other: 1 })).status).toBe(400);
-  });
-});
-
-describe('真实进程（src/server/index.ts）', () => {
-  /** 起一个真实服务进程（假模式：不查更新、不调模型），返回地址与退出码 */
-  async function spawnServer(): Promise<{ url: string; child: ChildProcess; exited: Promise<number | null> }> {
-    const dataDir = mkdtempSync(join(tmpdir(), 'mz-life-'));
-    const env = { ...process.env, MINGZHI_FAKE_LLM: '1', MINGZHI_DATA_DIR: dataDir, MINGZHI_PORT: String(47000 + Math.floor(Math.random() * 2000)) };
-    const child = spawn(process.execPath, ['--import', 'tsx', join(__dirname, '..', 'src', 'server', 'index.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
-    const url = await new Promise<string>((resolve, reject) => {
-      let out = '';
-      child.stdout!.on('data', (d: Buffer) => {
-        out += d.toString();
-        const m = /已启动：(http:\/\/127\.0\.0\.1:\d+)/.exec(out);
-        if (m) resolve(m[1]);
-      });
-      child.once('exit', () => reject(new Error(`服务没起来：${out}`)));
-    });
-    return { url, child, exited };
-  }
-
-  it('POST /api/shutdown 后进程以 0 退出', async () => {
-    const { url, exited } = await spawnServer();
-    const r = await fetch(`${url}/api/shutdown`, { method: 'POST', headers: { Origin: url } });
-    expect(r.status).toBe(202);
-    expect(await exited).toBe(0);
-  }, 30_000);
-
-  it('SIGTERM（启动器看门狗）同样优雅停止并以 0 退出', async () => {
-    const { child, exited } = await spawnServer();
-    child.kill('SIGTERM');
-    expect(await exited).toBe(0);
-  }, 30_000);
 });

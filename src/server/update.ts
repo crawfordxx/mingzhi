@@ -21,9 +21,8 @@ const PACKAGE_JSON = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '
 
 export interface UpdateInfo { version: string; url: string; notes: string }
 
-/** 当前版本：启动器传入的 MINGZHI_APP_VERSION 优先，否则读 package.json */
-export function appVersion(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.MINGZHI_APP_VERSION) return env.MINGZHI_APP_VERSION;
+/** 当前版本：读应用包内的 package.json（发布打包时与启动器清单的版本一致） */
+export function appVersion(): string {
   try {
     return (JSON.parse(readFileSync(PACKAGE_JSON, 'utf8')) as { version?: string }).version ?? '0.0.0';
   } catch {

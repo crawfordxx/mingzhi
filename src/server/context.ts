@@ -53,6 +53,8 @@ export interface AppOptions {
   idleExitMs?: number;
   /** 空闲检查间隔，默认 1 分钟 */
   idleCheckMs?: number;
+  /** 空闲计时用的时钟（测试注入假时钟，免得 CPU 繁忙时真实时间抖动导致误退出），默认 Date.now */
+  idleClock?: () => number;
 }
 
 /** 检查更新的最小接口：有新版本时 available() 返回它；poke() 到时间才真去查 */

@@ -10,6 +10,7 @@ import { CANVAS, type CardSpec, type TalkProps } from '../storyboard/schema.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { CoverProps } from '../cover/styles.js';
 import { run } from '../media/exec.js';
+import { loadConfig } from '../config.js';
 import { browserOptions } from './browser.js';
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'render', 'index.ts');
@@ -20,13 +21,35 @@ export function defaultConcurrency(): number {
   return Math.min(DEFAULT_CONCURRENCY, availableParallelism());
 }
 
+/** webpack 持久化缓存目录：放数据目录，不写进应用安装目录（约 170 MB；应用目录升级时整体替换，Windows 上还可能被杀毒软件占用） */
+export function remotionCacheDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(loadConfig(env).dataDir, 'cache', 'remotion');
+}
+
+/**
+ * 把 webpack 缓存目录指到 cacheDirectory。bundler 在 webpackOverride 之后才写入 cache 配置，
+ * 所以不能直接在 override 里改；插件的 apply 发生在 webpack 补默认值（含默认缓存目录）之前，在这里设置最稳妥。
+ */
+function cacheDirPlugin(cacheDirectory: string): { apply: (compiler: { options: { cache?: unknown } }) => void } {
+  return {
+    apply(compiler) {
+      const cache = compiler.options.cache;
+      if (cache && typeof cache === 'object') (cache as { cacheDirectory?: string }).cacheDirectory = cacheDirectory;
+    },
+  };
+}
+
 /** 打包 render/ 入口；publicDir 指向工作目录（软链，不复制人像与 B-roll），模板里用 staticFile() 取。webpack 把 .js 导入解析到 .ts/.tsx，与仓库的 NodeNext 写法一致 */
 function bundleFor(workDir: string): Promise<string> {
   return bundle({
     entryPoint: ENTRY,
     publicDir: workDir,
     symlinkPublicDir: true,
-    webpackOverride: (c) => ({ ...c, resolve: { ...c.resolve, extensionAlias: { '.js': ['.ts', '.tsx', '.js'] } } }),
+    webpackOverride: (c) => ({
+      ...c,
+      resolve: { ...c.resolve, extensionAlias: { '.js': ['.ts', '.tsx', '.js'] } },
+      plugins: [...(c.plugins ?? []), cacheDirPlugin(remotionCacheDir())],
+    }),
   });
 }
 

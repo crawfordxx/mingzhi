@@ -66,17 +66,17 @@ describe('envProxy：读环境变量里的代理', () => {
 describe('parseScutil：macOS 系统代理', () => {
   const OUT = `<dictionary> {
   HTTPEnable : 1
-  HTTPPort : 7897
+  HTTPPort : 8080
   HTTPProxy : 127.0.0.1
   HTTPSEnable : 1
-  HTTPSPort : 7898
+  HTTPSPort : 8081
   HTTPSProxy : 127.0.0.2
 }`;
   it('优先 HTTPS 代理', () => {
-    expect(parseScutil(OUT)).toBe('http://127.0.0.2:7898');
+    expect(parseScutil(OUT)).toBe('http://127.0.0.2:8081');
   });
   it('HTTPS 关着时用 HTTP 代理；都关着为 undefined', () => {
-    expect(parseScutil(OUT.replace('HTTPSEnable : 1', 'HTTPSEnable : 0'))).toBe('http://127.0.0.1:7897');
+    expect(parseScutil(OUT.replace('HTTPSEnable : 1', 'HTTPSEnable : 0'))).toBe('http://127.0.0.1:8080');
     expect(parseScutil('<dictionary> {\n  HTTPEnable : 0\n}')).toBeUndefined();
   });
 });

@@ -44,12 +44,11 @@ describe('isNewer', () => {
 });
 
 describe('appVersion', () => {
-  it('启动器传入 MINGZHI_APP_VERSION 时以它为准', () => {
-    expect(appVersion({ MINGZHI_APP_VERSION: '0.3.1' })).toBe('0.3.1');
-  });
-  it('没有时读 package.json', () => {
+  it('读 package.json（不受环境变量影响）', () => {
     const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as { version: string };
-    expect(appVersion({})).toBe(pkg.version);
+    vi.stubEnv('MINGZHI_APP_VERSION', '9.9.9');
+    expect(appVersion()).toBe(pkg.version);
+    vi.unstubAllEnvs();
   });
 });
 
