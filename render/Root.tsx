@@ -6,10 +6,11 @@ import { CardStill } from './layers/CardLayer.js';
 import { CaptionStill } from './layers/CaptionLayer.js';
 import type { CaptionStyleId } from '../src/captions/styles.js';
 import { Cover } from './Cover.js';
+import type { Palette } from '../src/compose/palette.js';
 import type { CoverProps } from '../src/cover/styles.js';
 
-/** 单卡静帧：shot 给出时按成片画这个镜头的卡片区（整片自检量铺图卡片可读性），hideText 时文字透明 */
-type CardStillProps = { card: CardSpec; dur?: number; shot?: Shot; hideText?: boolean };
+/** 单卡静帧：shot 给出时按成片画这个镜头的卡片区（整片自检量铺图卡片可读性），hideText 时文字透明，palette 为片色 */
+type CardStillProps = { card: CardSpec; dur?: number; shot?: Shot; hideText?: boolean; palette?: Palette };
 const EMPTY_COVER: CoverProps = { bg: '', person: '', style: 'bauhaus' };
 const EMPTY: TalkProps = { person: '', personWidth: 1080, personHeight: 1920, subject: null, captions: [], shots: [], durationSec: 1 };
 

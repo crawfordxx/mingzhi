@@ -101,7 +101,7 @@ export async function runQaFinal(ctx: QaFinalContext, video: string, storyboard:
   let hard: HardCheck[] = [];
   let message: string;
   try {
-    hard = await (ctx.hardChecks ?? realHardChecks)(video, { captionCenters: captionCentersOf(storyboard) }, defaultPalette(), ctx.cfg, ctx.outroStartSec);
+    hard = await (ctx.hardChecks ?? realHardChecks)(video, { captionCenters: captionCentersOf(storyboard) }, defaultPalette(storyboard.palette), ctx.cfg, ctx.outroStartSec);
     message = hardSummary(hard);
   } catch (err) {
     rethrowIfCancelled(err);

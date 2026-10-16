@@ -1,6 +1,7 @@
 import React from 'react';
 import { interpolateColors, useVideoConfig } from 'remotion';
-import { THEME } from '../theme.js';
+import { usePalette } from '../palette.js';
+import { toRgba } from '../../src/qa/contrast.js';
 import { CONTENT_W, CardFrame, Crumb, Reveal, SafeArea, clampLines, easeAt, fitFontSize, itemTimes, litIndex, springAt, type PropsOf, type TemplateProps } from './parts.js';
 
 type Step = PropsOf<'flow'>['steps'][number];
@@ -16,11 +17,6 @@ const LOOP_H = 128;
 const FIRST = 0.15;
 const STAGGER = 0.4;
 const DRAW_SEC = 0.35;
-const ACCENT = THEME.crumbDot;
-/** 未点亮的步骤：圆环浅灰，序号与文字用中灰（白底对比 ≥ 4.5，未讲到也看得清），点亮靠实心圆与深色字区分 */
-const IDLE = '#D9D4CB';
-export const FLOW_IDLE_INK = '#6E6962';
-const IDLE_INK = FLOW_IDLE_INK;
 
 /** 步骤标签基准字号：步数少时更大 */
 const labelBase = (n: number): number => (n <= 3 ? 52 : n === 4 ? 44 : 38);
@@ -28,29 +24,33 @@ const labelBase = (n: number): number => (n <= 3 ? 52 : n === 4 ? 44 : 38);
 /** 第 i 步的中心 x（各步平分卡内宽度） */
 const centerX = (i: number, n: number): number => (INNER_W * (i + 0.5)) / n;
 
-/** 一步：圆形序号 + 标签 + 注释；lit 0→1 从灰色描边变成实心，当前步外圈带橙色光环 */
+/** 一步：圆形序号 + 标签 + 注释；lit 0→1 从灰色描边变成实心，当前步是强调色实心圆带同色光环。
+ * 未点亮的步骤：圆环用片色 idle，序号与文字用 idleInk（对卡片 ≥ 4.5，未讲到也看得清），点亮靠实心圆与主文字色区分 */
 const StepNode: React.FC<{ step: Step; i: number; n: number; lit: number; current: boolean }> = ({ step, i, n, lit, current }) => {
   const col = INNER_W / n;
   const labelPx = fitFontSize(step.label, col - 16, labelBase(n), 24, 2);
-  const fill = interpolateColors(lit, [0, 1], ['#FFFFFF', current ? ACCENT : THEME.ink]);
+  const pal = usePalette();
+  const on = current ? pal.accent : pal.ink;
+  const fill = interpolateColors(lit, [0, 1], [pal.card, on]);
   return (
     <div style={{ position: 'absolute', left: centerX(i, n) - col / 2, top: 0, width: col, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-      <div style={{ width: NODE, height: NODE, borderRadius: NODE / 2, boxSizing: 'border-box', border: `4px solid ${interpolateColors(lit, [0, 1], [IDLE, current ? ACCENT : THEME.ink])}`, background: fill,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 50, fontWeight: 800, color: interpolateColors(lit, [0, 1], [IDLE_INK, '#FFFFFF']),
-        boxShadow: current ? `0 0 0 ${10 * lit}px rgba(240, 106, 42, 0.16)` : 'none', transform: `scale(${1 + (current ? 0.06 * lit : 0)})` }}>{i + 1}</div>
-      <div style={{ marginTop: LABEL_TOP, padding: '0 8px', fontSize: labelPx, fontWeight: 800, lineHeight: 1.2, color: interpolateColors(lit, [0, 1], [IDLE_INK, THEME.ink]), ...clampLines(2) }}>{step.label}</div>
-      {step.note ? <div style={{ marginTop: 10, padding: '0 8px', fontSize: fitFontSize(step.note, col - 16, 32, 20, 2), fontWeight: 500, lineHeight: 1.3, color: THEME.sub, ...clampLines(2) }}>{step.note}</div> : null}
+      <div style={{ width: NODE, height: NODE, borderRadius: NODE / 2, boxSizing: 'border-box', border: `4px solid ${interpolateColors(lit, [0, 1], [pal.idle, on])}`, background: fill,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 50, fontWeight: 800, color: interpolateColors(lit, [0, 1], [pal.idleInk, current ? pal.accentInk : pal.card]),
+        boxShadow: current ? `0 0 0 ${10 * lit}px ${toRgba(pal.accent, 0.18)}` : 'none', transform: `scale(${1 + (current ? 0.06 * lit : 0)})` }}>{i + 1}</div>
+      <div style={{ marginTop: LABEL_TOP, padding: '0 8px', fontSize: labelPx, fontWeight: 800, lineHeight: 1.2, color: interpolateColors(lit, [0, 1], [pal.idleInk, pal.ink]), ...clampLines(2) }}>{step.label}</div>
+      {step.note ? <div style={{ marginTop: 10, padding: '0 8px', fontSize: fitFontSize(step.note, col - 16, 32, 20, 2), fontWeight: 500, lineHeight: 1.3, color: pal.sub, ...clampLines(2) }}>{step.note}</div> : null}
     </div>
   );
 };
 
-/** 相邻两步之间的连线：灰色底线 + 点亮时从左往右画出的橙色/深色线 */
+/** 相邻两步之间的连线：轨道色底线 + 点亮时从左往右画出的主文字色线 */
 const Link: React.FC<{ i: number; n: number; p: number }> = ({ i, n, p }) => {
   const x0 = centerX(i - 1, n) + NODE / 2 + 10;
   const x1 = centerX(i, n) - NODE / 2 - 10;
+  const pal = usePalette();
   return (
-    <div style={{ position: 'absolute', left: x0, top: NODE / 2 - LINE_H / 2, width: x1 - x0, height: LINE_H, borderRadius: LINE_H / 2, background: '#ECE8E1', overflow: 'hidden' }}>
-      <div style={{ width: '100%', height: '100%', background: THEME.ink, transform: `scaleX(${p})`, transformOrigin: 'left center' }} />
+    <div style={{ position: 'absolute', left: x0, top: NODE / 2 - LINE_H / 2, width: x1 - x0, height: LINE_H, borderRadius: LINE_H / 2, background: pal.track, overflow: 'hidden' }}>
+      <div style={{ width: '100%', height: '100%', background: pal.ink, transform: `scaleX(${p})`, transformOrigin: 'left center' }} />
     </div>
   );
 };
@@ -61,13 +61,14 @@ const LoopBack: React.FC<{ n: number; top: number; p: number }> = ({ n, top, p }
   const x1 = centerX(0, n);
   const d = `M ${x0} 0 C ${x0} ${LOOP_H}, ${x1} ${LOOP_H}, ${x1} 8`;
   const len = (x0 - x1) * 1.25 + LOOP_H * 1.6;
+  const pal = usePalette();
   return (
     <div style={{ position: 'absolute', left: 0, top, width: INNER_W, height: LOOP_H }}>
       <svg width={INNER_W} height={LOOP_H} style={{ position: 'absolute', overflow: 'visible' }}>
-        <path d={d} fill="none" stroke={ACCENT} strokeWidth={5} strokeLinecap="round" strokeDasharray={len} strokeDashoffset={len * (1 - p)} />
-        <path d={`M ${x1 - 14} 24 L ${x1} 4 L ${x1 + 14} 24`} fill="none" stroke={ACCENT} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" opacity={p > 0.92 ? 1 : 0} />
+        <path d={d} fill="none" stroke={pal.accent} strokeWidth={5} strokeLinecap="round" strokeDasharray={len} strokeDashoffset={len * (1 - p)} />
+        <path d={`M ${x1 - 14} 24 L ${x1} 4 L ${x1 + 14} 24`} fill="none" stroke={pal.accent} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" opacity={p > 0.92 ? 1 : 0} />
       </svg>
-      <div style={{ position: 'absolute', left: (x0 + x1) / 2 - 90, top: LOOP_H * 0.75 - 26, width: 180, height: 52, borderRadius: 26, background: ACCENT, color: '#FFFFFF',
+      <div style={{ position: 'absolute', left: (x0 + x1) / 2 - 90, top: LOOP_H * 0.75 - 26, width: 180, height: 52, borderRadius: 26, background: pal.accent, color: pal.accentInk,
         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 800, letterSpacing: '0.06em', opacity: Math.min(1, p * 1.5), transform: `scale(${0.8 + 0.2 * p})` }}>循环迭代</div>
     </div>
   );

@@ -396,8 +396,8 @@ describe('从人物全屏切进分屏：卡片内部音效随 cardLead 提前', 
     const want = clickTimes(2, 5 + FRESH_LEAD_SEC).map((t) => 3 + t - FRESH_LEAD_SEC);
     expect(fresh).toHaveLength(2);
     fresh.forEach((t, i) => expect(Math.abs(t - want[i])).toBeLessThanOrEqual(2 / 30 + 1e-9));
-    // 同一张卡跟在分屏后面（没有提前）：照旧
-    expect(kindOf([split(0, 3, chips), split(3, 8, toggles)], 'toggle').map((c) => c.sec)).toEqual(clickTimes(2, 5).map((t) => 3 + t));
+    // 跟在同类分屏卡后面（叠化，没有提前）：照旧；结构不同的分屏卡之间是擦除，擦进来的卡也提前（见 card-wipe 测试）
+    expect(kindOf([split(0, 3, { template: 'strikeList', props: { items: ['a', 'b'] } }), split(3, 8, toggles)], 'toggle').map((c) => c.sec)).toEqual(clickTimes(2, 5).map((t) => 3 + t));
   });
   it('数字卡：ticks 与最后一下 hit 同步提前；入场 pop 仍在镜头第 0 帧', () => {
     const cues = sfxCues([full(0, 3), split(3, 9, num)]);

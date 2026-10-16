@@ -5,6 +5,7 @@ import type { SfxCue, VolumeKey } from '../audio/plan.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { Mood } from '../assets/catalog.js';
 import type { OutroProps } from '../compose/ending.js';
+import type { Palette } from '../compose/palette.js';
 
 /** 画布与版式常量：分界线 y=960 来自参考片实测 */
 export const CANVAS = { width: 1080, height: 1920, fps: 30, seam: 960 } as const;
@@ -121,8 +122,9 @@ export const COVER_SUBTITLE_MAX = 16;
 /** 封面标题：由分镜模型顺带给出，主标题 ≤12 字、小标题 ≤16 字 */
 export const CoverTitleSchema = z.object({ title: z.string().trim().min(1).max(COVER_TITLE_MAX), subtitle: z.string().trim().min(1).max(COVER_SUBTITLE_MAX).optional() });
 export type CoverTitle = z.infer<typeof CoverTitleSchema>;
-/** bgm 经归一化后必有值（缺省 chill），类型上可选是为了让只关心镜头的调用方与测试不必填写；coverTitle 缺省时由出片流程用 hook 卡片或第一句字幕兜底 */
-export interface Storyboard { shots: Shot[]; bgm?: Mood; coverTitle?: CoverTitle }
+/** bgm 经归一化后必有值（缺省 chill），类型上可选是为了让只关心镜头的调用方与测试不必填写；coverTitle 缺省时由出片流程用 hook 卡片或第一句字幕兜底；
+ * palette 为分镜阶段从人物背景推导的片色（compose/palette），随分镜落盘，旧分镜没有时用原配色 */
+export interface Storyboard { shots: Shot[]; bgm?: Mood; coverTitle?: CoverTitle; palette?: Palette }
 
-/** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名；grain 为颗粒质感层开关（缺省见 compose/layout 的 grainOn）；durationSec 是整片时长，有 outro 时包含最后一句后的留白与片尾，镜头只覆盖口播内容 */
-export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number; bgm?: { file: string; keys: VolumeKey[]; durationSec: number }; sfx?: SfxCue[]; captionStyle?: CaptionStyleId; captionFontFile?: string; grain?: boolean; outro?: OutroProps };
+/** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名；grain 为颗粒质感层开关（缺省见 compose/layout 的 grainOn）；palette 为片色（缺省原配色）；durationSec 是整片时长，有 outro 时包含最后一句后的留白与片尾，镜头只覆盖口播内容 */
+export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number; bgm?: { file: string; keys: VolumeKey[]; durationSec: number }; sfx?: SfxCue[]; captionStyle?: CaptionStyleId; captionFontFile?: string; grain?: boolean; outro?: OutroProps; palette?: Palette };

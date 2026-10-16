@@ -9,6 +9,7 @@ import { concatSources } from '../media/concat.js';
 import { extractWav16k } from '../media/extract-audio.js';
 import { probe } from '../media/probe.js';
 import { referenceColor } from '../broll/ref-color.js';
+import { samplePalette } from '../compose/palette-sample.js';
 
 /** 流程里耗时的本地媒体处理（探测、识别、剪切、抠像、合成、渲染、响度）；缺省为真实实现，仅供测试注入假实现 */
 export interface MediaDeps {
@@ -30,11 +31,13 @@ export interface MediaDeps {
   concat: typeof concatSources;
   /** 人物背景的平均色（B-roll 白平衡参考） */
   meanColor: typeof referenceColor;
+  /** 人物背景 → 片色（卡片、钩子、片尾的配色） */
+  palette: typeof samplePalette;
 }
 
 const REAL_MEDIA: MediaDeps = {
   probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut,
-  matte: matteVideo, subject: detectSubject, composite: compositeCut, loudness: normalizeLoudness, tail: limitTailLoudness, concat: concatSources, meanColor: referenceColor,
+  matte: matteVideo, subject: detectSubject, composite: compositeCut, loudness: normalizeLoudness, tail: limitTailLoudness, concat: concatSources, meanColor: referenceColor, palette: samplePalette,
 };
 
 /** 注入的实现覆盖真实实现 */

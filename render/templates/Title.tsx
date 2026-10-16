@@ -1,6 +1,6 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
-import { THEME } from '../theme.js';
+import { usePalette } from '../palette.js';
 import { balanceLines, tokenize } from './headline.js';
 import { CONTENT_W, CardFrame, Crumb, Reveal, SafeArea, SurfaceContext, clampLines, fitFontSize, maxFontSize, springAt, useMinPx, type TemplateProps } from './parts.js';
 
@@ -32,6 +32,7 @@ export const Title: React.FC<TemplateProps<'title'>> = ({ props, local }) => {
   const minPx = useMinPx();
   const px = titlePx(props.title, compact);
   const subPx = props.subtitle ? subtitlePx(props.subtitle, minPx) : 46;
+  const pal = usePalette();
   return (
     <SafeArea>
       <CardFrame fill padding={`64px ${PAD_X}px 68px`}>
@@ -43,7 +44,7 @@ export const Title: React.FC<TemplateProps<'title'>> = ({ props, local }) => {
         </Reveal>
         {props.subtitle ? (
           <Reveal p={springAt(local, 0.2, fps)} dy={24}>
-            <div style={{ marginTop: 30, fontSize: subPx, fontWeight: 500, lineHeight: 1.4, color: THEME.sub, ...clampLines(2) }}>{props.subtitle}</div>
+            <div style={{ marginTop: 30, fontSize: subPx, fontWeight: 500, lineHeight: 1.4, color: pal.sub, ...clampLines(2) }}>{props.subtitle}</div>
           </Reveal>
         ) : null}
       </CardFrame>

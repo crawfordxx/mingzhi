@@ -39,6 +39,7 @@ export function segmentBounds(shots: Shot[], durationSec: number): FrameRange[] 
  * - 该帧显示的字幕文字（跨镜头边界的字幕会同时进入两段）
  * - 画面按画面时间轴（visualShots）判断：全屏插入的 J-cut 前 2 帧仍是上一个镜头的画面（字幕也按字幕时钟取切点前那句）；
  *   镜头的版式与素材字段（文件、焦点、Ken Burns、时长）随镜头进入指纹；画中画退出过渡里垫底的上一镜素材也计入
+ * - 片色（props.palette，没有时不进指纹头，旧数据哈希格式不变）
  * - 卡片交叉过渡：镜头开头 0.3 秒里仍在淡出的上一张卡（镜头与淡出进度）也计入；从无卡镜头切进分屏时卡片时钟提前（cardLead）也计入
  */
 function frameFingerprints(props: Omit<TalkProps, 'shots'>, shots: Shot[], range: FrameRange, layer: HashLayer = 'render'): { shots: unknown[]; frames: string[] } {
@@ -73,7 +74,7 @@ export function shotHash(shot: Shot, props: Omit<TalkProps, 'shots'>, _index: nu
   const { shots, range } = ctx;
   const { shots: hit, frames } = frameFingerprints(props, shots, range, ctx.layer);
   const head = { v: 1, range, shot, hit, salt: ctx.salt ?? '', person: props.person, w: props.personWidth, h: props.personHeight, subject: props.subject,
-    style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '', ...(grainOn({ ...props, shots }) ? { grain: true } : {}), ...(props.outro && range.end > secToFrame(props.outro.startSec) ? { outro: props.outro } : {}) };
+    style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '', ...(grainOn({ ...props, shots }) ? { grain: true } : {}), ...(props.palette ? { palette: props.palette } : {}), ...(props.outro && range.end > secToFrame(props.outro.startSec) ? { outro: props.outro } : {}) };
   return sha1(`${JSON.stringify(head)}\n${frames.join('\n')}`);
 }
 

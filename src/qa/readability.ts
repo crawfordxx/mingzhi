@@ -11,6 +11,7 @@ import { throwIfCancelled } from '../cancel.js';
 import { withBundle } from '../compose/render.js';
 import { runBuffer } from '../media/exec.js';
 import { CANVAS, type Broll, type Shot, type Storyboard } from '../storyboard/schema.js';
+import type { Palette } from '../compose/palette.js';
 
 export const MIN_CONTRAST = 4.5;
 /** 对底图的一次处理：铺图变体、整体压暗量、文字挪到上方（都只加不减，逐级叠加） */
@@ -94,22 +95,22 @@ async function stillRgb(ffmpeg: string, png: string): Promise<Uint8Array> {
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
 }
 
-/** 渲染一个镜头的卡片区（1080×960）在 sec 时刻的静帧；hideText 时所有文字透明 */
-async function renderShot(serveUrl: string, shot: Shot, hideText: boolean, output: string): Promise<void> {
+/** 渲染一个镜头的卡片区（1080×960）在 sec 时刻的静帧；hideText 时所有文字透明；按这条片的片色画（暗色片是深色玻璃卡） */
+async function renderShot(serveUrl: string, shot: Shot, hideText: boolean, output: string, palette?: Palette): Promise<void> {
   const dur = shot.end - shot.start;
-  const inputProps = { card: shot.card, dur, shot, hideText };
+  const inputProps = { card: shot.card, dur, shot, hideText, ...(palette ? { palette } : {}) };
   const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
   const frame = Math.max(0, Math.min(Math.round(dur * CANVAS.fps) - 1, Math.round((dur - SAMPLE_BEFORE_END_SEC) * CANVAS.fps)));
   await renderStill({ composition, serveUrl, inputProps, output, frame, imageFormat: 'png' });
 }
 
-interface Env { serveUrl: string; tmp: string; ffmpeg: string }
+interface Env { serveUrl: string; tmp: string; ffmpeg: string; palette?: Palette }
 
 /** 一个镜头的文字对比度（两张静帧相减）；没有文字返回 null */
 async function contrastOf(env: Env, shot: Shot, name: string): Promise<{ contrast: number; polarity: 'light' | 'dark' } | null> {
   const [a, b] = [join(env.tmp, `${name}-a.png`), join(env.tmp, `${name}-b.png`)];
-  await renderShot(env.serveUrl, shot, false, a);
-  await renderShot(env.serveUrl, shot, true, b);
+  await renderShot(env.serveUrl, shot, false, a, env.palette);
+  await renderShot(env.serveUrl, shot, true, b, env.palette);
   return textContrast(await stillRgb(env.ffmpeg, a), await stillRgb(env.ffmpeg, b), CANVAS.width, CANVAS.seam);
 }
 
@@ -145,7 +146,7 @@ export async function measureReadability(o: { workDir: string; storyboard: Story
       const out: ShotContrast[] = [];
       for (const i of targets) {
         throwIfCancelled(o.signal);
-        const r = await measureShot({ serveUrl, tmp, ffmpeg: o.ffmpeg }, o.storyboard.shots[i], i);
+        const r = await measureShot({ serveUrl, tmp, ffmpeg: o.ffmpeg, palette: o.storyboard.palette }, o.storyboard.shots[i], i);
         if (r) out.push(r);
       }
       return out;

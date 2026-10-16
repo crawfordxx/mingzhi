@@ -21,6 +21,7 @@ import type { LlmClient } from '../llm/kexiang.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { MatteResult } from '../matting/rvm.js';
 import type { MediaInfo } from '../media/probe.js';
+import type { Palette } from '../compose/palette.js';
 import { generateStoryboard } from '../storyboard/generate.js';
 import { DEFAULT_MOOD, type Shot, type Storyboard } from '../storyboard/schema.js';
 import { limitTailLoudness } from '../audio/loudness.js';
@@ -138,15 +139,16 @@ export async function captionsStage(args: PipelineArgs, a: Analysis, ass: string
   return captions;
 }
 
-/** 生成分镜；请求失败不中断，降级为整片人像全屏一个镜头，并在进度消息里写明原因 */
-async function planStoryboard(llm: LlmClient, captions: TimedCaption[], durationSec: number, complete: Complete): Promise<Storyboard> {
+/** 生成分镜；请求失败不中断，降级为整片人像全屏一个镜头，并在进度消息里写明原因；片色（有的话）随分镜一起落盘 */
+async function planStoryboard(llm: LlmClient, captions: TimedCaption[], durationSec: number, complete: Complete, palette?: Palette): Promise<Storyboard> {
+  const tint = palette ? { palette } : {};
   let res: Awaited<ReturnType<typeof generateStoryboard>>;
   try {
     res = await generateStoryboard(llm, captions, durationSec, []);
   } catch (err) {
     rethrowIfBalance(err); // 余额不足降级也没用：后面的付费步骤同样会失败
     rethrowIfCancelled(err);
-    const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }], bgm: DEFAULT_MOOD };
+    const storyboard: Storyboard = { shots: [{ start: 0, end: durationSec, layout: 'full' }], bgm: DEFAULT_MOOD, ...tint };
     complete('storyboard', `分镜生成失败，改为全程人像：${err instanceof Error ? err.message : String(err)}`, { storyboard });
     return storyboard;
   }
@@ -154,16 +156,17 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
   const retry = res.retryError ? ` · 重试失败（已用首次结果）：${res.retryError}` : '';
   const facts = res.unsupported.length > 0 ? ` · 去掉 ${res.unsupported.length} 处口播里没有的数字（${res.unsupported.join('、')}）` : '';
-  const patch = { storyboard: res.storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped };
+  const storyboard = { ...res.storyboard, ...tint };
+  const patch = { storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped };
   complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${facts}${retry}`, patch);
-  return res.storyboard;
+  return storyboard;
 }
 
-/** 分镜 → 素材（素材文件写到 brollDir/broll，缓存按需求内容命中）；whiteBalance 为人物背景平均色（见 whiteBalanceOf） */
+/** 分镜 → 素材（素材文件写到 brollDir/broll，缓存按需求内容命中）；whiteBalance 为人物背景平均色（见 whiteBalanceOf），palette 为片色（见 paletteOf） */
 export async function storyboardStage(
-  args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete, whiteBalance?: BrollStageExtra['whiteBalance'],
+  args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete, whiteBalance?: BrollStageExtra['whiteBalance'], palette?: Palette,
 ): Promise<Storyboard> {
-  const planned = placeEnding(args, await planStoryboard(args.llm, captions, durationSec, complete), captions, durationSec);
+  const planned = placeEnding(args, await planStoryboard(args.llm, captions, durationSec, complete, palette), captions, durationSec);
   return brollStage(args, planned, durationSec, brollDir, complete, { captions, ...(whiteBalance ? { whiteBalance } : {}) });
 }
 
@@ -178,6 +181,20 @@ export async function whiteBalanceOf(args: PipelineArgs, file: string): Promise<
   } catch (err) {
     rethrowIfCancelled(err);
     args.onProgress?.({ step: 'broll', message: `白平衡参考色量取失败，素材只套项目 LUT：${err instanceof Error ? err.message : String(err)}` });
+    return undefined;
+  }
+}
+
+/**
+ * 片色：人物背景图（没换背景时用人像视频第一帧）套项目 LUT 后取样推导（compose/palette）；本地 ffmpeg，不花钱。
+ * 取不到不影响出片（卡片按原配色），在进度里说明
+ */
+export async function paletteOf(args: PipelineArgs, file: string): Promise<Palette | undefined> {
+  try {
+    return await mediaOf(args.media).palette(args.cfg.ffmpeg, file);
+  } catch (err) {
+    rethrowIfCancelled(err);
+    args.onProgress?.({ step: 'storyboard', message: `片色取样失败，卡片按默认配色：${err instanceof Error ? err.message : String(err)}` });
     return undefined;
   }
 }
@@ -261,7 +278,7 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
     onProgress: (done, total) => progress(total > 0 ? done / total : 1),
     props: {
       person: relative(workDir, c.person), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: c.subject,
-      captions: c.captions, shots, durationSec: ending.durationSec, ...(outro ? { outro } : {}), ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
+      captions: c.captions, shots, durationSec: ending.durationSec, ...(c.storyboard.palette ? { palette: c.storyboard.palette } : {}), ...(outro ? { outro } : {}), ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
     },
   }).catch((err: unknown) => {
     rethrowIfCancelled(err);

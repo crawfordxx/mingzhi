@@ -1,6 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, Img, staticFile, useVideoConfig } from 'remotion';
-import { THEME } from '../theme.js';
+import { usePalette } from '../palette.js';
+import { toRgba } from '../../src/qa/contrast.js';
 import { balanceLines, tokenize, type Token } from './headline.js';
 import { HookGraphic } from './HookGraphic.js';
 import { MediaBadge } from './MediaBadge.js';
@@ -25,58 +26,67 @@ const LINE_PAD = 0.08;
 const STAT_TOP = 30;
 const STAT_PX = 150;
 const STAT_LABEL_PX = 40;
-const LIME_SOFT = 'rgba(212, 242, 60, 0.12)';
 
 /** 钩子卡底：有视频时静音循环铺满、有图时铺图（缓慢推近），都压暗，带角标（AI 生成）；没有素材时用本地图形兜底（动态几何 + 大号关键词）；不随卡片进出场移动 */
 export const HookBackdrop: React.FC<TemplateProps<'hook'>> = ({ props, local }) => {
+  const bg = usePalette().hook.bg;
   if (!props.video && !props.image) return <HookGraphic props={props} local={local} />;
   return (
-    <AbsoluteFill style={{ background: THEME.hookBg }}>
+    <AbsoluteFill style={{ background: bg }}>
       {props.video ? <ShotVideo src={props.video} local={local} /> : (
         <Img src={staticFile(props.image ?? '')} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${1.04 + Math.min(local / 8, 1) * 0.05})` }} />
       )}
-      <AbsoluteFill style={{ background: 'rgba(14, 15, 12, 0.5)' }} />
-      <AbsoluteFill style={{ background: 'linear-gradient(180deg, rgba(14, 15, 12, 0.5) 0%, rgba(14, 15, 12, 0) 45%, rgba(14, 15, 12, 0.35) 100%)' }} />
+      <AbsoluteFill style={{ background: toRgba(bg, 0.5) }} />
+      <AbsoluteFill style={{ background: `linear-gradient(180deg, ${toRgba(bg, 0.5)} 0%, ${toRgba(bg, 0)} 45%, ${toRgba(bg, 0.35)} 100%)` }} />
       {props.mediaLabel ? <MediaBadge label={props.mediaLabel} /> : null}
     </AbsoluteFill>
   );
 };
 
-/** 来源背书小标签：荧光对勾 + 「出自」+ 来源（如「GitHub 3.5 万星项目」） */
-const SourceTag: React.FC<{ text: string }> = ({ text }) => (
+/** 来源背书小标签：强调色对勾 + 「出自」+ 来源（如「GitHub 3.5 万星项目」） */
+const SourceTag: React.FC<{ text: string }> = ({ text }) => {
+  const h = usePalette().hook;
+  return (
   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, maxWidth: SOURCE_W, height: INDEX_PILL_H, boxSizing: 'border-box', padding: '0 24px 0 16px', borderRadius: INDEX_PILL_H / 2,
-    background: 'rgba(255, 255, 255, 0.08)', border: '2px solid rgba(212, 242, 60, 0.45)', color: '#F4F6EC', fontSize: fitFontSize(`出自 ${text}`, SOURCE_W - 90, 28, 20), fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+    background: toRgba(h.ink, 0.08), border: `2px solid ${toRgba(h.accent, 0.45)}`, color: h.ink, fontSize: fitFontSize(`出自 ${text}`, SOURCE_W - 90, 28, 20), fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden' }}>
     <svg width={30} height={30} viewBox="0 0 24 24" style={{ flex: 'none' }}>
-      <circle cx={12} cy={12} r={11} fill={THEME.hookLime} />
-      <path d="M6.8 12.4 L10.4 15.8 L17.4 8.6" fill="none" stroke={THEME.hookBg} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={12} cy={12} r={11} fill={h.accent} />
+      <path d="M6.8 12.4 L10.4 15.8 L17.4 8.6" fill="none" stroke={h.accentInk} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
     <span style={{ opacity: 0.7 }}>出自</span>
     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
   </div>
-);
+  );
+};
 
 /** 顶行：左侧来源标签，右侧描边胶囊 index / total */
-const TopRow: React.FC<{ source?: string; index: number; total: number }> = ({ source, index, total }) => (
+const TopRow: React.FC<{ source?: string; index: number; total: number }> = ({ source, index, total }) => {
+  const accent = usePalette().hook.accent;
+  return (
   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 }}>
     {source ? <SourceTag text={source} /> : <div />}
-    <div style={{ flex: 'none', width: INDEX_PILL_W, height: INDEX_PILL_H, borderRadius: INDEX_PILL_H / 2, border: `2.5px solid ${THEME.hookLime}`, color: THEME.hookLime,
+    <div style={{ flex: 'none', width: INDEX_PILL_W, height: INDEX_PILL_H, borderRadius: INDEX_PILL_H / 2, border: `2.5px solid ${accent}`, color: accent,
       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, fontWeight: 700, letterSpacing: '0.06em', boxSizing: 'border-box' }}>
       {index} / {total}
     </div>
   </div>
-);
+  );
+};
 
-/** 一行标题：第 0 帧就完整可读，只从下方 14px 轻轻落位；高亮词荧光色，底下一道荧光条从左往右刷开 */
-const HeadlineLine: React.FC<{ tokens: Token[]; px: number; p: number; mark: number }> = ({ tokens, px, p, mark }) => (
+/** 一行标题：第 0 帧就完整可读，只从下方 14px 轻轻落位；高亮词强调色，底下一道强调色条从左往右刷开 */
+const HeadlineLine: React.FC<{ tokens: Token[]; px: number; p: number; mark: number }> = ({ tokens, px, p, mark }) => {
+  const accent = usePalette().hook.accent;
+  return (
   <div style={{ paddingBottom: px * LINE_PAD, transform: `translateY(${(1 - Math.min(1, p)) * 14}px)`, overflowWrap: 'anywhere' }}>
     {tokens.map((t, i) => (t.hot ? (
-      <span key={i} style={{ position: 'relative', color: THEME.hookLime, display: 'inline-block' }}>
-        <span style={{ position: 'absolute', left: 0, right: 0, bottom: -px * 0.02, height: px * 0.1, borderRadius: px * 0.05, background: THEME.hookLime, transform: `scaleX(${mark})`, transformOrigin: 'left center' }} />
+      <span key={i} style={{ position: 'relative', color: accent, display: 'inline-block' }}>
+        <span style={{ position: 'absolute', left: 0, right: 0, bottom: -px * 0.02, height: px * 0.1, borderRadius: px * 0.05, background: accent, transform: `scaleX(${mark})`, transformOrigin: 'left center' }} />
         {t.text}
       </span>
     ) : <span key={i}>{t.text}</span>))}
   </div>
-);
+  );
+};
 
 /** 标题字号：最多 3 行，84px 起往下缩，不小于 50px */
 const headlinePx = (text: string): number => Math.max(HEADLINE_MIN_PX, Math.min(HEADLINE_PX, maxFontSize(text, CONTENT_W, 3)));
@@ -98,33 +108,40 @@ export function estimateHookHeight(props: PropsOf<'hook'>): number {
   return INDEX_PILL_H + kicker + headline + stat;
 }
 
-/** 荧光小胶囊（kicker：钩子的小标题） */
-const Kicker: React.FC<{ text: string }> = ({ text }) => (
+/** 强调色小胶囊（kicker：钩子的小标题） */
+const Kicker: React.FC<{ text: string }> = ({ text }) => {
+  const h = usePalette().hook;
+  return (
   <div style={{ marginTop: 24, display: 'flex' }}>
-    <div style={{ background: THEME.hookLime, color: THEME.hookBg, fontSize: kickerPx(text), fontWeight: 700, lineHeight: KICKER_LINE_H, padding: `10px ${KICKER_PAD_X}px`, borderRadius: 30,
+    <div style={{ background: h.accent, color: h.accentInk, fontSize: kickerPx(text), fontWeight: 700, lineHeight: KICKER_LINE_H, padding: `10px ${KICKER_PAD_X}px`, borderRadius: 30,
       maxWidth: CONTENT_W, boxSizing: 'border-box', overflowWrap: 'anywhere', ...clampLines(2) }}>{text}</div>
   </div>
-);
+  );
+};
 
-/** 大数字：钩子的视觉主体之一（荧光色超大数字 + 白色说明），第 0 帧即完整，只做轻微的放大落位 */
-const Stat: React.FC<{ value: string; label: string; p: number }> = ({ value, label, p }) => (
+/** 大数字：钩子的视觉主体之一（强调色超大数字 + 浅色说明），第 0 帧即完整，只做轻微的放大落位 */
+const Stat: React.FC<{ value: string; label: string; p: number }> = ({ value, label, p }) => {
+  const h = usePalette().hook;
+  return (
   <div style={{ marginTop: STAT_TOP }}>
-    <div style={{ fontSize: statPx(value), fontWeight: 900, lineHeight: 1.05, letterSpacing: '-0.04em', color: THEME.hookLime, transform: `scale(${1.04 - 0.04 * Math.min(1, p)})`, transformOrigin: 'left bottom',
-      whiteSpace: 'nowrap', textShadow: `0 0 60px ${LIME_SOFT}` }}>{value}</div>
-    <div style={{ marginTop: 12, fontSize: statLabelPx(label), fontWeight: 600, lineHeight: 1.3, color: 'rgba(255, 255, 255, 0.82)', ...clampLines(2) }}>{label}</div>
+    <div style={{ fontSize: statPx(value), fontWeight: 900, lineHeight: 1.05, letterSpacing: '-0.04em', color: h.accent, transform: `scale(${1.04 - 0.04 * Math.min(1, p)})`, transformOrigin: 'left bottom',
+      whiteSpace: 'nowrap', textShadow: `0 0 60px ${toRgba(h.accent, 0.12)}` }}>{value}</div>
+    <div style={{ marginTop: 12, fontSize: statLabelPx(label), fontWeight: 600, lineHeight: 1.3, color: toRgba(h.ink, 0.82), ...clampLines(2) }}>{label}</div>
   </div>
-);
+  );
+};
 
-/** 钩子卡：开头 2–3 张，深色底（素材或本地图形）+ 来源背书 + 荧光高亮大标题 + 可选大数字；内容第 0 帧就完整，动效只做落位与高亮刷开 */
+/** 钩子卡：开头 2–3 张，深色底（片色钩子底：背景主色压深；或素材）+ 来源背书 + 强调色高亮大标题 + 可选大数字；内容第 0 帧就完整，动效只做落位与高亮刷开 */
 export const Hook: React.FC<TemplateProps<'hook'>> = ({ props, local }) => {
   const { fps } = useVideoConfig();
   const px = headlinePx(props.headline);
   const lines = headlineLines(props.headline, props.highlight);
+  const ink = usePalette().hook.ink;
   return (
     <SafeArea scale={fitScale(estimateHookHeight(props))}>
       <TopRow source={props.source} index={props.index} total={props.total} />
       {props.kicker ? <Kicker text={props.kicker} /> : null}
-      <div style={{ marginTop: HEADLINE_TOP, fontSize: px, fontWeight: 800, lineHeight: LINE_HEIGHT, color: '#FFFFFF', letterSpacing: '-0.01em' }}>
+      <div style={{ marginTop: HEADLINE_TOP, fontSize: px, fontWeight: 800, lineHeight: LINE_HEIGHT, color: ink, letterSpacing: '-0.01em' }}>
         {lines.map((l, i) => <HeadlineLine key={i} tokens={l} px={px} p={springAt(local, i * 0.06, fps, { damping: 22, mass: 0.8 })} mark={easeAt(local, HOOK_MARK_START + i * HOOK_MARK_STAGGER, HOOK_MARK_SEC)} />)}
       </div>
       {props.stat ? <Stat value={props.stat.value} label={props.stat.label} p={springAt(local, 0.1, fps)} /> : null}

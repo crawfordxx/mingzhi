@@ -3,6 +3,7 @@ import { Easing, interpolate, spring } from 'remotion';
 import type { CardSpec, TemplateId } from '../../src/storyboard/schema.js';
 import { REVEAL_TAIL_SEC } from '../../src/storyboard/reveal.js';
 import { THEME } from '../theme.js';
+import { glassStyle, paperCardStyle, usePalette } from '../palette.js';
 
 /** 某个模板的 props 类型 */
 export type PropsOf<T extends TemplateId> = Extract<CardSpec, { template: T }>['props'];
@@ -97,11 +98,10 @@ export const GLASS: React.CSSProperties = {
   boxShadow: '0 24px 64px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.12), inset 0 0 0 1.5px rgba(255, 255, 255, 0.55)',
 };
 
-/** 铺图变体（broll.legible）：玻璃卡几乎不透明，图上的深色字回到纸面卡的对比度 */
-export const GLASS_SOLID: React.CSSProperties = { ...GLASS, background: 'rgba(250, 248, 244, 0.96)' };
-/** 当前卡片是否铺在「铺图变体」的素材上（CardLayer 提供） */
+/** 当前卡片是否铺在「铺图变体」的素材上（CardLayer 提供）：玻璃卡几乎不透明，图上的字回到纸面卡的对比度 */
 export const SolidGlassContext = React.createContext(false);
-const useGlass = (): React.CSSProperties => (React.useContext(SolidGlassContext) ? GLASS_SOLID : GLASS);
+/** 当前片色下的玻璃卡（铺图变体几乎不透明）；暗色片是深色玻璃 */
+const useGlass = (): React.CSSProperties => glassStyle(usePalette(), React.useContext(SolidGlassContext));
 
 /** 浮层整块卡片区的缩放（CardLayer 用）；浮层里文字的字号下限按缩放后 ≥ 28px（以 1080 宽计）折算 */
 export const FLOAT_SCALE = 0.64;
@@ -119,6 +119,7 @@ export const SafeArea: React.FC<{ scale?: number; glass?: boolean; children: Rea
   const bottom = surface === 'image' || surface === 'float';
   const paper = surface === 'paper';
   const skin = useGlass();
+  const pal = usePalette();
   const body = glass && !paper
     ? <div style={{ ...skin, borderRadius: THEME.radius, padding: '40px 44px 44px' }}><SurfaceContext.Provider value="paper">{children}</SurfaceContext.Provider></div>
     : children;
@@ -126,17 +127,18 @@ export const SafeArea: React.FC<{ scale?: number; glass?: boolean; children: Rea
     ? { height: SAFE_H / scale, display: 'flex', flexDirection: 'column', justifyContent: 'center', transform: `scale(${scale})`, transformOrigin: 'top center' }
     : { transform: `scale(${scale})`, transformOrigin: bottom ? 'bottom center' : 'top center' };
   return (
-    <div style={{ position: 'absolute', left: SAFE.side, right: SAFE.side, top: SAFE.top, height: SAFE_H, display: 'flex', flexDirection: 'column', justifyContent: bottom ? 'flex-end' : 'flex-start', fontFamily: THEME.font, color: THEME.ink }}>
+    <div style={{ position: 'absolute', left: SAFE.side, right: SAFE.side, top: SAFE.top, height: SAFE_H, display: 'flex', flexDirection: 'column', justifyContent: bottom ? 'flex-end' : 'flex-start', fontFamily: THEME.font, color: pal.ink }}>
       <div style={inner}>{body}</div>
     </div>
   );
 };
 
-/** 白色圆角卡片；在图上或浮层里变成磨砂玻璃卡。fill：纸面上撑满安全区、内容垂直居中（图上与浮层仍按内容高度） */
+/** 圆角卡片（片色的卡片底：亮色白卡、暗色深色卡）；在图上或浮层里变成磨砂玻璃卡。fill：纸面上撑满安全区、内容垂直居中（图上与浮层仍按内容高度） */
 export const CardFrame: React.FC<{ padding?: string; fill?: boolean; style?: React.CSSProperties; children: React.ReactNode }> = ({ padding = '44px 48px', fill = false, style, children }) => {
   const surface = React.useContext(SurfaceContext);
   const glass = useGlass();
-  const skin: React.CSSProperties = surface === 'paper' ? { background: THEME.card, boxShadow: THEME.shadow } : glass;
+  const pal = usePalette();
+  const skin: React.CSSProperties = surface === 'paper' ? paperCardStyle(pal, THEME.shadow) : glass;
   const stretch: React.CSSProperties = fill && surface === 'paper' ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' } : {};
   return (
     <div style={{ ...skin, borderRadius: THEME.radius, padding, ...stretch, ...style }}>
@@ -145,14 +147,15 @@ export const CardFrame: React.FC<{ padding?: string; fill?: boolean; style?: Rea
   );
 };
 
-/** 面包屑：橙点 + 小字；直接压在图上或人物上时字改为近白（不给 color 时） */
+/** 面包屑：强调色圆点 + 小字；直接压在图上或人物上时字改为近白（不给 color 时） */
 export const Crumb: React.FC<{ text: string; size?: number; maxWidth?: number; color?: string; minPx?: number }> = ({ text, size = 26, maxWidth = CONTENT_W, color, minPx = 18 }) => {
   const surface = React.useContext(SurfaceContext);
-  const ink = color ?? (surface === 'paper' ? THEME.sub : 'rgba(255, 255, 255, 0.92)');
+  const pal = usePalette();
+  const ink = color ?? (surface === 'paper' ? pal.sub : 'rgba(255, 255, 255, 0.92)');
   const px = fitFontSize(text, maxWidth - 30, Math.max(size, minPx), minPx);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: px, fontWeight: 600, color: ink, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
-      <span style={{ width: 11, height: 11, borderRadius: 6, background: THEME.crumbDot, flex: 'none' }} />
+      <span style={{ width: 11, height: 11, borderRadius: 6, background: pal.accent, flex: 'none' }} />
       <span>{text}</span>
     </div>
   );

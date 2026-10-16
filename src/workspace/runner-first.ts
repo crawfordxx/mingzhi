@@ -7,7 +7,7 @@ import type { VersionState } from '../edit/apply.js';
 import { prepareMultiSource } from '../pipeline/multi.js';
 import { validateArgs, type PipelineArgs } from '../pipeline/run.js';
 import {
-  analyzeStage, backgroundStage, captionsStage, composeStage, cutStage, filmQaStage, finalQaStage, qaCardsStage, storyboardStage, whiteBalanceOf, type Analysis,
+  analyzeStage, backgroundStage, captionsStage, composeStage, cutStage, filmQaStage, finalQaStage, qaCardsStage, paletteOf, storyboardStage, whiteBalanceOf, type Analysis,
 } from '../pipeline/stages.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
 import { ANALYSIS_FILE, FINAL_FILE, LAYER_FILES, MATTE_META, linkBroll, linkFile, writeJsonAtomic, type BaseAnalysis } from './runner-files.js';
@@ -67,7 +67,9 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const captions = await captionsStage(args, a, join(env.dir, 'captions.ass'), env.complete);
   // 白平衡参考：人物背景图（没换背景时用人像第一帧）
   const whiteBalance = await whiteBalanceOf(args, env.record({}).background?.path ?? person);
-  const planned = await storyboardStage(args, captions, a.plan.outputDurationSec, env.base, env.complete, whiteBalance);
+  // 片色：同一张参考图（套 LUT 后取样），卡片、钩子、片尾与人物背景同一个色彩世界
+  const palette = await paletteOf(args, env.record({}).background?.path ?? person);
+  const planned = await storyboardStage(args, captions, a.plan.outputDurationSec, env.base, env.complete, whiteBalance, palette);
   linkBroll(planned, env.base, env.dir);
   const checked = await qaCardsStage(args, env.meter, planned, captions, env.complete);
   const cards = checked.cards;

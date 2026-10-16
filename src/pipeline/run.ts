@@ -25,7 +25,7 @@ import type { PipelineQa, QaDeps } from './qa-step.js';
 import type { FilmQa } from '../qa/film-redo.js';
 import type { MediaDeps } from './media-deps.js';
 import {
-  analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, filmQaStage, finalQaStage, matteStage, qaCardsStage, storyboardStage, whiteBalanceOf,
+  analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, filmQaStage, finalQaStage, matteStage, paletteOf, qaCardsStage, storyboardStage, whiteBalanceOf,
   type Analysis, type Complete,
 } from './stages.js';
 
@@ -159,7 +159,8 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
   }
   const captions = await captionsStage(args, a, join(args.workDir, 'captions.ass'), complete);
   const whiteBalance = await whiteBalanceOf(args, bgPath ?? base);
-  const storyboard = await storyboardStage(args, captions, a.plan.outputDurationSec, args.workDir, complete, whiteBalance);
+  const palette = await paletteOf(args, bgPath ?? base);
+  const storyboard = await storyboardStage(args, captions, a.plan.outputDurationSec, args.workDir, complete, whiteBalance, palette);
   return { captions, storyboard, base, subject };
 }
 

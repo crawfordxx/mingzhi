@@ -1,6 +1,8 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
+import { usePalette } from '../palette.js';
+import type { Palette } from '../../src/compose/palette.js';
 import { readableOn } from '../../src/qa/contrast.js';
 import { CONTENT_W, CardFrame, Crumb, Reveal, SafeArea, SurfaceContext, easeAt, fitFontSize, fitScale, itemTimes, litIndex, springAt, textEm, type PropsOf, type TemplateProps } from './parts.js';
 
@@ -11,15 +13,13 @@ const PAD_X = 40;
 const BOTTLE_W = 78;
 /** 纸面上整组放进一张撑满卡片区的白卡（左右内边距 PANEL_PAD），条目卡变成卡内浅色块 */
 const PANEL_PAD = 36;
-const INSET_BG = '#F6F3EE';
 const COL_W = CONTENT_W - PANEL_PAD * 2 - PAD_X * 2 - BOTTLE_W - 34;
-const GREEN = THEME.green;
-/** 文字/进度条用色 与 小瓶用色 */
-const TONE: Record<Tone, { ink: string; fill: string; bottle: string }> = {
-  bad: { ink: THEME.redText, fill: THEME.red, bottle: THEME.red },
-  warn: { ink: THEME.goldText, fill: THEME.gold, bottle: THEME.neutral },
-  good: { ink: THEME.greenText, fill: GREEN, bottle: GREEN },
-};
+/** 文字/进度条用色 与 小瓶用色（随片色：暗色片的字提亮一档） */
+const toneOf = (p: Palette): Record<Tone, { ink: string; fill: string; bottle: string }> => ({
+  bad: { ink: p.redText, fill: p.red, bottle: p.red },
+  warn: { ink: p.goldText, fill: p.gold, bottle: THEME.neutral },
+  good: { ink: p.greenText, fill: p.green, bottle: p.green },
+});
 /** 单行文字：字宽估算失准时以省略号收尾，不溢出卡片 */
 const ONE_LINE: React.CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' };
 const ITEM_H = 200;
@@ -36,7 +36,7 @@ export function bottleLabel(name: string): string | null {
 }
 
 const Bottle: React.FC<{ tone: Tone; label: string | null }> = ({ tone, label }) => {
-  const color = TONE[tone].bottle;
+  const color = toneOf(usePalette())[tone].bottle;
   return (
     <div style={{ width: BOTTLE_W, flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ width: 46, height: 14, borderRadius: '6px 6px 2px 2px', background: '#CDD1D5' }} />
@@ -50,39 +50,43 @@ const Bottle: React.FC<{ tone: Tone; label: string | null }> = ({ tone, label })
 };
 
 const Bar: React.FC<{ value: number; color: string; p: number }> = ({ value, color, p }) => (
-  <div style={{ marginTop: 22, height: 28, borderRadius: 14, background: '#EFEDE9', overflow: 'hidden' }}>
+  <div style={{ marginTop: 22, height: 28, borderRadius: 14, background: usePalette().track, overflow: 'hidden' }}>
     <div style={{ width: `${value * p * 100}%`, height: '100%', borderRadius: 14, background: color }} />
   </div>
 );
 
 /** 一项：小瓶 + 名称 + 注释 + 进度条；lit 为持续演进时正在讲的那一项（其余略淡） */
 const ItemCard: React.FC<{ item: Item; grow: number; dim: boolean; inset: boolean }> = ({ item, grow, dim, inset }) => {
-  const tone = TONE[item.tone];
+  const pal = usePalette();
+  const tone = toneOf(pal)[item.tone];
   const namePx = fitFontSize(item.name, COL_W * 0.52, 46, 28);
   const notePx = item.note ? fitFontSize(item.note, COL_W, 31, 22) : 31;
   return (
-    <CardFrame padding={`30px ${PAD_X}px`} style={{ display: 'flex', alignItems: 'center', gap: 34, opacity: dim ? 0.55 : 1, ...(inset ? { height: '100%', boxSizing: 'border-box', background: INSET_BG, boxShadow: 'none' } : {}) }}>
+    <CardFrame padding={`30px ${PAD_X}px`} style={{ display: 'flex', alignItems: 'center', gap: 34, opacity: dim ? 0.55 : 1, ...(inset ? { height: '100%', boxSizing: 'border-box', background: pal.inset, boxShadow: 'none' } : {}) }}>
       <Bottle tone={item.tone} label={bottleLabel(item.name)} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 20, whiteSpace: 'nowrap' }}>
           <span style={{ ...ONE_LINE, fontSize: namePx, fontWeight: 800 }}>{item.name}</span>
           {item.annotation ? <span style={{ ...ONE_LINE, flex: 'none', maxWidth: '48%', fontSize: fitFontSize(item.annotation, COL_W * 0.44, 38, 24), fontWeight: 800, color: tone.ink }}>{item.annotation}</span> : null}
         </div>
-        {item.note ? <div style={{ ...ONE_LINE, marginTop: 6, fontSize: notePx, fontWeight: 500, color: THEME.sub, whiteSpace: 'nowrap' }}>{item.note}</div> : null}
+        {item.note ? <div style={{ ...ONE_LINE, marginTop: 6, fontSize: notePx, fontWeight: 500, color: pal.sub, whiteSpace: 'nowrap' }}>{item.note}</div> : null}
         <Bar value={item.value} color={tone.fill} p={grow} />
       </div>
     </CardFrame>
   );
 };
 
-const Verdict: React.FC<{ text: string; p: number }> = ({ text, p }) => (
+const Verdict: React.FC<{ text: string; p: number }> = ({ text, p }) => {
+  const pal = usePalette();
+  return (
   <Reveal p={p} dy={18} from={0.85} style={{ marginTop: 40, display: 'flex', justifyContent: 'center' }}>
-    <div style={{ height: 88, padding: '0 52px', borderRadius: 44, background: THEME.ink, color: '#FFFFFF', display: 'flex', alignItems: 'center',
+    <div style={{ height: 88, padding: '0 52px', borderRadius: 44, background: pal.ink, color: pal.card, display: 'flex', alignItems: 'center',
       fontSize: fitFontSize(text, CONTENT_W - 140, 34, 24), fontWeight: 700, letterSpacing: '0.02em', boxShadow: '0 16px 34px rgba(28, 27, 25, 0.28)', whiteSpace: 'nowrap' }}>
       {text}
     </div>
   </Reveal>
-);
+  );
+};
 
 /** 估算内容高度（不含纸面白卡的上下内边距 80）：面包屑 + 各条目 + 结论 */
 export const estimateCompareHeight = (props: PropsOf<'compareBars'>): number =>

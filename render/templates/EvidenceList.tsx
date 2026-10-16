@@ -1,6 +1,7 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
+import { usePalette } from '../palette.js';
 import { BADGE_PAD_X, Badge, CONTENT_W, CardFrame, Crumb, Reveal, SafeArea, clampLines, easeAt, fitFontSize, fitScale, itemTimes, lineCount, litIndex, springAt, type PropsOf, type TemplateProps } from './parts.js';
 
 type Row = PropsOf<'evidenceList'>['rows'][number];
@@ -28,8 +29,6 @@ const TAG_GAP = 14;
 /** 每个来源标签可用的文字宽度：最多 3 个并排，扣掉间距与左右内边距 */
 const TAG_TEXT_W = (INNER_W - TAG_GAP * 2) / 3 - BADGE_PAD_X * 2 - 4;
 const ROW_STAGGER = 0.07;
-/** 还没出现的行：虚线占位（持续演进时提示后面还有内容，版面也不跳） */
-const PENDING = '2.5px dashed #E2DDD4';
 
 const evidenceTitlePx = (title: string): number => fitFontSize(title, INNER_W, TITLE_PX, 38, 3);
 const rowPx = (text: string, rows: number): number => fitFontSize(text, TEXT_W, textPxFor(rows), TEXT_MIN_PX, 2);
@@ -37,9 +36,11 @@ const rowPx = (text: string, rows: number): number => fitFontSize(text, TEXT_W, 
 /** 一行：左侧彩色标签 + 右侧文字；点亮的行铺一层同色浅底（从左往右刷开）；pending 时先画虚线占位 */
 const EvidenceRow: React.FC<{ row: Row; hot: boolean; p: number; mark: number; padY: number; pending: boolean; rows: number }> = ({ row, hot, p, mark, padY, pending, rows }) => {
   const color = THEME.badge[row.badge];
+  // 还没出现的行：片色轨道色的虚线占位（持续演进时提示后面还有内容，版面也不跳）
+  const dashed = `2.5px dashed ${usePalette().track}`;
   return (
     <div style={{ position: 'relative' }}>
-      {pending ? <div style={{ position: 'absolute', inset: 0, borderRadius: 20, border: PENDING, opacity: Math.max(0, 1 - p * 1.5) }} /> : null}
+      {pending ? <div style={{ position: 'absolute', inset: 0, borderRadius: 20, border: dashed, opacity: Math.max(0, 1 - p * 1.5) }} /> : null}
       <Reveal p={p} dx={-40} dy={0}>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 28, padding: `${padY}px ${ROW_PAD_X}px`, borderRadius: 20 }}>
           {hot ? <div style={{ position: 'absolute', inset: 0, borderRadius: 20, background: `${color}1F`, transform: `scaleX(${mark})`, transformOrigin: 'left center' }} /> : null}

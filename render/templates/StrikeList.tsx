@@ -1,6 +1,6 @@
 import React from 'react';
 import { interpolateColors, useVideoConfig } from 'remotion';
-import { THEME } from '../theme.js';
+import { usePalette } from '../palette.js';
 import { CONTENT_W, CardFrame, Crumb, EXIT_SEC, Reveal, SafeArea, easeAt, fitFontSize, fitScale, itemTimes, springAt, textEm, type TemplateProps } from './parts.js';
 
 const TEXT_PX = 46;
@@ -11,8 +11,6 @@ const GAP = 20;
 /** 白卡内边距；胶囊在卡内铺满一行 */
 const FRAME_PAD_X = 40;
 const PILL_W = CONTENT_W - FRAME_PAD_X * 2;
-const PILL_BG = '#F4F1EC';
-const PENDING = '2.5px dashed #E2DDD4';
 /** 第一项出现时间、项与项的间隔、出现后多久开始划、划线时长（秒） */
 const FIRST = 0.12;
 const STAGGER = 0.42;
@@ -40,14 +38,15 @@ const itemPx = (text: string): number => fitFontSize(text, MAX_TEXT_W, TEXT_PX, 
 const Item: React.FC<{ text: string; p: number; strike: number; pending: boolean }> = ({ text, p, strike, pending }) => {
   const px = itemPx(text);
   const lineW = Math.min(textEm(text) * px, PILL_W - PILL_PAD_X * 2) + STRIKE_PAD * 2;
+  const pal = usePalette();
   return (
   <div style={{ position: 'relative' }}>
-  {pending ? <div style={{ position: 'absolute', inset: 0, borderRadius: 26, border: PENDING, opacity: Math.max(0, 1 - p * 1.5) }} /> : null}
+  {pending ? <div style={{ position: 'absolute', inset: 0, borderRadius: 26, border: `2.5px dashed ${pal.track}`, opacity: Math.max(0, 1 - p * 1.5) }} /> : null}
   <Reveal p={p} dx={-36} dy={0}>
     <div style={{ position: 'relative', width: PILL_W, height: PILL_H, boxSizing: 'border-box', padding: `0 ${PILL_PAD_X}px`, display: 'flex', alignItems: 'center',
-      borderRadius: 26, background: PILL_BG, opacity: 1 - strike * 0.25,
+      borderRadius: 26, background: pal.inset, opacity: 1 - strike * 0.25,
       transform: `scale(${1 - strike * 0.02})`, transformOrigin: 'left center' }}>
-      <span style={{ fontSize: px, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: interpolateColors(strike, [0, 1], [THEME.ink, THEME.faint]) }}>{text}</span>
+      <span style={{ fontSize: px, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: interpolateColors(strike, [0, 1], [pal.ink, pal.faint]) }}>{text}</span>
       <div style={{ position: 'absolute', left: PILL_PAD_X - STRIKE_PAD, width: lineW, top: PILL_H / 2 + 1, height: 4, borderRadius: 2, background: STRIKE_COLOR,
         transform: `scaleX(${strike})`, transformOrigin: 'left center' }} />
     </div>

@@ -1,5 +1,6 @@
 import type { Mood } from '../assets/catalog.js';
 import { unifyListNumbering } from './numbering.js';
+import { PaletteSchema, type Palette } from '../compose/palette.js';
 import { visualLayout } from '../compose/layout.js';
 import { applyStoryboardRules } from './rules.js';
 import { fitRevealToShots, revealToLocal } from './reveal.js';
@@ -239,10 +240,17 @@ function readCoverTitle(raw: unknown): CoverTitle | undefined {
   return main.success ? main.data : undefined;
 }
 
-/** 分镜里与镜头无关的附加字段（背景乐情绪、封面标题） */
-function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle'> {
+/** 片色（分镜阶段推导后落盘）：合法就原样保留，归一化再整理时不丢；不合法的丢掉（按原配色） */
+function readPalette(raw: unknown): Palette | undefined {
+  const p = PaletteSchema.safeParse((raw as { palette?: unknown } | null)?.palette);
+  return p.success ? p.data : undefined;
+}
+
+/** 分镜里与镜头无关的附加字段（背景乐情绪、封面标题、片色） */
+function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle' | 'palette'> {
   const coverTitle = readCoverTitle(raw);
-  return { bgm: readMood(raw), ...(coverTitle ? { coverTitle } : {}) };
+  const palette = readPalette(raw);
+  return { bgm: readMood(raw), ...(coverTitle ? { coverTitle } : {}), ...(palette ? { palette } : {}) };
 }
 
 /**

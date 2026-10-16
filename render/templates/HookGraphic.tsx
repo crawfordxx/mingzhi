@@ -1,14 +1,14 @@
 import React from 'react';
 import { AbsoluteFill } from 'remotion';
 import { THEME } from '../theme.js';
+import { usePalette } from '../palette.js';
+import { toRgba } from '../../src/qa/contrast.js';
 import { textEm, type PropsOf } from './parts.js';
 
 /**
  * 钩子没有素材时的本地图形兜底（不是纯文字黑底）：大号关键词缓慢横移的动态排版 + 同心圆、旋转弧段、环绕光点与点阵（单双张左右镜像）。
- * 全部由帧时间驱动、从第 0 帧起就是完整构图（不从空白画出来）
+ * 颜色取片色的钩子底与强调色（背景主色压深 + 强调色）。全部由帧时间驱动、从第 0 帧起就是完整构图（不从空白画出来）
  */
-const LIME = THEME.hookLime;
-const lime = (a: number): string => `rgba(212, 242, 60, ${a})`;
 const W = 1080;
 const H = 960;
 /** 同心圆的圆心与半径：单数张在右上、双数张镜像到左上（同一组钩子不重复构图） */
@@ -36,6 +36,8 @@ export function hookKeyword(props: PropsOf<'hook'>): string {
 const wordPx = (word: string): number => Math.max(WORD_MIN, Math.min(WORD_MAX, Math.floor(WORD_W / Math.max(1, textEm(word)))));
 
 const Rings: React.FC<{ local: number; C: { x: number; y: number } }> = ({ local, C }) => {
+  const LIME = usePalette().hook.accent;
+  const lime = (a: number): string => toRgba(LIME, a);
   const orbit = ((local * ORBIT - 40) * Math.PI) / 180;
   return (
     <svg width={W} height={H} style={{ position: 'absolute', inset: 0 }}>
@@ -58,9 +60,11 @@ export const HookGraphic: React.FC<{ props: PropsOf<'hook'>; local: number }> = 
   const word = hookKeyword(props);
   const C = CENTERS[(props.index - 1) % CENTERS.length];
   const px = wordPx(word);
+  const { bg, accent } = usePalette().hook;
+  const lime = (a: number): string => toRgba(accent, a);
   const base: React.CSSProperties = { position: 'absolute', left: -20, bottom: -px * 0.2, fontFamily: THEME.font, fontSize: px, fontWeight: 900, lineHeight: 1, letterSpacing: '-0.04em', whiteSpace: 'nowrap' };
   return (
-    <AbsoluteFill style={{ background: THEME.hookBg, overflow: 'hidden' }}>
+    <AbsoluteFill style={{ background: bg, overflow: 'hidden' }}>
       <AbsoluteFill style={{ background: `radial-gradient(circle at ${(C.x / W) * 100}% ${(C.y / H) * 100}%, ${lime(0.16)} 0%, ${lime(0.04)} 32%, rgba(0, 0, 0, 0) 60%)` }} />
       <div style={{ ...base, color: lime(0.08), transform: `translateX(${-local * DRIFT}px)` }}>{word}</div>
       <div style={{ ...base, color: 'transparent', WebkitTextStroke: `2px ${lime(0.22)}`, transform: `translate(${60 + local * DRIFT * 0.6}px, ${-px * 0.08}px)` }}>{word}</div>

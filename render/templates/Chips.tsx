@@ -1,6 +1,7 @@
 import React from 'react';
 import { useVideoConfig } from 'remotion';
-import { THEME } from '../theme.js';
+import { usePalette } from '../palette.js';
+import type { Palette } from '../../src/compose/palette.js';
 import { CONTENT_W, CardFrame, SAFE_H, Reveal, SafeArea, clampLines, fitFontSize, fitScale, lineCount, springAt, textEm, useMinPx, type PropsOf, type TemplateProps } from './parts.js';
 
 type Mark = 'yes' | 'no' | 'maybe';
@@ -21,11 +22,12 @@ const MIN_SCALE = 0.55;
 /** 第一个胶囊弹入的时间与相邻胶囊的间隔（秒）；音效触发点（src/audio/plan.ts）与之对拍 */
 export const FIRST_POP = 0.15;
 export const STAGGER = 0.12;
-const MARKS: Record<Mark, { bg: string; fg: string }> = {
-  yes: { bg: THEME.tint.yes, fg: THEME.greenText },
-  no: { bg: THEME.tint.no, fg: THEME.redText },
-  maybe: THEME.maybe,
-};
+/** 胶囊底色与字色（随片色：暗色片是深色浅染底 + 提亮的字） */
+const marksOf = (p: Palette): Record<Mark, { bg: string; fg: string }> => ({
+  yes: { bg: p.tint.yes, fg: p.greenText },
+  no: { bg: p.tint.no, fg: p.redText },
+  maybe: p.maybe,
+});
 
 /** 标签总数不多（≤ SPARSE_ITEMS）时整体放大，卡片不显空 */
 const SPARSE_ITEMS = 4;
@@ -78,7 +80,7 @@ const MarkIcon: React.FC<{ mark: Mark; size: number; color: string }> = ({ mark,
 /** 胶囊：依次弹入（带一点过冲） */
 const Pill: React.FC<{ text: string; mark: Mark; p: number; k: number; minPx: number }> = ({ text, mark, p, k, minPx }) => {
   const px = chipPillPx(text, k, minPx);
-  const c = MARKS[mark];
+  const c = marksOf(usePalette())[mark];
   return (
     <Reveal p={p} dy={10} from={0.6}>
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: ICON_GAP, height: PILL_H * k, padding: '0 28px 0 22px', borderRadius: (PILL_H * k) / 2,
@@ -91,14 +93,17 @@ const Pill: React.FC<{ text: string; mark: Mark; p: number; k: number; minPx: nu
 };
 
 /** minPx > 0（浮层）时组名单独一行、胶囊排在下面，字号不低于 minPx（缩放后 ≥ 28px） */
-const Row: React.FC<{ group: Group; first: number; divider: boolean; local: number; fps: number; k: number; minPx: number }> = ({ group, first, divider, local, fps, k, minPx }) => (
-  <div style={{ display: 'flex', flexDirection: minPx ? 'column' : 'row', alignItems: minPx ? 'flex-start' : 'center', gap: 20, padding: `${ROW_PAD_Y}px 0`, borderTop: divider ? '2px solid #EFEDE9' : 'none' }}>
-    <div style={{ width: minPx ? undefined : LABEL_W, flex: 'none', fontSize: chipLabelPx(group.label, k, minPx), fontWeight: 600, color: THEME.sub, lineHeight: LABEL_LH, ...clampLines(2) }}>{group.label}</div>
+const Row: React.FC<{ group: Group; first: number; divider: boolean; local: number; fps: number; k: number; minPx: number }> = ({ group, first, divider, local, fps, k, minPx }) => {
+  const pal = usePalette();
+  return (
+  <div style={{ display: 'flex', flexDirection: minPx ? 'column' : 'row', alignItems: minPx ? 'flex-start' : 'center', gap: 20, padding: `${ROW_PAD_Y}px 0`, borderTop: divider ? `2px solid ${pal.track}` : 'none' }}>
+    <div style={{ width: minPx ? undefined : LABEL_W, flex: 'none', fontSize: chipLabelPx(group.label, k, minPx), fontWeight: 600, color: pal.sub, lineHeight: LABEL_LH, ...clampLines(2) }}>{group.label}</div>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: PILL_GAP }}>
       {group.items.map((it, i) => <Pill key={i} text={it.text} mark={it.mark} k={k} minPx={minPx} p={springAt(local, FIRST_POP + (first + i) * STAGGER, fps, { damping: 12, mass: 0.6 })} />)}
     </div>
   </div>
-);
+  );
+};
 
 /** 标签卡：白卡撑满卡片区，每组一行，左侧组名，右侧 yes/no/maybe 胶囊 */
 export const Chips: React.FC<TemplateProps<'chips'>> = ({ props, local }) => {

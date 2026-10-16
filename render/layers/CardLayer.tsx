@@ -1,10 +1,12 @@
 import React from 'react';
 import { AbsoluteFill, Easing, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { shotAt, visualLayout } from '../../src/compose/layout.js';
-import { cardCarry, cardLead, drawsCard } from '../../src/compose/card-carry.js';
+import { cardCarry, cardLead, carryStyle, drawsCard, wipeAt } from '../../src/compose/card-carry.js';
 import type { Broll, CardSpec, Shot } from '../../src/storyboard/schema.js';
 import { CANVAS } from '../../src/storyboard/schema.js';
 import { THEME } from '../theme.js';
+import { PaletteContext, stageBackground, usePalette } from '../palette.js';
+import { DEFAULT_PALETTE, type Palette } from '../../src/compose/palette.js';
 import { renderBackdrop, renderCard } from '../templates/index.js';
 import { FLOAT_SCALE, GLASS, SolidGlassContext, SurfaceContext } from '../templates/parts.js';
 import { BrollMedia } from './BrollLayer.js';
@@ -68,8 +70,9 @@ const SPLIT_SHADE_LEGIBLE = 'linear-gradient(180deg, rgba(0, 0, 0, 0.42) 0%, rgb
  */
 const SplitBase: React.FC<Part> = ({ shot, local, dur }) => {
   const label = shot.broll?.label;
+  const stage = stageBackground(usePalette());
   return (
-    <div style={{ ...SEAM_BOX, background: THEME.stage }}>
+    <div style={{ ...SEAM_BOX, background: stage }}>
       {shot.broll ? <>
         <BrollMedia broll={{ ...shot.broll, label: undefined }} local={local} dur={dur} />
         <AbsoluteFill style={{ background: splitShadeBackground(shot.broll.legible ? SPLIT_SHADE_LEGIBLE : SPLIT_SHADE, shot.broll) }} />
@@ -131,11 +134,43 @@ const WholeShot: React.FC<Part> = (p) => {
   return layout === 'full' && p.shot.card?.template === 'cta' ? <FullCta {...p} /> : null;
 };
 
+/** 擦除时上一张卡顺着擦除方向被推走的距离、新卡从反方向滑入的距离（px）：两层速度不同，有纵深 */
+const WIPE_PUSH = 90;
+const WIPE_SLIDE = 160;
+/** 擦除边缘的强调色细条宽度（px），只在擦除中段最亮 */
+const WIPE_EDGE = 6;
+
+/** 擦除的裁切：只留 [from, to] 这一段（横向从左往右、竖向从上往下的比例） */
+const clipOf = (axis: 'x' | 'y', from: number, to: number): string =>
+  axis === 'x' ? `inset(0 ${(1 - to) * 100}% 0 ${from * 100}%)` : `inset(${from * 100}% 0 ${(1 - to) * 100}% 0)`;
+const shift = (axis: 'x' | 'y', px: number): string => (axis === 'x' ? `translateX(${px}px)` : `translateY(${px}px)`);
+
+/**
+ * 遮罩擦除：一道边缘沿阅读方向扫过卡片区，边缘之前是新卡（从反方向滑入落位），之后是旧卡（被同向推走），边缘上一道强调色细条。
+ * 裁切在外层（不随位移走），位移在内层，所以画面上两张卡以边缘为界、任何一帧都不叠加
+ */
+const CardWipe: React.FC<{ prev: Part; cur: Part; t: number; axis: 'x' | 'y' }> = ({ prev, cur, t, axis }) => {
+  const pal = usePalette();
+  const p = wipeAt(t);
+  const size = axis === 'x' ? CANVAS.width : CANVAS.seam;
+  const edge: React.CSSProperties = axis === 'x'
+    ? { left: p * size - WIPE_EDGE / 2, top: 0, width: WIPE_EDGE, height: CANVAS.seam }
+    : { top: p * size - WIPE_EDGE / 2, left: 0, height: WIPE_EDGE, width: CANVAS.width };
+  return (
+    <>
+      <div style={{ ...SEAM_BOX, clipPath: clipOf(axis, p, 1) }}><div style={{ ...SEAM_BOX, transform: shift(axis, p * WIPE_PUSH) }}><WholeShot {...prev} /></div></div>
+      <div style={{ ...SEAM_BOX, clipPath: clipOf(axis, 0, p) }}><div style={{ ...SEAM_BOX, transform: shift(axis, -(1 - p) * WIPE_SLIDE) }}><WholeShot {...cur} /></div></div>
+      <div style={{ position: 'absolute', ...edge, background: pal.accent, opacity: Math.sin(Math.PI * p), boxShadow: `0 0 24px ${pal.accent}` }} />
+    </>
+  );
+};
+
 const partOf = (shots: Shot[], index: number, sec: number, motion: Motion): Part => ({ shot: shots[index], local: sec - shots[index].start, dur: shots[index].end - shots[index].start, motion, lead: cardLead(shots, index) });
 
 /**
  * 卡片层（shots 为画面时间轴）：分屏画上半屏；浮层画顶部浮卡；全屏只叠加 cta；全屏插入与画中画不画卡片（素材层负责）。
- * 交叉过渡：上一镜头的卡片在本镜头开头 CARD_XFADE_SEC 内退场（叠在本镜头的底之上、本镜头卡片之下），本镜头卡片同时进场
+ * 交叉过渡：上一镜头的卡片在本镜头开头 CARD_XFADE_SEC 内退场（叠在本镜头的底之上、本镜头卡片之下），本镜头卡片同时进场；
+ * 结构差异大的相邻分屏卡片（carryStyle 为 wipe）改用遮罩擦除（CardWipe），两张卡的文字任何一帧都不叠在一起
  */
 export const CardLayer: React.FC<{ shots: Shot[]; sec: number }> = ({ shots, sec }) => {
   const hit = shotAt(shots, sec);
@@ -147,6 +182,8 @@ export const CardLayer: React.FC<{ shots: Shot[]; sec: number }> = ({ shots, sec
     if (!cur.lead) return <WholeShot {...cur} />;
     return <div style={{ position: 'absolute', inset: 0, opacity: exitEase(cur.local / FADE_IN_SEC) }}><WholeShot {...cur} motion={{ enter: 'settle', exit: 0 }} /></div>;
   }
+  const style = carryStyle(shots, hit.index);
+  if (style.kind === 'wipe') return <CardWipe prev={partOf(shots, carry.index, sec, { enter: 'settle', exit: 0 })} cur={{ ...cur, motion: { enter: 'settle', exit: 0 } }} t={carry.t} axis={style.axis} />;
   const e = exitEase(carry.t);
   const prev = partOf(shots, carry.index, sec, { enter: carry.index === 0 ? 'settle' : 'spring', exit: e });
   const split = visualLayout(hit.shot) === 'split';
@@ -163,18 +200,21 @@ export const CardLayer: React.FC<{ shots: Shot[]; sec: number }> = ({ shots, sec
 const HIDE_TEXT = '* { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }';
 
 /**
- * 单卡静帧合成（1080×960）：不做进出场，直接画模板在当前帧的状态；镜头时长取合成时长（可由 inputProps.dur 指定）。
+ * 单卡静帧合成（1080×960）：不做进出场，直接画模板在当前帧的状态；镜头时长取合成时长（可由 inputProps.dur 指定）；palette 为这条片的片色（缺省原配色）。
  * 给了 shot 时按成片的画法画这个镜头的卡片区（分屏素材做底、卡片排在图上）；hideText 时文字透明
  */
-export const CardStill: React.FC<{ card: CardSpec; dur?: number; shot?: Shot; hideText?: boolean }> = ({ card, shot, hideText }) => {
+export const CardStill: React.FC<{ card: CardSpec; dur?: number; shot?: Shot; hideText?: boolean; palette?: Palette }> = ({ card, shot, hideText, palette }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
   const local = frame / fps;
   const dur = durationInFrames / fps;
+  const pal = palette ?? DEFAULT_PALETTE;
   return (
-    <AbsoluteFill style={{ background: THEME.stage }}>
-      {hideText ? <style>{HIDE_TEXT}</style> : null}
-      {shot ? <CardLayer shots={[{ ...shot, start: 0, end: dur }]} sec={local} /> : <>{renderBackdrop(card, local, dur)}{renderCard(card, local, dur)}</>}
-    </AbsoluteFill>
+    <PaletteContext.Provider value={pal}>
+      <AbsoluteFill style={{ background: pal.stage }}>
+        {hideText ? <style>{HIDE_TEXT}</style> : null}
+        {shot ? <CardLayer shots={[{ ...shot, start: 0, end: dur }]} sec={local} /> : <>{renderBackdrop(card, local, dur)}{renderCard(card, local, dur)}</>}
+      </AbsoluteFill>
+    </PaletteContext.Provider>
   );
 };
