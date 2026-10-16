@@ -71,8 +71,47 @@ describe('预检与上下文', () => {
 describe('归一化：新版式不被打回全屏', () => {
   it('无卡片的全屏插入保留且不与相邻全屏合并；缺素材的画中画退回全屏并合并', () => {
     const raw = { shots: [{ start: 0, end: 2, layout: 'full' }, { start: 2, end: 4, layout: 'broll', broll: B }, { start: 4, end: 6, layout: 'full' }, { start: 6, end: 8, layout: 'pip' }] };
-    const { storyboard } = normalizeStoryboard(raw, 8, []);
+    const { storyboard } = normalizeStoryboard(raw, 8, [B.file]);
     expect(storyboard.shots.map((s) => [s.start, s.end, s.layout])).toEqual([[0, 2, 'full'], [2, 4, 'broll'], [4, 8, 'full']]);
     expect(storyboard.shots[1].broll).toEqual(B);
+  });
+});
+
+describe('修复轮 1：素材只认可用列表、换卡不改版式、颗粒设置', () => {
+  const title = { template: 'title' as const, props: { title: '标题' } };
+  it('素材不在可用列表里：去掉素材并降级（全屏插入/画中画 → 全屏，带卡片时按规则变分屏；分屏、浮层保留卡片）', () => {
+    const raw = { shots: [
+      { start: 0, end: 2, layout: 'broll', broll: B },
+      { start: 2, end: 4, layout: 'pip', broll: B, card: title },
+      { start: 4, end: 6, layout: 'split', broll: B, card: title },
+      { start: 6, end: 8, layout: 'overlay', broll: B, card: title },
+      { start: 8, end: 10, layout: 'overlay', broll: B },
+    ] };
+    const { storyboard } = normalizeStoryboard(raw, 10, []);
+    expect(storyboard.shots.every((s) => s.broll === undefined)).toBe(true);
+    expect(storyboard.shots.map((s) => [s.start, s.end, s.layout, s.card?.template ?? '-'])).toEqual([
+      [0, 2, 'full', '-'], [2, 4, 'split', 'title'], [4, 6, 'split', 'title'], [6, 8, 'overlay', 'title'], [8, 10, 'full', '-'],
+    ]);
+  });
+  it('路径越界或编造的素材：模式校验直接拒收（镜头按无效丢弃）', () => {
+    const raw = { shots: [{ start: 0, end: 2, layout: 'broll', broll: { ...B, file: '../../etc/x.jpg' } }] };
+    const r = normalizeStoryboard(raw, 2, ['../../etc/x.jpg']);
+    expect(r.dropped).toBe(1);
+    expect(r.storyboard.shots).toEqual([{ start: 0, end: 2, layout: 'full' }]);
+  });
+  it('编辑后归一化：分镜里已有的素材视为可用，不被误删', () => {
+    const next = applyOps(withBroll(), [{ type: 'editCaption', index: 0, text: '改字幕' }, { type: 'setLayout', shotIndex: 1, layout: 'pip' }]);
+    expect(layoutOf(next, 1).broll).toEqual(B);
+  });
+  it('replaceCard 保留版式：浮层、分屏不变；全屏变分屏；画中画/全屏插入里卡片看不见，拒绝并说明；cta 仍固定全屏', () => {
+    const card = { template: 'title' as const, props: { title: '新标题' } };
+    const s = withBroll();
+    const overlay = applyOps(s, [{ type: 'setLayout', shotIndex: 0, layout: 'overlay' }]);
+    expect(layoutOf(applyOps(overlay, [{ type: 'replaceCard', shotIndex: 0, card }]), 0)).toMatchObject({ layout: 'overlay', card });
+    expect(layoutOf(applyOps(s, [{ type: 'replaceCard', shotIndex: 0, card }]), 0).layout).toBe('split');
+    expect(layoutOf(applyOps(s, [{ type: 'replaceCard', shotIndex: 1, card }]), 1)).toMatchObject({ layout: 'split', card, broll: B });
+    const pip = applyOps(s, [{ type: 'setLayout', shotIndex: 1, layout: 'pip' }]);
+    expect(() => applyOps(pip, [{ type: 'replaceCard', shotIndex: 1, card }])).toThrow('画中画');
+    expect(checkOp({ type: 'replaceCard', shotIndex: 1, card }, buildEditContext(pip, ''))).toContain('画中画');
   });
 });

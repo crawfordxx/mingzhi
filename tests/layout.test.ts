@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { blendTransform, captionAt, personTransform, shotAt } from '../src/compose/layout.js';
+import { CANVAS, ShotSchema, type Broll, type Shot } from '../src/storyboard/schema.js';
+import { FULL_CAPTION_Y } from '../src/captions/styles.js';
+import { J_CUT_FRAMES, KB_PUSH, LAYOUT_TRANSITION_SEC, PIP, captionCenterY, captionSec, grainOn, kenBurnsAt, kenBurnsRects, underlayAt, visualLayout, visualShots, type Rect } from '../src/compose/layout.js';
 
 describe('personTransform', () => {
   it('全屏：按宽铺满并垂直居中（9:16 视频正好铺满）', () => {
@@ -57,9 +60,6 @@ describe('blendTransform / captionAt / shotAt', () => {
 });
 
 // ---------- P7：新版式（broll / pip / overlay）、J-cut、Ken Burns ----------
-import { CANVAS, ShotSchema, type Broll, type Shot } from '../src/storyboard/schema.js';
-import { FULL_CAPTION_Y } from '../src/captions/styles.js';
-import { J_CUT_FRAMES, KB_PUSH, PIP, captionCenterY, kenBurnsAt, kenBurnsRects, visualLayout, visualShots, type Rect } from '../src/compose/layout.js';
 
 const BROLL: Broll = { file: 'broll/a.jpg', kind: 'photo', focal: { x: 0.5, y: 0.5 } };
 const inside = (r: Rect): boolean => r.x >= -1e-9 && r.y >= -1e-9 && r.x + r.w <= 1 + 1e-9 && r.y + r.h <= 1 + 1e-9;
@@ -198,5 +198,50 @@ describe('Ken Burns 起止裁框', () => {
     expect(mid.w).toBeCloseTo((kb.from.w + kb.to.w) / 2, 6);
     expect(kenBurnsAt(kb, -1)).toEqual(kb.from);
     expect(kenBurnsAt(kb, 2)).toEqual(kb.to);
+  });
+});
+
+describe('修复轮 1：素材路径、画中画退出垫底、字幕时钟、颗粒开关', () => {
+  const ok = (broll: unknown): boolean => ShotSchema.safeParse({ start: 0, end: 2, layout: 'broll', broll }).success;
+  it('素材路径：只收项目内相对路径与白名单扩展名，类型与扩展名一致；可选时长为正数', () => {
+    expect(ok({ ...BROLL, file: 'broll/a.webp' })).toBe(true);
+    expect(ok({ ...BROLL, file: 'broll/a.mp4', kind: 'video', durationSec: 2.5 })).toBe(true);
+    for (const file of ['../a.jpg', 'broll/../../a.jpg', '/etc/a.jpg', 'C:/a.jpg', 'broll\\a.jpg', 'broll/a.txt', 'broll/a', 'https://x.com/a.jpg']) expect(ok({ ...BROLL, file }), file).toBe(false);
+    expect(ok({ ...BROLL, file: 'broll/a.mp4' })).toBe(false);
+    expect(ok({ ...BROLL, file: 'broll/a.jpg', kind: 'video' })).toBe(false);
+    expect(ok({ ...BROLL, file: 'broll/a.mp4', kind: 'video', durationSec: 0 })).toBe(false);
+  });
+  it('画中画退出：后一个镜头的前 0.4 秒仍用画中画的素材垫底（镜头内时间接着走），之后不画', () => {
+    const V: Broll = { file: 'broll/v.mp4', kind: 'video', focal: { x: 0.5, y: 0.5 } };
+    const shots: Shot[] = [{ start: 0, end: 2, layout: 'full' }, { start: 2, end: 4, layout: 'pip', broll: V }, { start: 4, end: 6, layout: 'full' }, { start: 6, end: 8, layout: 'pip', broll: V }];
+    expect(LAYOUT_TRANSITION_SEC).toBe(0.4);
+    expect(underlayAt(shots, 1)).toBeNull();
+    expect(underlayAt(shots, 3)).toMatchObject({ index: 1, local: 1, dur: 2 });
+    expect(underlayAt(shots, 4.1)).toMatchObject({ index: 1, dur: 2 });
+    expect(underlayAt(shots, 4.1)?.local).toBeCloseTo(2.1, 9);
+    expect(underlayAt(shots, 4.4)).toBeNull();
+    expect(underlayAt(shots, 6.1)).toMatchObject({ index: 3 });
+    // 后一个是全屏插入：素材层自己盖住，不需要垫底
+    const toBroll: Shot[] = [{ start: 0, end: 2, layout: 'pip', broll: V }, { start: 2, end: 4, layout: 'broll', broll: BROLL }];
+    expect(underlayAt(toBroll, 2.1)).toBeNull();
+  });
+  it('字幕时钟：J-cut 的前 2 帧仍显示切点前的字幕（文字与位置都跟画面一起切），其余时刻不变', () => {
+    const shots: Shot[] = [{ start: 0, end: 2, layout: 'split', card: { template: 'title', props: { title: 't' } } }, { start: 2, end: 4, layout: 'broll', broll: BROLL }];
+    expect(captionSec(shots, 1)).toBe(1);
+    expect(captionSec(shots, 2)).toBeLessThan(2);
+    expect(captionSec(shots, 2)).toBeGreaterThan(2 - 1e-6);
+    expect(captionSec(shots, 2 + 1 / CANVAS.fps)).toBeLessThan(2);
+    expect(captionSec(shots, 2 + J_CUT_FRAMES / CANVAS.fps)).toBe(2 + J_CUT_FRAMES / CANVAS.fps);
+    const caps = [{ start: 0, end: 2, text: '旧句' }, { start: 2, end: 4, text: '新句' }];
+    expect(captionAt(caps, captionSec(shots, 2))?.text).toBe('旧句');
+    expect(captionAt(caps, captionSec(shots, 2 + 2 / 30))?.text).toBe('新句');
+  });
+  it('颗粒：显式设置优先；未设置时只有用到 B-roll 的分镜才开（旧项目不变）', () => {
+    const old: Shot[] = [{ start: 0, end: 2, layout: 'split', card: { template: 'title', props: { title: 't' } } }];
+    const fresh: Shot[] = [...old, { start: 2, end: 4, layout: 'broll', broll: BROLL }];
+    expect(grainOn({ shots: old })).toBe(false);
+    expect(grainOn({ shots: fresh })).toBe(true);
+    expect(grainOn({ shots: old, grain: true })).toBe(true);
+    expect(grainOn({ shots: fresh, grain: false })).toBe(false);
   });
 });

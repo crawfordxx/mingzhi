@@ -64,8 +64,16 @@ function sanitizeCard(card: CardSpec, files: Set<string>): CardSpec | null {
   }
 }
 
+/** 镜头素材（B-roll 编排层写入）不在可用列表里就去掉；全屏插入、画中画随之降为全屏（带卡片时下面按规则变分屏） */
+function sanitizeBroll(shot: Shot, files: Set<string>): Shot {
+  if (!shot.broll || files.has(shot.broll.file)) return shot;
+  const { broll: _drop, ...rest } = shot;
+  return rest.layout === 'broll' || rest.layout === 'pip' ? { ...rest, layout: 'full' } : rest;
+}
+
 /** 无卡片的镜头除非有素材可显示（全屏插入、画中画、浮层、上半屏铺素材）否则变为全屏；full 镜头只有 cta 能显示卡片，带其他卡片的改为 split（保留内容，否则会为看不见的卡片白取素材）；卡片不可用则返回 null（镜头整体丢弃） */
-function sanitizeShot(shot: Shot, files: Set<string>): Shot | null {
+function sanitizeShot(raw: Shot, files: Set<string>): Shot | null {
+  const shot = sanitizeBroll(raw, files);
   if (!shot.card) return shot.broll && visualLayout(shot) !== 'full' ? shot : { ...shot, layout: 'full' };
   const card = sanitizeCard(shot.card, files);
   if (!card) return null;

@@ -24,6 +24,13 @@ export function layoutBlocker(layout: Layout, shot: { template?: string; broll: 
   return null;
 }
 
+/** 这个版式里换上的非 cta 卡片会不会看不见（全屏插入、画中画只显示素材与人物） */
+export function cardHiddenIn(layout: Layout): string | null {
+  if (layout === 'broll') return '这是全屏插入镜头，卡片不会显示；要显示卡片请先改成分屏或浮层';
+  if (layout === 'pip') return '这是画中画镜头，卡片不会显示；要显示卡片请先改成分屏或浮层';
+  return null;
+}
+
 const shotMissing = (i: number, ctx: EditContext): string | null => (i < ctx.shots.length ? null : `没有第 ${i} 个镜头`);
 
 function checkVisual(op: Extract<EditOp, { type: 'regenerateVisual' }>, ctx: EditContext): string | null {
@@ -50,7 +57,7 @@ export function checkOp(op: EditOp, ctx: EditContext): string | null {
     case 'setBgm':
       return ['auto', 'none', ...MOODS, ...ctx.tracks.map((t) => t.id)].includes(op.bgm) ? null : `没有配乐「${op.bgm}」`;
     case 'replaceCard':
-      return shotMissing(op.shotIndex, ctx) ?? checkCard(op.card);
+      return shotMissing(op.shotIndex, ctx) ?? checkCard(op.card) ?? (op.card.template === 'cta' ? null : cardHiddenIn(ctx.shots[op.shotIndex].layout));
     case 'setLayout': {
       const shot = ctx.shots[op.shotIndex];
       if (!shot) return shotMissing(op.shotIndex, ctx);

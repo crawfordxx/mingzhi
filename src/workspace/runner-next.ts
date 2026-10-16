@@ -41,8 +41,8 @@ function planChange(env: VersionEnv, parent: VersionState, raw: EditOp[]): Chang
   const { ops, dropped } = validateOps(raw, parent);
   if (raw.length > 0 && ops.length === 0) throw new Error(`没有可执行的修改：${dropped.join('；')}`);
   const applied = applyOps(parent, ops);
-  const { budgetYuan, broll, maxVideos } = env.space.settings;
-  const next = { ...applied, settings: { ...applied.settings, budgetYuan, broll, maxVideos } };
+  const { budgetYuan, broll, maxVideos, grain } = env.space.settings;
+  const next = { ...applied, settings: { ...applied.settings, budgetYuan, broll, maxVideos, ...(grain === undefined ? {} : { grain }) } };
   return { next, ops, dropped, stages: stagesFor(ops), newCover: next.coverStyle !== parent.coverStyle };
 }
 

@@ -67,13 +67,22 @@ const RectSchema = z.object({ x: unit, y: unit, w: z.number().gt(0).max(1), h: z
   .refine((r) => Math.abs(r.w - r.h) <= RECT_EPS, '裁框须与画面同比例（w 等于 h）')
   .refine((r) => r.x + r.w <= 1 + RECT_EPS && r.y + r.h <= 1 + RECT_EPS, '裁框超出画面');
 export type Rect = z.infer<typeof RectSchema>;
-/** 镜头素材：file 相对工作目录；focal 为主体位置（0–1）；kenBurns 省略时由 focal 计算（只用于静图） */
+/** 素材扩展名白名单（按类型） */
+export const BROLL_EXTS = { photo: ['.jpg', '.jpeg', '.png', '.webp'], video: ['.mp4', '.mov', '.webm'] } as const;
+const extOf = (file: string): string => /\.[a-z0-9]+$/i.exec(file)?.[0].toLowerCase() ?? '';
+/** 项目内相对路径：不以 / 开头、不带盘符或协议、不含反斜杠与 .. 段 */
+const isProjectPath = (file: string): boolean => !/^[/\\]|^[a-z][a-z0-9+.-]*:/i.test(file) && !file.includes('\\') && !file.split('/').includes('..');
+/**
+ * 镜头素材（只由 B-roll 编排层写入，归一化时还要对照可用素材列表）：file 为工作目录内的相对路径；focal 为主体位置（0–1）；
+ * kenBurns 省略时由 focal 计算（只用于静图）；durationSec 为视频素材时长，给出时镜头比素材长就循环，否则停在末帧
+ */
 export const BrollSchema = z.object({
-  file: z.string().trim().min(1),
+  file: z.string().trim().min(1).max(200).refine(isProjectPath, '素材必须是项目内的相对路径'),
   kind: z.enum(['video', 'photo']),
   focal: z.object({ x: unit, y: unit }),
   kenBurns: z.object({ from: RectSchema, to: RectSchema }).optional(),
-});
+  durationSec: z.number().finite().positive().optional(),
+}).refine((b) => (BROLL_EXTS[b.kind] as readonly string[]).includes(extOf(b.file)), '素材扩展名与类型不符');
 export type Broll = z.infer<typeof BrollSchema>;
 
 export const ShotSchema = z.object({ start: z.number().finite(), end: z.number().finite(), layout: z.enum(LAYOUTS), card: CardSpecSchema.optional(), broll: BrollSchema.optional() });
@@ -89,5 +98,5 @@ export type CoverTitle = z.infer<typeof CoverTitleSchema>;
 /** bgm 经归一化后必有值（缺省 chill），类型上可选是为了让只关心镜头的调用方与测试不必填写；coverTitle 缺省时由出片流程用 hook 卡片或第一句字幕兜底 */
 export interface Storyboard { shots: Shot[]; bgm?: Mood; coverTitle?: CoverTitle }
 
-/** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名 */
-export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number; bgm?: { file: string; keys: VolumeKey[]; durationSec: number }; sfx?: SfxCue[]; captionStyle?: CaptionStyleId; captionFontFile?: string };
+/** 传给 Remotion 主合成的全部数据；person 与图片都是相对 publicDir（工作目录）的文件名；grain 为颗粒质感层开关（缺省见 compose/layout 的 grainOn） */
+export type TalkProps = { person: string; personWidth: number; personHeight: number; subject: SubjectBox | null; captions: TimedCaption[]; shots: Shot[]; durationSec: number; bgm?: { file: string; keys: VolumeKey[]; durationSec: number }; sfx?: SfxCue[]; captionStyle?: CaptionStyleId; captionFontFile?: string; grain?: boolean };

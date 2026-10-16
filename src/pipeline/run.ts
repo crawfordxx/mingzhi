@@ -39,6 +39,8 @@ export interface PipelineArgs {
   audio?: AudioOptions;
   /** 字幕样式；缺省 blade */
   captionStyle?: CaptionStyleId;
+  /** 颗粒质感层开关；缺省时按分镜是否用到 B-roll 决定（旧项目不变） */
+  grain?: boolean;
   /** 封面；缺省按默认风格生成，false 关闭 */
   cover?: CoverOptions;
   /** 仅供测试注入的封面实现 */

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captionAt, shotAt, visualShots, type PersonTransform } from './layout.js';
+import { captionAt, captionSec, grainOn, shotAt, underlayAt, visualShots, type PersonTransform } from './layout.js';
 import { renderAudioTrack, renderVideoSegment, withBundle, type SegmentRenderOptions } from './render.js';
 import { transformAt } from '../../render/layers/PersonLayer.js';
 import { DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
@@ -31,20 +31,25 @@ export function segmentBounds(shots: Shot[], durationSec: number): FrameRange[] 
  *   镜头起点非整帧时，段边缘的帧可能属于相邻镜头，所以按帧而不是按镜头索引判断
  * - 人像位置：由本镜头版式、前一镜头版式与时长（0.4 秒过渡）、取景框、人像尺寸共同决定，直接用渲染用的 transformAt 逐帧算出
  * - 该帧显示的字幕文字（跨镜头边界的字幕会同时进入两段）
- * - 画面按画面时间轴（visualShots）判断：全屏插入的 J-cut 前 2 帧仍是上一个镜头的画面；镜头的版式与素材字段（文件、焦点、Ken Burns）随镜头进入指纹
+ * - 画面按画面时间轴（visualShots）判断：全屏插入的 J-cut 前 2 帧仍是上一个镜头的画面（字幕也按字幕时钟取切点前那句）；
+ *   镜头的版式与素材字段（文件、焦点、Ken Burns、时长）随镜头进入指纹；画中画退出过渡里垫底的上一镜素材也计入
  */
 function frameFingerprints(props: Omit<TalkProps, 'shots'>, shots: Shot[], range: FrameRange): { shots: unknown[]; frames: string[] } {
   const vis = visualShots(shots);
   const full: TalkProps = { ...props, shots: vis };
-  const secs = Array.from({ length: Math.max(0, range.end - range.start) }, (_, k) => (range.start + k) / CANVAS.fps);
+  const secs = frameSecs(range);
   const hits = secs.map((sec) => shotAt(vis, sec)?.index ?? -1);
-  const seen = [...new Set(hits.filter((i) => i >= 0))];
+  const unders = secs.map((sec) => underlayAt(vis, sec)?.index ?? -1);
+  const seen = [...new Set([...hits, ...unders].filter((i) => i >= 0))];
   const frames = secs.map((sec, k) => {
     const t = transformAt(vis, sec, full);
-    return `${hits[k] < 0 ? '-' : seen.indexOf(hits[k])}|${captionAt(props.captions, sec)?.text ?? ''}|${t.scale}|${t.x}|${t.y}${clipStamp(t)}`;
+    const under = unders[k] < 0 || unders[k] === hits[k] ? '' : `|u${seen.indexOf(unders[k])}`;
+    return `${hits[k] < 0 ? '-' : seen.indexOf(hits[k])}|${captionAt(props.captions, captionSec(shots, sec))?.text ?? ''}|${t.scale}|${t.x}|${t.y}${clipStamp(t)}${under}`;
   });
   return { shots: seen.map((i) => ({ shot: vis[i], last: i === shots.length - 1 })), frames };
 }
+
+const frameSecs = (range: FrameRange): number[] => Array.from({ length: Math.max(0, range.end - range.start) }, (_, k) => (range.start + k) / CANVAS.fps);
 
 /** 画中画窗口进指纹；全屏/分屏没有窗口时为空串（与旧指纹格式一致） */
 const clipStamp = (t: PersonTransform): string => (t.clip ? `|${t.clip.x},${t.clip.y},${t.clip.w},${t.clip.h},${t.clip.radius}` : '');
@@ -57,7 +62,7 @@ export function shotHash(shot: Shot, props: Omit<TalkProps, 'shots'>, _index: nu
   const { shots, range } = ctx;
   const { shots: hit, frames } = frameFingerprints(props, shots, range);
   const head = { v: 1, range, shot, hit, salt: ctx.salt ?? '', person: props.person, w: props.personWidth, h: props.personHeight, subject: props.subject,
-    style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '' };
+    style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '', ...(grainOn({ ...props, shots }) ? { grain: true } : {}) };
   return sha1(`${JSON.stringify(head)}\n${frames.join('\n')}`);
 }
 
@@ -113,11 +118,11 @@ function shotMedia(shot: Shot | undefined): string[] {
   return [p.image, p.video, shot?.broll?.file].filter((v): v is string => typeof v === 'string');
 }
 
-/** 本段帧区间里实际出现的镜头序号（按画面时间轴；各层每帧只画当前镜头，所以只有这些镜头的素材会进画面） */
+/** 本段帧区间里实际出现的镜头序号（按画面时间轴；各层每帧只画当前镜头与画中画退出时垫底的上一镜，所以只有这些镜头的素材会进画面） */
 function shotsInRange(shots: Shot[], range: FrameRange): number[] {
   const vis = visualShots(shots);
-  const secs = Array.from({ length: Math.max(0, range.end - range.start) }, (_, k) => (range.start + k) / CANVAS.fps);
-  return [...new Set(secs.map((sec) => shotAt(vis, sec)?.index ?? -1).filter((i) => i >= 0))];
+  const idx = frameSecs(range).flatMap((sec) => [shotAt(vis, sec)?.index ?? -1, underlayAt(vis, sec)?.index ?? -1]);
+  return [...new Set(idx.filter((i) => i >= 0))];
 }
 
 /**

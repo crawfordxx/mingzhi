@@ -1,10 +1,10 @@
 import React from 'react';
 import { OffthreadVideo, staticFile } from 'remotion';
-import { FULL_CLIP, PIP, blendTransform, personTransform, shotAt, visualLayout, type PersonTransform } from '../../src/compose/layout.js';
+import { FULL_CLIP, LAYOUT_TRANSITION_SEC, PIP, blendTransform, personTransform, shotAt, visualLayout, type PersonTransform } from '../../src/compose/layout.js';
 import type { Shot, TalkProps } from '../../src/storyboard/schema.js';
 
-/** 版式切换的过渡时长（秒） */
-export const LAYOUT_TRANSITION_SEC = 0.4;
+/** 版式切换的过渡时长（秒），定义在 compose/layout（素材垫底与分段指纹共用） */
+export { LAYOUT_TRANSITION_SEC };
 const ease = (t: number): number => 1 - (1 - t) ** 3;
 
 /** 第 i 个镜头的目标位置：全屏插入时人像被素材盖住，停在上一个镜头结束时的位置（切回同版式时不动）；首个镜头按全屏 */

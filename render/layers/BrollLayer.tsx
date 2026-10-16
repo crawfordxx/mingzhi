@@ -1,6 +1,6 @@
 import React from 'react';
-import { AbsoluteFill, Img, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
-import { kenBurnsAt, kenBurnsRects, shotAt, visualLayout } from '../../src/compose/layout.js';
+import { AbsoluteFill, Img, Loop, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { kenBurnsAt, kenBurnsRects, shotAt, underlayAt, visualLayout } from '../../src/compose/layout.js';
 import type { Broll, Shot } from '../../src/storyboard/schema.js';
 import { shotStartFrame } from '../templates/ShotVideo.js';
 
@@ -22,15 +22,22 @@ const KenBurnsPhoto: React.FC<{ broll: Broll; local: number; dur: number }> = ({
   );
 };
 
-/** 视频：静音、按焦点铺满，从镜头画面起点开始播放（local 为画面起点后的秒数） */
+/**
+ * 视频：静音、按焦点铺满，从镜头画面起点开始播放（local 为画面起点后的秒数）。
+ * 与卡片视频底（ShotVideo）同一策略：镜头比素材长时循环；素材时长未知（durationSec 缺省）时无法对齐循环点，停在末帧
+ */
 const BrollVideo: React.FC<{ broll: Broll; local: number }> = ({ broll, local }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
+  const video = (
+    <AbsoluteFill style={{ overflow: 'hidden' }}>
+      <OffthreadVideo src={staticFile(broll.file)} muted style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: focalPosition(broll) }} />
+    </AbsoluteFill>
+  );
+  const loopFrames = broll.durationSec ? Math.max(1, Math.round(broll.durationSec * fps)) : 0;
   return (
     <Sequence from={shotStartFrame(frame, local, fps)} layout="none">
-      <AbsoluteFill style={{ overflow: 'hidden' }}>
-        <OffthreadVideo src={staticFile(broll.file)} muted style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: focalPosition(broll) }} />
-      </AbsoluteFill>
+      {loopFrames > 0 ? <Loop durationInFrames={loopFrames} layout="none">{video}</Loop> : video}
     </Sequence>
   );
 };
@@ -42,17 +49,27 @@ export const BrollMedia: React.FC<{ broll: Broll; local: number; dur: number }> 
   </AbsoluteFill>
 );
 
+/** 当前帧要画的全屏素材：over 为全屏插入镜头；under 为画中画的底（含画中画之后人像放大回去的过渡期，见 underlayAt） */
+function layerShot(shots: Shot[], sec: number, place: 'over' | 'under'): { broll: Broll; local: number; dur: number } | null {
+  if (place === 'under') {
+    const u = underlayAt(shots, sec);
+    return u?.shot.broll ? { broll: u.shot.broll, local: u.local, dur: u.dur } : null;
+  }
+  const hit = shotAt(shots, sec);
+  const broll = hit?.shot.broll;
+  return hit && broll && visualLayout(hit.shot) === 'broll' ? { broll, local: sec - hit.shot.start, dur: hit.shot.end - hit.shot.start } : null;
+}
+
 /**
  * 全屏素材层：place=over 画全屏插入（盖在人像之上，人声继续），place=under 画画中画的底（人像小窗在其上）。
  * shots 为画面时间轴（visualShots 之后，全屏插入已晚 2 帧切入）；带字幕区柔和压暗
  */
 export const BrollLayer: React.FC<{ shots: Shot[]; sec: number; place: 'over' | 'under' }> = ({ shots, sec, place }) => {
-  const hit = shotAt(shots, sec);
-  const broll = hit?.shot.broll;
-  if (!hit || !broll || visualLayout(hit.shot) !== (place === 'over' ? 'broll' : 'pip')) return null;
+  const m = layerShot(shots, sec, place);
+  if (!m) return null;
   return (
     <AbsoluteFill>
-      <BrollMedia broll={broll} local={sec - hit.shot.start} dur={hit.shot.end - hit.shot.start} />
+      <BrollMedia broll={m.broll} local={m.local} dur={m.dur} />
       <AbsoluteFill style={{ background: CAPTION_SHADE }} />
     </AbsoluteFill>
   );

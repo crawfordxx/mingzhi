@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const onProgress = (e: ProgressEvent): void => {
     if (e.detail?.kind !== 'cost') console.log(`[${e.step}] ${e.message}`);
   };
-  const args = { input, workDir, output, cfg, llm, background, task, broll, meter, qa: !values['no-qa'], ...finish, onProgress };
+  const args = { input, workDir, output, cfg, llm, background, task, broll, meter, qa: !values['no-qa'], grain: true, ...finish, onProgress };
   const res = await runPipeline(args).catch((err: unknown) => {
     console.error(`已花费 ¥${meter.total.toFixed(2)}`);
     if (err instanceof InsufficientBalanceError) console.error(`请先到 ${RECHARGE_URL} 充值，再重新运行（重跑会重新付费：只有 B-roll 素材与封面底图有缓存，其余 AI 步骤会重新调用）`);

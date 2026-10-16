@@ -12,7 +12,7 @@ import type { RunState } from './runs.js';
 import { IMAGE_EXTS, looksLikeImage } from './upload.js';
 
 export const DEFAULT_BUDGET_YUAN = 10;
-export const DEFAULT_SETTINGS: SpaceSettings = { captionStyle: DEFAULT_CAPTION_STYLE, budgetYuan: DEFAULT_BUDGET_YUAN, broll: true, maxVideos: 1 };
+export const DEFAULT_SETTINGS: SpaceSettings = { captionStyle: DEFAULT_CAPTION_STYLE, budgetYuan: DEFAULT_BUDGET_YUAN, broll: true, maxVideos: 1, grain: true };
 export const DEFAULT_TITLE = '未命名项目';
 
 const ids = <T extends object>(o: T): [keyof T & string, ...(keyof T & string)[]] => Object.keys(o) as [keyof T & string, ...(keyof T & string)[]];
@@ -30,6 +30,7 @@ const SettingsPatch = z.object({
   budgetYuan: z.number().finite().min(0).max(1000).optional(),
   broll: z.boolean().optional(),
   maxVideos: z.number().int().min(0).max(10).optional(),
+  grain: z.boolean().optional(),
 }).strict();
 export type SettingsPatchInput = z.infer<typeof SettingsPatch>;
 

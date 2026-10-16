@@ -28,6 +28,8 @@ export const FULL_CLIP: PersonClip = { x: 0, y: 0, w: CANVAS.width, h: CANVAS.he
 
 /** 全屏插入的 J-cut：画面比声音晚几帧切入 */
 export const J_CUT_FRAMES = 2;
+/** 版式切换时人像的过渡时长（秒）；画中画退出时素材垫底也持续这么久 */
+export const LAYOUT_TRANSITION_SEC = 0.4;
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 /** 线性插值；两端相同直接返回（避免浮点误差让「不动」变成「微动」） */
@@ -110,6 +112,35 @@ export function visualShots(shots: Shot[]): Shot[] {
     const extend = next && jCuts(shots, i + 1) && Math.abs(s.end - next.start) < 1e-6 ? { end: next.start + delay } : {};
     return { ...s, ...late, ...extend };
   });
+}
+
+/**
+ * 字幕时钟：J-cut 的前 2 帧仍按切点前一刻取字幕（shots 为原始镜头），让字幕文字与位置跟画面在同一帧切换；其余时刻原样返回
+ */
+export function captionSec(shots: Shot[], sec: number): number {
+  const delay = J_CUT_FRAMES / CANVAS.fps;
+  const i = shots.findIndex((s, k) => jCuts(shots, k) && sec >= s.start && sec < s.start + delay);
+  return i < 0 ? sec : shots[i].start - 1e-9;
+}
+
+/**
+ * 画中画的素材底：当前镜头是画中画时画它自己；画中画之后的镜头（全屏插入除外，它自己铺满）在前 LAYOUT_TRANSITION_SEC 内
+ * 人像从小窗放大回去，继续用上一个画中画的素材垫底（镜头内时间接着走），不露米色底。shots 为画面时间轴
+ */
+export function underlayAt(shots: Shot[], sec: number): { shot: Shot; index: number; local: number; dur: number } | null {
+  const hit = shotAt(shots, sec);
+  if (!hit) return null;
+  const at = (index: number) => ({ shot: shots[index], index, local: sec - shots[index].start, dur: shots[index].end - shots[index].start });
+  const layout = visualLayout(hit.shot);
+  if (layout === 'pip') return at(hit.index);
+  const prev = shots[hit.index - 1];
+  const leaving = prev && visualLayout(prev) === 'pip' && layout !== 'broll' && sec - hit.shot.start < LAYOUT_TRANSITION_SEC;
+  return leaving ? at(hit.index - 1) : null;
+}
+
+/** 颗粒质感层是否开启：显式设置优先；未设置时（旧项目）只在分镜用到 B-roll 时开，旧片重渲画面不变 */
+export function grainOn(p: { shots: Shot[]; grain?: boolean }): boolean {
+  return p.grain ?? p.shots.some((s) => s.broll !== undefined);
 }
 
 // ---------- Ken Burns：起止裁框由主体焦点计算 ----------

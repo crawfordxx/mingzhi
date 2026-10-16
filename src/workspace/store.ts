@@ -14,6 +14,8 @@ export interface SpaceSettings {
   budgetYuan: number;
   broll: boolean;
   maxVideos: number;
+  /** 颗粒质感层；新项目默认开，旧项目没有这个字段时按「用到 B-roll 才开」（见 compose/layout 的 grainOn） */
+  grain?: boolean;
 }
 
 export interface VersionMeta {

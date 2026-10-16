@@ -226,7 +226,7 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
     onProgress: (done, total) => progress(total > 0 ? done / total : 1),
     props: {
       person: relative(workDir, c.person), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: c.subject,
-      captions: c.captions, shots: c.storyboard.shots, durationSec, ...audio.props,
+      captions: c.captions, shots: c.storyboard.shots, durationSec, ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
     },
   }).catch((err: unknown) => {
     rethrowIfCancelled(err);
