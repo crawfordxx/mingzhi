@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { THEME } from '../render/theme.js';
 import { hexOf, hslOf, rgbOfHex, type Rgb } from '../src/compose/color.js';
-import { DEFAULT_PALETTE, PaletteSchema, backdropTone, fitLightness, paletteFor } from '../src/compose/palette.js';
+import { DEFAULT_PALETTE, PaletteSchema, backdropTone, ctaIdle, fitLightness, paletteFor } from '../src/compose/palette.js';
 import { contrastRatio } from '../src/qa/contrast.js';
 import { defaultPalette, palettePairs } from '../src/qa/palette.js';
 import { backdropPixels, samplePalette } from '../src/compose/palette-sample.js';
@@ -153,5 +153,13 @@ describe('backdropPixels / samplePalette（真实 ffmpeg）', () => {
   });
   it('读不到画面时抛错', async () => {
     await expect(backdropPixels(cfg.ffmpeg, '/nonexistent/bg.png')).rejects.toThrow();
+  });
+});
+
+describe('ctaIdle', () => {
+  it('暗色片：未点胶囊是深色玻璃底 + 次文字色；亮色片沿用原白底灰字', () => {
+    const night = paletteFor(NIGHT);
+    expect(ctaIdle(night)).toMatchObject({ bg: night.glass.bg, fg: night.sub });
+    expect(ctaIdle(paletteFor(LIVING))).toMatchObject({ bg: THEME.cta.idle.bg, fg: THEME.cta.idle.fg });
   });
 });

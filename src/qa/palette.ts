@@ -1,7 +1,7 @@
 import { CAPTION_STYLES } from '../captions/styles.js';
 import { THEME } from '../../render/theme.js';
 import { blend, readableOn } from './contrast.js';
-import type { Palette } from '../compose/palette.js';
+import { ctaIdle, type Palette } from '../compose/palette.js';
 
 export interface PalettePair { fg: string; bg: string; label: string }
 
@@ -53,6 +53,12 @@ function glassPairs(): PalettePair[] {
   ];
 }
 
+/** CTA 未点胶囊（叠在人物画面上，按最不利的底合成） */
+function ctaIdlePair(p: Palette): [string, string, string][] {
+  const idle = ctaIdle(p);
+  return [[idle.fg, blend(idle.bg, idle.alpha, p.tone === 'dark' ? '#FFFFFF' : '#000000'), 'CTA 未点胶囊（叠最不利底）']];
+}
+
 /** 片色（背景推导出的卡片与钩子配色）里的文字/底色组合；玻璃卡按最不利的底（暗色卡叠白、亮色卡叠黑）合成后检查 */
 export function palettePairs(p: Palette): PalettePair[] {
   const glass = blend(p.glass.bg, p.glass.alpha, p.tone === 'dark' ? '#FFFFFF' : '#000000');
@@ -65,6 +71,8 @@ export function palettePairs(p: Palette): PalettePair[] {
     [p.maybe.fg, p.maybe.bg, 'maybe.fg/bg'],
     [p.hook.ink, p.hook.bg, '钩子标题 hook.ink/bg'], [p.hook.accent, p.hook.bg, '钩子强调 hook.accent/bg'], [p.hook.accentInk, p.hook.accent, '钩子胶囊 accentInk/accent'],
     [p.ink, glass, '玻璃卡 ink（叠最不利底）'],
+    ...(p.tone === 'dark' ? [[p.sub, glass, '玻璃卡 sub（叠白最不利）'] as [string, string, string]] : []),
+    ...ctaIdlePair(p),
   ];
   return pairs.map(([fg, bg, label]) => ({ fg, bg, label: `片色 ${label}` }));
 }

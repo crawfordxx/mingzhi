@@ -160,7 +160,7 @@ function darkOf(t: BackdropTone): Palette {
 /** 亮背景：带背景色调的暖白底 + 近白卡，文字与强调色往暗处调；语义色沿用原 THEME（白卡上已达标） */
 function lightOf(t: BackdropTone): Palette {
   const s = clamp(t.sat * 0.8 + 0.14, 0.1, 0.32);
-  const card = hsl(t.hue, 0.6, 0.993);
+  const card = hsl(t.hue, 0.7, 0.984);
   const stage = hsl(t.hue, s, 0.915);
   const inset = hsl(t.hue, s * 1.1, 0.95);
   const ink = hsl(t.hue, 0.12, 0.11);
@@ -177,6 +177,12 @@ function lightOf(t: BackdropTone): Palette {
     hook: hookOf(t),
     glass: { bg: glassBg, alpha: glassAlpha(glassBg, [ink], '#000000', 0.8), solidAlpha: 0.96 },
   };
+}
+
+/** CTA 未点胶囊（压在人物画面上）：亮色片沿用原白底灰字；暗色片是深色玻璃底 + 次文字色，与卡片同一套玻璃 */
+export function ctaIdle(p: Palette): { bg: string; alpha: number; fg: string; edge: string } {
+  if (p.tone !== 'dark') return { ...THEME.cta.idle, edge: 'none' };
+  return { bg: p.glass.bg, alpha: Math.max(p.glass.alpha, 0.86), fg: p.sub, edge: 'inset 0 0 0 1.5px rgba(255, 255, 255, 0.12)' };
 }
 
 /** 从背景像素（0–1，已套项目 LUT）推导整条片的配色 */
