@@ -30,6 +30,15 @@ function transcript() {
   });
 }
 
+/** 校对后的字幕：每个识别行一行，去掉被剪的字与标点，个别字按校对改写（演示「转录 · 已校对」） */
+function captionLines() {
+  const cut = new Set(CUTS.flatMap(([from, to]) => Array.from({ length: to - from + 1 }, (_, k) => from + k)));
+  return transcript().map((l) => {
+    const kept = l.tokens.filter((t, k) => !cut.has(l.from + k) && !/[，。、]/.test(t)).join('');
+    return { from: l.from, to: l.from + l.tokens.length - 1, text: kept.replace('六百五十条', '650 条') };
+  });
+}
+
 const cost = (at: number, total: number): Ev =>
   ({ at, step: 'probe', message: `已花费 ¥${total.toFixed(2)}`, detail: { kind: 'cost', data: { total, budget: 10 } } });
 const pct = (at: number, step: string, p: number): Ev =>
@@ -50,7 +59,7 @@ function firstScript(): Ev[] {
     { at: 1800, step: 'plan', message: '原片 3:42 → 成片 1:57' },
     { at: 2100, step: 'render', message: '剪切完成' }, { at: 2300, step: 'background', message: '背景：书房' },
     ...[20, 45, 70, 100].map((p, i) => pct(2600 + i * 600, 'matte', p)),
-    { at: 5200, step: 'captions', message: '41 行字幕' }, cost(5210, 0.74),
+    { at: 5200, step: 'captions', message: '41 行字幕', detail: { kind: 'captions', data: { lines: captionLines() } } }, cost(5210, 0.74),
     { at: 6000, step: 'storyboard', message: '18 个镜头 · 12 张卡片', detail: { kind: 'shot', data: { shots: SHOTS } } }, cost(6010, 0.86),
     { at: 7000, step: 'broll', message: '素材 3 个（截图 2 / 生图 1 / 视频 0）' }, cost(7010, 1.06),
     ...qa,
@@ -133,6 +142,7 @@ export function withRuns(base: Api, f: Find, spaces: Space[]): Api {
       return { reply, ops: [], options, version: version ?? 1 };
     },
     async apply(id, ops, _parent, summary) { return { ...enqueue(id, summary ?? '对话修改', ops), dropped: [] }; },
+    async chat() { return { turns: [] }; },
     async revert(id, n) { return enqueue(id, `回退到 v${n}`, []); },
     async cancel() { /* 演示数据不支持取消 */ },
     async exportVersion(_id, n) { return { dir: '~/Downloads/明知AI剪辑', files: [`~/Downloads/明知AI剪辑/演示-v${n}.mp4`] }; },

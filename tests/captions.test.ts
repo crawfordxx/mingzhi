@@ -116,6 +116,14 @@ describe('polishCaptions', () => {
     expect(calls[0].system).toContain(`${MAX_LINE_WIDTH}`);
     expect(calls[0].system).toContain('{"lines":["第一行","第二行"]}');
   });
+  it('提示词：口语约数（两三个小时）保持汉字原样，只在有明确单位的精确数值时用阿拉伯数字', async () => {
+    const { client, calls } = scripted({ lines: ['你好'] });
+    await polishCaptions(client, toks('你好'), [0, 1]);
+    expect(calls[0].system).toContain('两三个小时');
+    expect(calls[0].system).toContain('保持汉字原样');
+    expect(calls[0].system).toContain('不要写成「2、3 个小时」');
+    expect(calls[0].system).toContain('明确单位的精确数值');
+  });
   it('输入不带下标，只列保留的字，停顿超过 0.3 秒换行', async () => {
     const { client, calls } = scripted({ lines: ['一三四五'] });
     await polishCaptions(client, toks('一二三四五', 3), [0, 2, 3, 4]);

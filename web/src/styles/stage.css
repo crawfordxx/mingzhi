@@ -43,7 +43,7 @@
 
 .tw { position: absolute; background: var(--term); border-radius: 16px; box-shadow: var(--shadow-win); overflow: hidden; color: var(--term-1); z-index: 3; }
 .tw .titlebar { height: 30px; background: var(--term-bar); }
-.tw .titlebar .tt { color: var(--term-2); font: 400 12px/1 var(--mono); }
+.tw .titlebar .tt { color: var(--term-2); font: 400 12px/1 var(--mono); padding: 0 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tw-body { padding: 10px 14px 12px; font: 400 12px/1.8 var(--mono); white-space: pre-wrap; }
 .tw-body .cmd { text-indent: -1.4em; padding-left: 1.4em; }
 .tw-body .p { color: var(--brand-2); }

@@ -52,6 +52,8 @@ export interface QaCardsContext {
   signal?: AbortSignal;
   /** 只检查这些镜头序号的卡片；缺省全部 */
   only?: number[];
+  /** 只打分不重写的镜头（用户在对话里指定的卡片） */
+  keep?: number[];
 }
 
 /** 卡片自检：不达标的卡片重写；返回（可能被改写的）分镜并落盘。自检本身出错（余额不足除外）只记一条进度，沿用原分镜 */
@@ -60,7 +62,7 @@ export async function runQaCards(ctx: QaCardsContext, storyboard: Storyboard, ca
   try {
     res = await (ctx.qaCards ?? realQaCards)({
       client: ctx.llm, workDir: ctx.workDir, storyboard, captions, meter: ctx.meter, ffmpeg: ctx.ffmpeg, reserveYuan: ctx.reserveYuan,
-      signal: ctx.signal, onProgress: ctx.onProgress, ...(ctx.only ? { only: ctx.only } : {}),
+      signal: ctx.signal, onProgress: ctx.onProgress, ...(ctx.only ? { only: ctx.only } : {}), ...(ctx.keep ? { keep: ctx.keep } : {}),
     });
   } catch (err) {
     rethrowIfBalance(err);

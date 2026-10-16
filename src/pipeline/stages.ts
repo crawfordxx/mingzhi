@@ -147,8 +147,9 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   const cards = res.storyboard.shots.filter((s) => s.card).length;
   const dropped = res.dropped > 0 ? ` · 丢弃 ${res.dropped} 个不合格镜头` : '';
   const retry = res.retryError ? ` · 重试失败（已用首次结果）：${res.retryError}` : '';
+  const facts = res.unsupported.length > 0 ? ` · 去掉 ${res.unsupported.length} 处口播里没有的数字（${res.unsupported.join('、')}）` : '';
   const patch = { storyboard: res.storyboard, storyboardDropped: res.dropped, storyboardDemoted: res.demoted, storyboardCapped: res.capped };
-  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${retry}`, patch);
+  complete('storyboard', `${res.storyboard.shots.length} 个镜头 · ${cards} 张卡片${dropped}${facts}${retry}`, patch);
   return res.storyboard;
 }
 
@@ -167,16 +168,16 @@ export function brollStage(
   return runBroll({ ...args, workDir: brollDir, reserveYuan: coverReserve(args), ...(deferShots ? { deferShots } : {}) }, storyboard, durationSec, complete);
 }
 
-/** 卡片自检（args.qa 为 false 时跳过）；only 给出时只检查这些镜头 */
+/** 卡片自检（args.qa 为 false 时跳过）；only 给出时只检查这些镜头；keep 里的镜头只打分不重写 */
 export async function qaCardsStage(
-  args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], complete: Complete, only?: number[],
+  args: PipelineArgs, meter: CostMeter, storyboard: Storyboard, captions: TimedCaption[], complete: Complete, only?: number[], keep?: number[],
 ): Promise<{ storyboard: Storyboard; cards: CardQaEntry[] }> {
   if (args.qa === false) return { storyboard, cards: [] };
   const onProgress = (message: string, info?: { shotIndex: number; attempt: number; score: CardScore; passed: boolean }): void =>
     args.onProgress?.({ step: 'qa-cards', message, ...(info ? { detail: cardScoreDetail(info.shotIndex, info.score, info.passed, info.attempt) } : {}) });
   const ctx = {
     llm: args.llm, workDir: args.workDir, meter, ffmpeg: args.cfg.ffmpeg, reserveYuan: coverReserve(args), signal: args.signal,
-    qaCards: args.qaDeps?.qaCards, onProgress, ...(only ? { only } : {}),
+    qaCards: args.qaDeps?.qaCards, onProgress, ...(only ? { only } : {}), ...(keep?.length ? { keep } : {}),
   };
   const res = await runQaCards(ctx, storyboard, captions, complete);
   return { storyboard: res.storyboard, cards: res.report };

@@ -32,7 +32,7 @@ const STORYBOARD = { bgm: 'tech', coverTitle: { title: '怎么存钱', subtitle:
 
 export interface Calls {
   llm: string[]; renderCut: unknown[][]; matte: string[]; composite: { bg: string; keep: unknown; cut: string; fgr: string; matte: string }[]; segments: string[]; concat: string[][]; cutInputs: string[]; audio: number;
-  qaOnly: (number[] | undefined)[]; hard: string[]; covers: { style: string; workDir: string }[]; images: string[]; videos: string[];
+  qaOnly: (number[] | undefined)[]; qaKeep: (number[] | undefined)[]; hard: string[]; covers: { style: string; workDir: string }[]; images: string[]; videos: string[];
 }
 
 const json = (file: string): Record<string, unknown> => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
@@ -91,6 +91,7 @@ function fakeMedia(calls: Calls, hooks: Hooks): Partial<MediaDeps> {
 const fakeQa = (calls: Calls): QaDeps => ({
   qaCards: async (o) => {
     calls.qaOnly.push(o.only);
+    calls.qaKeep.push(o.keep);
     const targets = o.storyboard.shots.flatMap((s, i) => (s.layout === 'split' && s.card && (!o.only || o.only.includes(i)) ? [i] : []));
     const score = { layout: 9, hierarchy: 8, motion: 8, brand: 9, notes: '无' };
     return { storyboard: o.storyboard, report: targets.map((shotIndex) => ({ shotIndex, scores: [score], revised: 0, passed: true })) };
@@ -124,7 +125,7 @@ export interface Fixture { ctx: RunnerCtx; store: SpaceStore; spaceId: string; c
 
 export const DEFAULT_SETTINGS: SpaceSettings = { background: { kind: 'preset', id: 'study' }, captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 1 };
 
-const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], concat: [], cutInputs: [], audio: 0, qaOnly: [], hard: [], covers: [], images: [], videos: [] });
+const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], concat: [], cutInputs: [], audio: 0, qaOnly: [], qaKeep: [], hard: [], covers: [], images: [], videos: [] });
 
 /** 建一个临时项目与全部假依赖；reset() 清空调用记录（在 v1 跑完之后调用，只看修改版本做了什么） */
 export function makeFixture(settings: Partial<SpaceSettings> = {}, inputSecs: number[] = [SOURCE_SEC]): Fixture {

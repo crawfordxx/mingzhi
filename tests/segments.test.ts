@@ -107,19 +107,31 @@ describe('盐值（素材与渲染代码指纹）', () => {
     write('fonts/f.ttf', 'font-v1');
   });
 
-  it('B-roll 图片内容变：该镜头及相邻镜头（i±1，进出场相邻）变，不相邻镜头不变；mtime 变而内容不变则不变', async () => {
+  it('B-roll 图片内容变：只有画面里出现这张图的镜头变（相邻镜头不显示它，不变）；mtime 变而内容不变则不变', async () => {
     const base = await hashes();
     write('broll/a.png', 'img-v1', 1_800_000_000);
     expect(changed(await hashes(), base)).toEqual([false, false, false, false]);
     write('broll/a.png', 'img-v2');
-    expect(changed(await hashes(), base)).toEqual([true, true, true, false]);
+    expect(changed(await hashes(), base)).toEqual([false, true, false, false]);
     write('broll/a.png', 'img-v1');
   });
   it('图片同名同大小同 mtime 但内容不同也能识别', async () => {
     const base = await hashes();
     write('broll/a.png', 'img-XX');
-    expect(changed(await hashes(), base)).toEqual([true, true, true, false]);
+    expect(changed(await hashes(), base)).toEqual([false, true, false, false]);
     write('broll/a.png', 'img-v1');
+  });
+  it('镜头边界不在整帧上、段首的帧还属于前一个镜头时，前一个镜头的素材也进本段指纹', async () => {
+    // 第 2 镜从 2.01 秒开始：第 2 段从第 60 帧（2.0 秒）起，这一帧仍是第 1 镜（带图）
+    const odd: TalkProps = { ...props, shots: SHOTS4.map((s, i) => (i === 1 ? { ...s, end: 2.01 } : i === 2 ? { ...s, start: 2.01 } : s)) };
+    expect(segmentBounds(odd.shots, odd.durationSec)[2]).toEqual({ start: 60, end: 90 });
+    const sl = await salts(odd, 'c');
+    expect(sl.map((x) => x.includes('broll/a.png'))).toEqual([false, true, true, false]);
+  });
+  it('换掉一个镜头的卡片（新卡片带图）：前后镜头的哈希不变（v1→v2 差异标记误报）', async () => {
+    const base = await hashes();
+    const next: TalkProps = { ...props, shots: SHOTS4.map((s, i) => (i === 2 ? { ...s, card: photo('broll/a.png') } : s)) };
+    expect(changed(await hashes(next), base)).toEqual([false, false, true, false]);
   });
   it('人像文件内容变：所有镜头变', async () => {
     const base = await hashes();

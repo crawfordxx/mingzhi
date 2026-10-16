@@ -70,7 +70,7 @@ function makeEnv(ctx: RunnerCtx, space: Space, n: number): VersionEnv {
   const { llm, task } = ctx.clients(meter);
   const record = projectRecorder(join(dir, 'project.json'), space.inputs[0] ?? '');
   const emit = (e: ProgressEvent): void => { ctx.bus.publish(toWorkEvent(space.id, n, e)); };
-  const complete = makeComplete({ record, meter, onProgress: emit, signal: ctx.signal });
+  const complete = makeComplete({ record, meter, onProgress: emit, signal: ctx.signal, capYuan: space.settings.budgetYuan });
   return { ctx, space, n, base: ctx.store.baseDir(space.id), dir, meter, llm, ...(task ? { task } : {}), record, complete, emit };
 }
 

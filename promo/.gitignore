@@ -1,0 +1,8 @@
+# 成片与预告（是否入库由控制者决定，先不提交）
+out/
+# 渲染缓存、中间文件、依赖
+film/node_modules/
+film/build/
+film/gen/
+storyboard/gen/*.png
+*.part

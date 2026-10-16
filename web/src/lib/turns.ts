@@ -1,7 +1,7 @@
 /**
- * 对话记录：服务端不存对话（只存版本），这里按项目存在本机浏览器里，刷新后还能看到。
- * 读出来的每一条都过结构校验（旧格式、手改、别的扩展写入的坏数据直接丢掉，不让页面白屏）；
- * 读写都包 try/catch：隐私模式或存储被禁时退化为只在内存里。
+ * 对话记录：服务端按项目存（<space>/chat.jsonl，GET /api/spaces/:id/chat），换浏览器、清缓存后照样在；
+ * 本机只在内存里放还在等回复、正在执行的条目，与服务端的合并（mergeTurns）。
+ * 服务端返回的每一条都过结构校验（坏数据直接丢掉，不让页面白屏）。
  */
 import type { EditOp, EditOption } from '../api';
 
@@ -22,8 +22,6 @@ export interface AiTurn {
 }
 export type Turn = UserTurn | AiTurn;
 
-const KEY = (spaceId: string) => `mingzhi.turns.${spaceId}`;
-const MAX_TURNS = 200;
 
 type Raw = Record<string, unknown>;
 const isObj = (v: unknown): v is Raw => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -60,21 +58,22 @@ function settle(t: Turn): Turn {
   return t;
 }
 
-export function loadTurns(spaceId: string): Turn[] {
-  try {
-    const raw = window.localStorage.getItem(KEY(spaceId));
-    return raw ? sanitizeTurns(JSON.parse(raw)) : [];
-  } catch {
-    return [];
-  }
+/** 还在等回复或正在执行（服务端还没有结果） */
+const inFlight = (t: Turn): boolean => t.kind === 'ai' && (!!t.pending || !!t.applying);
+
+/** 合并：以服务端为准；本机在途的条目保留本机的样子；服务端还没有的本机条目按时间接上 */
+export function mergeTurns(server: readonly Turn[], local: readonly Turn[]): Turn[] {
+  const mine = new Map(local.map((t) => [t.id, t]));
+  const known = new Set(server.map((t) => t.id));
+  const merged = server.map((t) => { const l = mine.get(t.id); return l && inFlight(l) ? l : t; });
+  return [...merged, ...local.filter((t) => !known.has(t.id))].sort((a, b) => a.at - b.at);
 }
 
-export function saveTurns(spaceId: string, turns: readonly Turn[]): void {
-  try {
-    window.localStorage.setItem(KEY(spaceId), JSON.stringify(turns.slice(-MAX_TURNS)));
-  } catch {
-    /* 存不下就只留在内存里 */
-  }
+/** 版本卡上「触发它的那句话」：执行出第 n 版的回复前面那句用户的话 */
+export function saidFor(turns: readonly Turn[], n: number): string | undefined {
+  const at = turns.findIndex((t) => t.kind === 'ai' && t.applied === n);
+  const user = turns.slice(0, Math.max(0, at)).reverse().find((t): t is UserTurn => t.kind === 'user');
+  return at >= 0 ? user?.message : undefined;
 }
 
 export const newId = (): string => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;

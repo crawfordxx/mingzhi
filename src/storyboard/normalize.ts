@@ -1,4 +1,5 @@
 import type { Mood } from '../assets/catalog.js';
+import { unifyListNumbering } from './numbering.js';
 import { CANVAS, CoverTitleSchema, DEFAULT_MOOD, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, MOODS, ShotSchema, type CardSpec, type CoverTitle, type Shot, type Storyboard } from './schema.js';
 
 export interface NormalizeResult {
@@ -217,7 +218,7 @@ function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle'> {
   return { bgm: readMood(raw), ...(coverTitle ? { coverTitle } : {}) };
 }
 
-/** 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜 */
+/** 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜；同一组列表卡的编号统一（要么都编号要么都不编号） */
 export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[]): NormalizeResult {
   if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error(`分镜归一化失败：片长无效（${durationSec}）`);
   const items = (raw as { shots?: unknown } | null)?.shots;
@@ -230,7 +231,7 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
   const { placed, dropped: overlapDropped } = clampAndResolve(usable, durationSec);
   const { shots: capped, capped: cappedCount } = capLongShots(extendCta(placed, durationSec));
   const merged = mergePlain(applyPlacementRules(mergeShort(fillGaps(capped, durationSec))));
-  const shots = snapToFrames(ensureCtaRoom(merged), durationSec);
+  const shots = unifyListNumbering(snapToFrames(ensureCtaRoom(merged), durationSec));
 
   return {
     storyboard: { shots, ...extras },

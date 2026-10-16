@@ -45,4 +45,9 @@ describe('剪辑直播视图', () => {
     expect(reduceLive([...events, e(9000, 'done', '/x/final.mp4')])).toMatchObject({ status: 'done', t1: 9000 });
     expect(reduceLive([e(0, 'probe', 'a'), e(1, 'failed', '已取消')])).toMatchObject({ status: 'failed', error: '已取消' });
   });
+  it('字幕校对完成后带上校对后的字幕行（转录据此显示校对后的文字）', () => {
+    const v = reduceLive([...events, e(5000, 'captions', '2 行字幕', { kind: 'captions', data: { lines: [{ from: 1, to: 2, text: '我们' }] } })]);
+    expect(v.captions).toEqual([{ from: 1, to: 2, text: '我们' }]);
+    expect(reduceLive(events).captions).toEqual([]);
+  });
 });

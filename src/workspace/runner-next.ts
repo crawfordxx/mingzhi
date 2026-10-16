@@ -132,11 +132,17 @@ function changedShots(parent: VersionState, storyboard: Storyboard): number[] {
   return changedAgainst(parentCards, cards);
 }
 
+/** 用户在对话里直接换上的卡片（replaceCard）所在的镜头：自检只打分不重写，免得换掉用户要的模板和文字 */
+function userCards(ops: EditOp[], storyboard: Storyboard, changed: number[]): number[] {
+  const wanted = ops.flatMap((o) => (o.type === 'replaceCard' ? [o] : []));
+  return changed.filter((i) => wanted.some((o) => o.shotIndex === i && storyboard.shots[i]?.card?.template === o.card.template));
+}
+
 /** 卡片自检只查父版本里没有的卡片 */
-function checkChanged(env: VersionEnv, args: PipelineArgs, parent: VersionState, m: Made): Promise<{ storyboard: Storyboard; cards: CardQaEntry[] }> {
+function checkChanged(env: VersionEnv, args: PipelineArgs, parent: VersionState, c: Change, m: Made): Promise<{ storyboard: Storyboard; cards: CardQaEntry[] }> {
   const changed = changedShots(parent, m.storyboard);
   if (changed.length === 0) return Promise.resolve({ storyboard: m.storyboard, cards: [] });
-  return qaCardsStage(args, env.meter, m.storyboard, m.captions, env.complete, changed);
+  return qaCardsStage(args, env.meter, m.storyboard, m.captions, env.complete, changed, userCards(c.ops, m.storyboard, changed));
 }
 
 interface Rendered { changed: number[]; hashes?: string[] }
@@ -180,7 +186,7 @@ export async function produceNext(env: VersionEnv, input: string, parentN: numbe
   const args = pipelineArgs(env, input, c.next, c.newCover ? { style: c.next.coverStyle } : false);
   validateNext(args, c, p.state);
   const made = await remake(env, args, p, c);
-  const { storyboard, cards } = await checkChanged(env, args, p.state, made);
+  const { storyboard, cards } = await checkChanged(env, args, p.state, c, made);
   const m = { ...made, storyboard };
   const rendered = await render(env, args, p, c, m);
   await finalQaStage(args, join(env.dir, FINAL_FILE), storyboard, cards, env.complete);

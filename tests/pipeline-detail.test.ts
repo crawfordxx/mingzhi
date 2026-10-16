@@ -9,7 +9,7 @@ import type { Cut } from '../src/cut/llm-cuts.js';
 import type { Storyboard } from '../src/storyboard/schema.js';
 import type { CardQaEntry } from '../src/qa/visual.js';
 import type { ProjectFile } from '../src/pipeline/project.js';
-import { cardsDetail, detailOfStep, cardScoreDetail, costDetail, cutsDetail, hardDetail, progressDetail, shotsDetail, transcriptDetail } from '../src/pipeline/detail.js';
+import { captionsDetail, cardsDetail, detailOfStep, cardScoreDetail, costDetail, cutsDetail, hardDetail, progressDetail, shotsDetail, transcriptDetail } from '../src/pipeline/detail.js';
 import { runPipeline, throttledMatteProgress, throttledRenderProgress, type ProgressEvent } from '../src/pipeline/run.js';
 import { hasModels } from './helpers/models.js';
 
@@ -79,6 +79,13 @@ describe('进度明细', () => {
     expect(detailOfStep('broll', { storyboard: { shots: [{ start: 0, end: 3, layout: 'full' }] } }, project)?.kind).toBe('shot');
     expect(detailOfStep('broll', {}, project)).toBeUndefined();
     expect(detailOfStep('plan', {}, project)).toBeUndefined();
+    expect(detailOfStep('captions', { captionLines: [{ from: 0, to: 2, text: '你好' }] }, project)?.kind).toBe('captions');
+  });
+
+  it('captions：校对后的字幕行与它覆盖的 token 区间（直播转录据此显示校对后的文字、标出被剪的词）', () => {
+    expect(captionsDetail([{ from: 0, to: 3, text: '大家好' }, { from: 5, to: 9, text: '今天聊聊' }])).toEqual({
+      kind: 'captions', data: { lines: [{ from: 0, to: 3, text: '大家好' }, { from: 5, to: 9, text: '今天聊聊' }] },
+    });
   });
 
   it('节流进度回调带上 progress 明细，消息文本不变', () => {

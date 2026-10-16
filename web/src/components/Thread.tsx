@@ -7,7 +7,7 @@ import { useEffect, type RefObject } from 'react';
 import type { Options, Space, VersionMeta, VersionState } from '../api';
 import type { ShotInfo } from '../lib/liveModel';
 import { splitMessage } from '../lib/shots';
-import type { AiTurn, Turn } from '../lib/turns';
+import { saidFor, type AiTurn, type Turn } from '../lib/turns';
 import { reduceLive } from '../lib/liveModel';
 import { isFirst } from '../lib/versions';
 import type { Replay } from '../live';
@@ -102,6 +102,7 @@ export function Thread({ space, options, runs, convo, replay, stream, onSeek, li
 
   const versionItem = (meta: VersionMeta) => (meta.status === 'done'
     ? <VersionCard spaceId={space.id} thumbSec={thumbSecOf(meta, runs.stateOf(meta.n)?.storyboard.shots)} meta={meta}
+        said={isFirst(meta) ? undefined : saidFor(convo.turns, meta.n) ?? meta.summary}
         parent={meta.parent !== undefined ? done.find((v) => v.n === meta.parent) : undefined} totalShots={runs.stateOf(meta.n)?.storyboard.shots.length}
         events={runs.eventsOf(meta.n)} viewing={runs.view === meta.n} latest={meta.n === latest} exporting={runs.exporting === meta.n} busy={busy}
         onView={() => runs.setView(meta.n)} onExport={() => void runs.exportVersion(meta.n)} onRevert={() => void runs.revert(meta.n)} />

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Storyboard Overview</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@1,300&family=Press+Start+2P&display=block" rel="stylesheet">
+<style>
+:root{--ink:#1b1206;--b1:#d6dff5;--b5:#3361cc;--b6:#294ea3;--hero:#014DF9;--t2:#000000b3;--t3:#0000008f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:2000px;background:#f7f7f7;font-family:-apple-system,'PingFang SC',system-ui,sans-serif;color:#111;padding:48px 48px 40px}
+header{display:flex;align-items:flex-end;gap:24px;margin-bottom:30px}
+header h1{font:600 34px/1 -apple-system,'PingFang SC'}
+header h1 em{font:300 italic 30px/1 'IBM Plex Serif';color:var(--t2);margin-left:8px}
+header .m{margin-left:auto;font:13px/1.6 'Press Start 2P';color:var(--b6);text-align:right}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.c{background:#fff;outline:3px solid var(--ink);outline-offset:-3px;padding:10px 10px 14px}
+.c img{display:block;width:100%;aspect-ratio:16/9}
+.c .l{display:flex;align-items:baseline;gap:10px;margin-top:12px;padding:0 4px;white-space:nowrap}
+.c .n{font:13px/1 'Press Start 2P';color:#fff;background:var(--ink);padding:6px 7px 5px}
+.c .t{font:500 15px/1 'IBM Plex Mono';color:var(--b6)}
+.c .name{font:600 18px/1 -apple-system,'PingFang SC'}
+.c .cam{margin-left:auto;font:13px/1 'IBM Plex Mono';color:var(--t3)}
+.c .d{margin-top:8px;padding:0 4px;font:14px/1.45 -apple-system,'PingFang SC';color:var(--t2)}
+.c.climax{outline-color:var(--hero);box-shadow:0 0 0 6px var(--b1)}
+.extra{padding:22px 24px}
+.extra h6{font:13px/1 'Press Start 2P';color:var(--b5);font-weight:400;margin-bottom:16px}
+.sw{display:flex;height:40px;outline:3px solid var(--ink);outline-offset:-3px}.sw i{flex:1}
+.swl{display:flex;margin-top:8px}.swl span{flex:1;font:11px/1.35 'IBM Plex Mono';color:var(--t2)}.swl b{display:block;font:500 12px/1.3 -apple-system,'PingFang SC';color:#111}
+svg text{font-family:'IBM Plex Mono'}
+</style>
+</head>
+<body>
+<header>
+  <h1>明知AI剪辑 · 发布片分镜<em>(Pixel Side-Scroller · storyboard v1)</em></h1>
+  <div class="m">16:9 · 1920×1080 · 30FPS<br>53.0S · 14 SHOTS · CLIMAX @ 41.5S</div>
+</header>
+<div class="grid" id="g"></div>
+<script>
+const S=[
+ ['01','0.0–3.0','标志降采样','远景 1x · 静','logo 矢量一步步降到 24×22 格，像素小象诞生'],
+ ['02','3.0–6.5','1-1 原片开局','全景 1x→1.06','灰色原片关卡，地面是音频波形；小象落地'],
+ ['03','6.5–10.0','转录铺路','中景 1.5x · 跟','波形砖翻成字幕砖；本机识别，音频不出本机'],
+ ['04','10.0–13.5','踩口误','全景 1x · 跟','跳跃弧，踩扁「他就」；下一只「呃」在右侧'],
+ ['05','13.5–16.5','合缝','近景 2x · punch','「呃」被剪，地砖自己合缝；2:12 → 2:02'],
+ ['06','16.5–21.0','换背景传送门','全景 1x · 静','9:16 浮窗当传送门，10 种预设滚动；穿过即上色'],
+ ['07','21.0–25.0','分镜卡升级','全景 1x · 平移','顶出分镜卡，飞进 9:16：上卡下人'],
+ ['08','25.0–27.5','呼吸字卡','全景 1x · 静','不是剪辑软件。没有时间线，没有轨道'],
+ ['09','27.5–32.5','一句话','全景 1x · 打字锁机','RPG 对话框逐字输入「@00:29 这张卡太弱了」'],
+ ['10','32.5–35.5','只重渲一段','全景 1x · 静','14 段里只有 1 段亮起重渲，其余复用'],
+ ['11','35.5–39.0','存档 v2','全景 1x · 平移','存档旗升起 v2；双版本并排，只有 1 段不同'],
+ ['12','39.0–44.5','成片通关','3D dolly 推近','走进影院，成片在银幕上放映（全片高潮）'],
+ ['13','44.5–48.0','结算格','全景 1x · 静','样片成绩单：只用真实数字'],
+ ['14','48.0–53.0','片尾','全景 1x · hold','像素回到矢量 logo；finished cut. + GitHub + MIT'],
+];
+const g=document.getElementById('g');
+S.forEach(([n,t,name,cam,d])=>{g.insertAdjacentHTML('beforeend',`<div class="c ${n==='12'?'climax':''}"><img src="S${n}.png"><div class="l"><span class="n">S${n}</span><span class="name">${name}</span><span class="t">${t}s</span><span class="cam">${cam}</span></div><div class="d">${d}</div></div>`);});
+const sw=[['#014DF9','logo 电光蓝'],['#3361cc','品牌蓝'],['#d6dff5','浅蓝'],['#1b1206','像素墨'],['#c8402a','口误红'],['#e9c77a','午后光'],['#9a9ea6','原片灰'],['#ffffff','成片白']];
+g.insertAdjacentHTML('beforeend',`<div class="c extra"><h6>PALETTE</h6><div class="sw">${sw.map(s=>`<i style="background:${s[0]}"></i>`).join('')}</div><div class="swl">${sw.map(s=>`<span><b>${s[1]}</b>${s[0].slice(1)}</span>`).join('')}</div>
+<h6 style="margin-top:26px">GRID</h6><div style="font:14px/1.6 -apple-system,'PingFang SC';color:rgba(0,0,0,.7)">精灵 / 地砖 / UI 像素：6px 一格（320×180 逻辑分辨率）<br>油画世界：8px 一格（原片态 16px）<br>变焦只用 1x / 1.5x / 2x，像素永远落在整数屏幕像素上</div></div>`);
+// 情绪曲线
+const pts=[[0,30],[3,26],[6.5,34],[10,48],[13.5,58],[16.5,52],[21,66],[25,60],[27.5,30],[32.5,62],[35.5,70],[39,78],[41.5,96],[44.5,74],[48,62],[53,44]];
+const W=440,H=210, x=v=>20+v/53*(W-40), y=v=>H-20-v/100*(H-50);
+const path=pts.map((p,i)=>(i?'L':'M')+x(p[0]).toFixed(1)+' '+y(p[1]).toFixed(1)).join(' ');
+g.insertAdjacentHTML('beforeend',`<div class="c extra"><h6>ENERGY ARC</h6><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+<line x1="20" y1="${H-20}" x2="${W-20}" y2="${H-20}" stroke="#1b1206" stroke-width="2"/>
+${[[0,'开场'],[6.5,'原片'],[16.5,'上色'],[25,'呼吸'],[27.5,'一句话'],[39,'通关'],[48,'片尾']].map(([t,l])=>`<line x1="${x(t)}" y1="${H-20}" x2="${x(t)}" y2="${H-14}" stroke="#1b1206" stroke-width="2"/><text x="${x(t)}" y="${H-2}" font-size="11" text-anchor="middle" fill="#666">${l}</text>`).join('')}
+<path d="${path}" fill="none" stroke="#014DF9" stroke-width="4" stroke-linejoin="round"/>
+<circle cx="${x(41.5)}" cy="${y(96)}" r="7" fill="#014DF9"/><text x="${x(41.5)-8}" y="${y(96)-12}" font-size="12" text-anchor="end" fill="#014DF9">climax 41.5s</text>
+</svg></div>`);
+Promise.all([...document.images].map(i=>i.complete?1:new Promise(r=>{i.onload=i.onerror=r;}))).then(()=>document.fonts.ready).then(()=>document.body.dataset.ready='1');
+</script>
+</body>
+</html>

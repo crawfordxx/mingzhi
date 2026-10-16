@@ -2,6 +2,7 @@ import type { TimedCaption } from '../captions/lines.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { CardScore } from '../qa/visual.js';
 import { CATALOG } from './catalog.js';
+import { checkCardFacts } from './facts.js';
 import { STORYBOARD_MODEL } from './generate.js';
 import { normalizeStoryboard } from './normalize.js';
 import { CardSpecSchema, type CardSpec, type Shot } from './schema.js';
@@ -14,7 +15,7 @@ const SYSTEM_PROMPT = `你是短视频口播的分镜导演。上半屏的一张
 
 规则：
 1. 可以换用更合适的模板，也可以在原模板上改字段；针对评语指出的问题修改（溢出就缩短文字或减少条目，层级不清就提炼重点，等等）。
-2. 卡片文字是提炼后的信息，不要照抄字幕；数字、专名与字幕保持一致，不要编造字幕里没有的数据。
+2. 卡片文字是提炼后的信息，不要照抄字幕；数字、专名与字幕保持一致。不要写口播里没有的数字（百分比、倍数、时长、金额都算），程序会核对，口播里找不到的数字会被删掉。
 3. 每个字段严格遵守下面写明的长度上限，超出会被丢弃。
 4. 原卡片是 hook 时新卡片仍用 hook，并保留 index、total；原卡片不是 hook 时不要用 hook；不要用 cta。
 5. image、video 只能填「可用素材」里的文件名，不要编造；没有合适素材就不要写。本次重写不能申请新素材，忽略模板目录里的 visual 字段。
@@ -50,10 +51,12 @@ function sanitize(card: CardSpec, durationSec: number, images: string[]): CardSp
 }
 
 /**
- * 把评语与该镜头字幕交给分镜模型，返回重写后的卡片（可换模板，镜头仍是分屏）。
+ * 把评语与该镜头字幕交给分镜模型，返回重写后的卡片（可换模板，镜头仍是分屏）。卡片数字按整条口播（allCaptions，缺省用本镜头字幕）核对，编造的字段去掉。
  * 模型返回不合模式、换成不允许的模板（cta、非 hook 镜头变 hook、hook 镜头换模板）或素材不可用被丢弃时返回 null；请求本身失败会抛出。
  */
-export async function reviseCard(client: LlmClient, shot: Shot, captionsInShot: TimedCaption[], score: CardScore, availableImages: string[] = []): Promise<CardSpec | null> {
+export async function reviseCard(
+  client: LlmClient, shot: Shot, captionsInShot: TimedCaption[], score: CardScore, availableImages: string[] = [], allCaptions: TimedCaption[] = captionsInShot,
+): Promise<CardSpec | null> {
   const old = shot.card;
   if (!old) return null;
   const raw = await client.chatJson({
@@ -62,7 +65,8 @@ export async function reviseCard(client: LlmClient, shot: Shot, captionsInShot: 
   });
   const parsed = CardSpecSchema.safeParse((raw as { card?: unknown } | null)?.card);
   if (!parsed.success || parsed.data.template === 'cta') return null;
-  if ((parsed.data.template === 'hook') !== (old.template === 'hook')) return null;
-  const clean = sanitize(withoutVisual(parsed.data), shot.end - shot.start, availableImages);
+  const checked = checkCardFacts(parsed.data, allCaptions.map((c) => c.text).join(' ')).card;
+  if (!checked || (checked.template === 'hook') !== (old.template === 'hook')) return null;
+  const clean = sanitize(withoutVisual(checked), shot.end - shot.start, availableImages);
   return clean ? keepHookNumbering(clean, old) : null;
 }

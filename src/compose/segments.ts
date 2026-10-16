@@ -108,9 +108,18 @@ function shotMedia(shot: Shot | undefined): string[] {
   return [p.image, p.video].filter((v): v is string => typeof v === 'string');
 }
 
-/** 第 i 段的盐值：渲染代码 + 人像与字幕字体的内容 + 本镜头及前后相邻镜头引用的素材内容 */
-export async function segmentSalt(stamper: Stamper, props: TalkProps, i: number): Promise<string> {
-  const media = [-1, 0, 1].flatMap((d) => shotMedia(props.shots[i + d]));
+/** 本段帧区间里实际出现的镜头序号（卡片层每帧只画当前镜头，所以只有这些镜头的素材会进画面） */
+function shotsInRange(shots: Shot[], range: FrameRange): number[] {
+  const secs = Array.from({ length: Math.max(0, range.end - range.start) }, (_, k) => (range.start + k) / CANVAS.fps);
+  return [...new Set(secs.map((sec) => shotAt(shots, sec)?.index ?? -1).filter((i) => i >= 0))];
+}
+
+/**
+ * 第 i 段的盐值：渲染代码 + 人像与字幕字体的内容 + 本段画面里出现的镜头引用的素材内容。
+ * 只看本段帧里实际出现的镜头：相邻镜头换了带图的卡片不会让本段被误判为改动（镜头边界不在整帧上时，段边缘的帧属于相邻镜头，照样计入）
+ */
+export async function segmentSalt(stamper: Stamper, props: TalkProps, i: number, range: FrameRange = segmentBounds(props.shots, props.durationSec)[i]): Promise<string> {
+  const media = shotsInRange(props.shots, range).flatMap((k) => shotMedia(props.shots[k]));
   const fonts = props.captionFontFile ? `fonts/${props.captionFontFile}` : undefined;
   const files = await Promise.all([props.person, fonts, ...media].map((n) => stamper.file(n)));
   return [stamper.code, ...files].join('|');
@@ -186,7 +195,7 @@ export async function renderSegmented(opts: SegmentedOptions): Promise<Segmented
   mkdirSync(cacheDir, { recursive: true });
   const stamper = createStamper(workDir);
   const plan = await Promise.all(segmentBounds(shots, props.durationSec).map(async (range, i) => {
-    const salt = await segmentSalt(stamper, props, i);
+    const salt = await segmentSalt(stamper, props, i, range);
     const hash = shotHash(shots[i], rest, i, { shots, range, salt });
     return { range, i, hash, file: join(cacheDir, `${hash}.mp4`) };
   }));

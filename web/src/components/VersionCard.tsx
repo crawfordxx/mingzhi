@@ -6,11 +6,14 @@ import { motion } from 'motion/react';
 import { useRef } from 'react';
 import { mediaUrl, type VersionMeta, type WorkEvent } from '../api';
 import { fmtDuration, yuan } from '../lib/media';
+import { mmss, splitMessage } from '../lib/shots';
 import { changedLabel, isFirst } from '../lib/versions';
 import { Ico, It, SOFT, Tap } from '../ui';
 
 interface Props {
   spaceId: string;
+  /** 触发这一版的那句话（对话里说的；回退等没有对话的用版本摘要） */
+  said?: string;
   /** 缩略停在哪一秒（改动的那张卡已入场的时刻） */
   thumbSec: number;
   meta: VersionMeta;
@@ -45,7 +48,18 @@ function Thumb({ spaceId, n, at }: { spaceId: string; n: number; at: number }) {
   );
 }
 
-export function VersionCard({ spaceId, thumbSec, meta, parent, totalShots, events, viewing, latest, exporting, busy, onView, onExport, onRevert }: Props) {
+/** 触发这一版的那句话：@ 引用画成小胶囊，正文最多两行 */
+function Said({ text }: { text: string }) {
+  const { refs, text: rest } = splitMessage(text);
+  return (
+    <p className="ver-said" title={text}>
+      {refs.map((r) => <span key={`${r.sec}${r.label}`} className="hl ref sm">@{mmss(r.sec)}{r.label ? <span className="ref-nm">{r.label}</span> : null}</span>)}
+      {rest}
+    </p>
+  );
+}
+
+export function VersionCard({ spaceId, said, thumbSec, meta, parent, totalShots, events, viewing, latest, exporting, busy, onView, onExport, onRevert }: Props) {
   const delta = meta.qaScore !== undefined && parent?.qaScore !== undefined ? meta.qaScore - parent.qaScore : undefined;
   const facts: [string, string][] = [
     [tookOf(events), '耗时'],
@@ -59,6 +73,7 @@ export function VersionCard({ spaceId, thumbSec, meta, parent, totalShots, event
         <div className="vt">v{meta.n}<It l className="ver-it">({changedLabel(meta, totalShots)})</It>
           {viewing && <motion.span layoutId={`now-${spaceId}`} className="now" transition={SOFT}>预览中</motion.span>}
         </div>
+        {said && <Said text={said} />}
         <div className="facts">
           {facts.map(([b, s]) => <div key={s}><b>{b}</b><span className={trendOf(s)}>{s}</span></div>)}
         </div>

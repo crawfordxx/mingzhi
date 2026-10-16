@@ -1,9 +1,10 @@
-import { planEdit } from '../edit/plan.js';
+import { planEdit, type EditPlan } from '../edit/plan.js';
 import { validateOps } from '../edit/validate.js';
 import { EDIT_PLAN_YUAN, estimateCost, formatEstimate, requiredYuan, type Estimate } from '../cost/estimate.js';
 import { CostMeter, roundYuan } from '../cost/meter.js';
 import type { Space } from '../workspace/store.js';
 import { opsYuan, remainingYuan, requireBudget } from './budget.js';
+import { appendChat, isTurnId, readChat, turnId } from './chat.js';
 import { loadPricesOrEmpty, type AppCtx } from './context.js';
 import { exportVersion } from './export.js';
 import { HttpError, readJsonBody, sendJson } from './http.js';
@@ -11,7 +12,7 @@ import { doneVersion, loadSpace, parseVersionNumber, pickParent, readState } fro
 import { requireKey } from './keys.js';
 import { route, type Route, type RouteCtx } from './router.js';
 import { handleEvents } from './sse.js';
-import { publicSettings } from './spaces.js';
+import { publicSettings, spaceDir } from './spaces.js';
 
 export const MAX_MESSAGE_CHARS = 2000;
 export const MAX_OPS = 20;
@@ -50,6 +51,24 @@ async function start(app: AppCtx, c: RouteCtx): Promise<void> {
   sendJson(c.res, 202, { version, queued: ahead });
 }
 
+/** 规划一次修改：按剩余额度把关 → 调模型 → 花费记进项目（模型调用失败也记） */
+async function planFor(app: AppCtx, space: Space, message: string, version: number): Promise<{ plan: EditPlan; costYuan: number; chatCostYuan: number }> {
+  requireBudget(space, EDIT_PLAN_YUAN, '一次对话规划');
+  const key = await requireKey(app);
+  const state = readState(app, space.id, version);
+  const meter = new CostMeter(await loadPricesOrEmpty(app.deps, key), remainingYuan(space));
+  try {
+    const plan = await planEdit(app.deps.planClient(key, meter), message, state);
+    return { plan, costYuan: roundYuan(meter.total), chatCostYuan: addChatCost(app, space.id, meter.total) };
+  } catch (err) {
+    addChatCost(app, space.id, meter.total); // 模型已经调用过，失败也要记账
+    throw new HttpError(502, app.keys.redact(err instanceof Error ? err.message : String(err)));
+  }
+}
+
+const errorText = (err: unknown): string => (err instanceof HttpError ? err.message : '服务出错了，请稍后再试');
+
+/** 一句话修改 → 修改方案；用户的话与回复（含失败原因）都记进项目的对话记录 */
 async function messages(app: AppCtx, c: RouteCtx): Promise<void> {
   const space = loadSpace(app, c.params.id);
   const body = await readJsonBody(c.req);
@@ -57,19 +76,23 @@ async function messages(app: AppCtx, c: RouteCtx): Promise<void> {
   if (!message) throw new HttpError(400, '请先说说想改什么');
   if ([...message].length > MAX_MESSAGE_CHARS) throw new HttpError(400, `消息太长了（最多 ${MAX_MESSAGE_CHARS} 字）`);
   const version = pickParent(space, body.version);
-  requireBudget(space, EDIT_PLAN_YUAN, '一次对话规划');
-  const key = await requireKey(app);
-  const state = readState(app, space.id, version);
-  const meter = new CostMeter(await loadPricesOrEmpty(app.deps, key), remainingYuan(space));
-  let plan: Awaited<ReturnType<typeof planEdit>>;
+  const ids = (body.turn ?? {}) as { user?: unknown; ai?: unknown };
+  const dir = spaceDir(app, space.id);
+  const ai = turnId(ids.ai);
+  appendChat(dir, { type: 'user', id: turnId(ids.user), at: Date.now(), base: version, message });
   try {
-    plan = await planEdit(app.deps.planClient(key, meter), message, state);
+    const { plan, costYuan, chatCostYuan } = await planFor(app, space, message, version);
+    appendChat(dir, { type: 'ai', id: ai, at: Date.now(), base: version, reply: plan.reply, ops: plan.ops, ...(plan.options ? { options: plan.options } : {}) });
+    sendJson(c.res, 200, { ...plan, version, costYuan, chatCostYuan, turnId: ai });
   } catch (err) {
-    addChatCost(app, space.id, meter.total); // 模型已经调用过，失败也要记账
-    throw new HttpError(502, app.keys.redact(err instanceof Error ? err.message : String(err)));
+    appendChat(dir, { type: 'ai', id: ai, at: Date.now(), base: version, error: errorText(err) });
+    throw err;
   }
-  const chatCostYuan = addChatCost(app, space.id, meter.total);
-  sendJson(c.res, 200, { ...plan, version, costYuan: roundYuan(meter.total), chatCostYuan });
+}
+
+function chat(app: AppCtx, c: RouteCtx): void {
+  const space = loadSpace(app, c.params.id);
+  sendJson(c.res, 200, { turns: readChat(spaceDir(app, space.id)) });
 }
 
 /** 把一次对话的花费并入项目的 chatCostYuan（读-改-写，不覆盖期间别处的修改）；返回累计值 */
@@ -89,6 +112,11 @@ async function apply(app: AppCtx, c: RouteCtx): Promise<void> {
   requireBudget(space, opsYuan(ops), '这次修改');
   const summary = typeof body.summary === 'string' && body.summary.trim() ? [...body.summary.trim()].slice(0, MAX_SUMMARY_CHARS).join('') : DEFAULT_SUMMARY;
   const { version, ahead } = await app.runs.submit(space.id, { kind: 'next', parent, ops, summary });
+  // 从对话里执行的：记下是哪条回复、点了第几个选项（-1 = 直接执行）、出了哪一版
+  if (isTurnId(body.turn)) {
+    const picked = Number.isInteger(body.picked) ? Number(body.picked) : -1;
+    appendChat(spaceDir(app, space.id), { type: 'apply', id: body.turn, at: Date.now(), picked, version, ops, dropped });
+  }
   sendJson(c.res, 202, { version, queued: ahead, dropped });
 }
 
@@ -128,6 +156,7 @@ export function runRoutes(app: AppCtx): Route[] {
     route('GET', 'api/spaces/:id/estimate', (c) => estimate(app, c)),
     route('POST', 'api/spaces/:id/start', (c) => start(app, c)),
     route('POST', 'api/spaces/:id/messages', (c) => messages(app, c)),
+    route('GET', 'api/spaces/:id/chat', (c) => chat(app, c)),
     route('POST', 'api/spaces/:id/apply', (c) => apply(app, c)),
     route('POST', 'api/spaces/:id/cancel', (c) => cancel(app, c)),
     route('GET', 'api/spaces/:id/events', (c) => handleEvents(app, c)),

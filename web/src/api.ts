@@ -58,7 +58,11 @@ export interface WorkEvent {
 export type EditOp = { type: string } & Record<string, unknown>;
 export interface EditOption { label: string; ops: EditOp[] }
 /** 对话修改的回复（EditPlan + 基于哪个版本） */
-export interface EditReply { reply: string; ops: EditOp[]; options?: EditOption[]; version: number; costYuan?: number; chatCostYuan?: number }
+export interface EditReply { reply: string; ops: EditOp[]; options?: EditOption[]; version: number; costYuan?: number; chatCostYuan?: number; turnId?: string }
+/** 对话条目 id（前端生成，服务端记录时沿用）：用户的话与 AI 回复各一个 */
+export interface TurnIds { user: string; ai: string }
+/** 从对话执行修改时带上：哪条回复、点了第几个选项（-1 = 直接执行） */
+export interface ApplyLink { turn: string; picked: number }
 export interface Queued { version: number; queued: number }
 
 export interface ShotState { start: number; end: number; layout: 'split' | 'full'; card?: { template: string; props: Record<string, unknown> } }
@@ -117,10 +121,12 @@ export interface Api {
   /** 没有口播时服务端返回 400，调用方应先判断 */
   estimate(id: string): Promise<Estimate>;
   start(id: string): Promise<Queued>;
-  /** 一句话修改 → 修改方案（不执行）；version 缺省 = 最新完成版本 */
-  messages(id: string, message: string, version?: number): Promise<EditReply>;
-  /** 执行修改，出新版本；dropped 是被校验丢弃的原因 */
-  apply(id: string, ops: EditOp[], parent?: number, summary?: string): Promise<Queued & { dropped: string[] }>;
+  /** 一句话修改 → 修改方案（不执行）；version 缺省 = 最新完成版本；turn 是这一轮对话条目的 id（服务端记进对话记录） */
+  messages(id: string, message: string, version?: number, turn?: TurnIds): Promise<EditReply>;
+  /** 执行修改，出新版本；dropped 是被校验丢弃的原因；link 把这次执行记到对应的回复上 */
+  apply(id: string, ops: EditOp[], parent?: number, summary?: string, link?: ApplyLink): Promise<Queued & { dropped: string[] }>;
+  /** 项目的对话记录（服务端保存）；条目由调用方校验 */
+  chat(id: string): Promise<{ turns: unknown[] }>;
   revert(id: string, n: number): Promise<Queued>;
   cancel(id: string): Promise<void>;
   exportVersion(id: string, n: number): Promise<ExportResult>;
@@ -211,14 +217,15 @@ export function createHttpApi(): Api {
     uploadBackground: (id, file, opts) => sendFile(`/api/spaces/${enc(id)}/background`, file, opts),
     estimate: (id) => json(`/api/spaces/${enc(id)}/estimate`),
     start: (id) => json(`/api/spaces/${enc(id)}/start`, { method: 'POST' }),
-    messages: (id, message, version) => {
-      const body = JSON.stringify({ message, ...(version ? { version } : {}) });
+    messages: (id, message, version, turn) => {
+      const body = JSON.stringify({ message, ...(version ? { version } : {}), ...(turn ? { turn } : {}) });
       return json(`/api/spaces/${enc(id)}/messages`, { method: 'POST', body }, PLAN_TIMEOUT_MS);
     },
-    apply: (id, ops, parent, summary) => {
-      const body = JSON.stringify({ ops, ...(parent ? { parent } : {}), ...(summary ? { summary } : {}) });
+    apply: (id, ops, parent, summary, link) => {
+      const body = JSON.stringify({ ops, ...(parent ? { parent } : {}), ...(summary ? { summary } : {}), ...(link ?? {}) });
       return json(`/api/spaces/${enc(id)}/apply`, { method: 'POST', body });
     },
+    chat: (id) => json(`/api/spaces/${enc(id)}/chat`),
     revert: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/revert`, { method: 'POST' }),
     cancel: (id) => json(`/api/spaces/${enc(id)}/cancel`, { method: 'POST' }),
     exportVersion: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/export`, { method: 'POST' }, PLAN_TIMEOUT_MS),

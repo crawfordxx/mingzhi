@@ -90,6 +90,8 @@
 .ver-th video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .vt { font: 700 24px/1 var(--sans); display: flex; align-items: baseline; gap: 8px; }
 .ver-it { font-size: 17px; color: var(--text-3); }
+.ver-said { margin: 8px 0 0; font: 400 13px/1.5 var(--sans); color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ver-said .ref { margin-right: 5px; }
 .now { font: 500 12px/1 var(--sans); color: var(--brand-6); background: var(--brand-1); border-radius: 999px; padding: 4px 8px; align-self: center; }
 .facts { display: flex; gap: 18px; margin-top: 12px; }
 .facts b { display: block; font: 600 16px/1 var(--sans); color: var(--text-1); }

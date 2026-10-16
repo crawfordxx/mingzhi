@@ -31,6 +31,12 @@ describe('parseTimeRefs', () => {
   it('秒数 >= 60 的不识别', () => {
     expect(parseTimeRefs('@01:75')).toEqual([]);
   });
+  it('手打的 @时间：只认时间，后面的话不当卡片名（卡片名只认「插入」生成的模板名）', () => {
+    expect(parseTimeRefs('@00:07 这张卡换成大字标题「2. 手机放到另一个房间」')).toEqual([{ sec: 7 }]);
+    expect(parseTimeRefs('@00:07 钩子卡2/3 换个图')).toEqual([{ sec: 7, label: '钩子卡2/3' }]);
+    expect(parseTimeRefs('@00:07 纯人像')).toEqual([{ sec: 7, label: '纯人像' }]);
+    expect(parseTimeRefs('@00:07 标题卡写得太长')).toEqual([{ sec: 7 }]);
+  });
 });
 
 describe('shotForTime', () => {

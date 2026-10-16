@@ -24,7 +24,7 @@ const SYSTEM_PROMPT = `你是口播短视频的修改助手。用户在工作台
 
 输出严格的 JSON，不要任何多余文字：
 {"reply":"给用户的简短回复","ops":[操作…],"options":[{"label":"选项名","ops":[操作…]}]}
-- reply：一两句中文，说清楚改了什么；纯提问或无需修改时 ops 写 []。
+- reply：一两句中文，只描述 ops 里真正写了的修改（ops 为空就不要说「已改好」）；纯提问或无需修改时 ops 写 []。
 - options 可选：用户的意思有多种合理做法时，给 2-3 个可点选的备选方案（label 简短），此时 ops 可以为空；明确的需求不要给 options。
 
 操作（type 字段区分）：
@@ -46,6 +46,7 @@ const SYSTEM_PROMPT = `你是口播短视频的修改助手。用户在工作台
 3. 卡片不要写 image、video 文件名（你不知道有哪些文件）；需要图片或视频就用 visual 描述，photo 卡必须带 visual。卡片文字要精炼，严格遵守各字段长度上限；数字、专名不要编造。
 4. 版式规则：cta 只能是最后一个镜头且只能全屏，hook 只能放在前 15 秒内且最多 3 张，带卡片的镜头最长 8 秒；违反的操作会被丢弃。
 5. 不确定的需求宁可给 options，不要瞎猜。
+6. 用户要换模板（如「换成标题卡 / 大字标题」）时，用 replaceCard 写一张新模板的完整卡片（例如把 photo 换成 title），不要只改原卡片的字段。
 
 模板目录：
 ${catalogText}`;
@@ -78,7 +79,9 @@ export async function planEdit(client: LlmClient, message: string, state: Versio
   const direct = validateOps(top.data.ops, state, tracks);
   const picked = checkOptions(top.data.options, state, tracks);
   const dropped = [...direct.dropped, ...picked.dropped];
-  const note = dropped.length > 0 ? `\n\n（有 ${dropped.length} 处无法执行，已忽略：${dropped.join('；')}）` : '';
+  const nothing = top.data.ops.length > 0 && direct.ops.length === 0 && picked.options.length === 0;
+  const note = nothing ? `\n\n（这次没有执行任何修改：${dropped.join('；')}）`
+    : dropped.length > 0 ? `\n\n（有 ${dropped.length} 处无法执行，已忽略：${dropped.join('；')}）` : '';
   return {
     reply: top.data.reply + note,
     ops: direct.ops,

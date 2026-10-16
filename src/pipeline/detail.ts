@@ -1,4 +1,5 @@
 import type { Token, Transcript } from '../asr/types.js';
+import type { CaptionLine } from '../captions/lines.js';
 import type { Cut } from '../cut/llm-cuts.js';
 import type { HardCheck } from '../qa/hard.js';
 import type { CardQaEntry, CardScore } from '../qa/visual.js';
@@ -7,7 +8,7 @@ import type { ProjectFile, ProjectPatch } from './project.js';
 
 /** 进度事件携带的结构化数据，供工作台「剪辑直播」画界面；kind 决定 data 的形状 */
 export interface ProgressDetail {
-  kind: 'transcript' | 'cut' | 'shot' | 'qa' | 'cost' | 'progress';
+  kind: 'transcript' | 'cut' | 'captions' | 'shot' | 'qa' | 'cost' | 'progress';
   data: unknown;
 }
 
@@ -65,6 +66,11 @@ export function cutsDetail(cuts: Cut[], tokens: Token[]): ProgressDetail {
   return { kind: 'cut', data: { cuts: items } };
 }
 
+/** 校对后的字幕行：文字与覆盖的 token 下标区间 [from, to]（区间内可能夹着被剪的 token）；data: { lines } */
+export function captionsDetail(lines: CaptionLine[]): ProgressDetail {
+  return { kind: 'captions', data: { lines: lines.map(({ from, to, text }) => ({ from, to, text })) } };
+}
+
 type Props = Record<string, unknown>;
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
 const first = (v: unknown): unknown => (Array.isArray(v) ? v[0] : undefined);
@@ -117,9 +123,9 @@ export function hardDetail(hard: HardCheck[]): ProgressDetail {
   return { kind: 'qa', data: { phase: 'hard', ok: hard.every((c) => c.ok), checks: hard.map((c) => ({ id: c.id, ok: c.ok, detail: c.detail })) } };
 }
 
-/** 当前总花费与上限（元）；不限预算时 budget 为 null */
-export function costDetail(total: number, budget: number | null): ProgressDetail {
-  return { kind: 'cost', data: { total, budget } };
+/** 当前总花费与上限（元）；不限预算时 budget 为 null；工作台另带项目上限 cap（budget 是本版开始时的剩余额度） */
+export function costDetail(total: number, budget: number | null, cap?: number): ProgressDetail {
+  return { kind: 'cost', data: { total, budget, ...(cap !== undefined ? { cap } : {}) } };
 }
 
 /** 抠像 / 渲染百分比；抠像另带帧数 */
@@ -131,6 +137,7 @@ export function progressDetail(stage: 'matte' | 'compose', pct: number, frames?:
 export function detailOfStep(step: string, patch: ProjectPatch, project: ProjectFile): ProgressDetail | undefined {
   if (step === 'asr' && patch.transcript) return transcriptDetail(patch.transcript);
   if (step === 'cuts' && patch.cuts && project.transcript) return cutsDetail(patch.cuts, project.transcript.tokens);
+  if (step === 'captions' && patch.captionLines) return captionsDetail(patch.captionLines);
   // 素材步骤会重新归一化分镜（合并、降级镜头），所以改写后再发一次，前端以最后一次为准
   if ((step === 'storyboard' || step === 'broll') && patch.storyboard) return shotsDetail(patch.storyboard);
   if (step === 'qa-cards' && patch.qa && patch.qa.cards.length > 0) return cardsDetail(patch.qa.cards);

@@ -59,10 +59,17 @@ export interface PipelineArgs {
 }
 export interface PipelineResult { output: string; projectPath: string; cuts: Cut[]; plan: EditPlan; captions: TimedCaption[]; storyboard: Storyboard; qa: PipelineQa }
 
+/** 上限说明：给了项目上限（工作台）时写项目上限与剩余额度，否则计费器上限就是上限（CLI） */
+function limitText(meter: CostMeter, budget: number | null, capYuan?: number): string {
+  if (budget === null) return '';
+  if (capYuan === undefined) return `（上限 ¥${budget.toFixed(2)}）`;
+  return `（项目上限 ¥${capYuan.toFixed(2)} · 剩余 ¥${Math.max(0, budget - meter.total).toFixed(2)}）`;
+}
+
 /** 花费变化事件：只带 cost 明细（CLI 不打印它，工作台用它刷新「已花 / 上限」） */
-function costEvent(step: PipelineStep, meter: CostMeter): ProgressEvent {
+function costEvent(step: PipelineStep, meter: CostMeter, capYuan?: number): ProgressEvent {
   const budget = Number.isFinite(meter.budget) ? meter.budget : null;
-  return { step, message: `已花费 ¥${meter.total.toFixed(2)}${budget === null ? '' : `（上限 ¥${budget.toFixed(2)}）`}`, detail: costDetail(meter.total, budget) };
+  return { step, message: `已花费 ¥${meter.total.toFixed(2)}${limitText(meter, budget, capYuan)}`, detail: costDetail(meter.total, budget, capYuan) };
 }
 
 /** 当前账目快照写进 project.json；预算不限时 budget 为 null（JSON 里没有 Infinity） */
@@ -76,13 +83,15 @@ export const costsOf = (meter: CostMeter): NonNullable<ProjectFile['costs']> => 
  */
 export function makeComplete(o: {
   record: (patch: ProjectPatch) => ProjectFile; meter: CostMeter; onProgress?: (e: ProgressEvent) => void; signal?: AbortSignal;
+  /** 工作台的项目上限（元）：计费器上限是项目剩余额度，提示里分开写项目上限与剩余 */
+  capYuan?: number;
 }): Complete {
   let lastCost: number | null = null;
   return (step, message, patch = {}) => {
     const project = o.record({ ...patch, costs: costsOf(o.meter) });
     const detail = detailOfStep(step, patch, project);
     o.onProgress?.({ step, message, ...(detail ? { detail } : {}) });
-    if (o.meter.total !== lastCost) { lastCost = o.meter.total; o.onProgress?.(costEvent(step, o.meter)); }
+    if (o.meter.total !== lastCost) { lastCost = o.meter.total; o.onProgress?.(costEvent(step, o.meter, o.capYuan)); }
     throwIfCancelled(o.signal); // 步骤之间检查；这一步的结果已经落盘，取消不丢数据
     return project;
   };

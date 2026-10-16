@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920">
+<title>方向 B · 钉在那一秒</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@1,200;1,300&display=swap" rel="stylesheet">
+<style>
+/* 本机 fontsource 优先（与工作台同源），Google Fonts 兜底 */
+@font-face { font-family: 'Plex Serif L'; font-style: italic; font-weight: 200;
+  src: url('../../node_modules/.pnpm/@fontsource+ibm-plex-serif@5.1.0/node_modules/@fontsource/ibm-plex-serif/files/ibm-plex-serif-latin-200-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Plex Serif L'; font-style: italic; font-weight: 300;
+  src: url('../../node_modules/.pnpm/@fontsource+ibm-plex-serif@5.1.0/node_modules/@fontsource/ibm-plex-serif/files/ibm-plex-serif-latin-300-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Plex Mono L'; font-weight: 400;
+  src: url('../../node_modules/.pnpm/@fontsource+ibm-plex-mono@5.1.0/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Plex Mono L'; font-weight: 500;
+  src: url('../../node_modules/.pnpm/@fontsource+ibm-plex-mono@5.1.0/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2') format('woff2'); }
+
+/* G1 token（照抄 web/src/theme.css） */
+:root {
+  --bg-1:#fff; --bg-2:#f7f7f7; --bg-3:#f5f5f5; --bg-4:#eee; --bg-5:#e0e0e0;
+  --text-1:#000000e6; --text-2:#000000b3; --text-3:#0000008f; --text-4:#0000003d;
+  --brand-1:#d6dff5; --brand-2:#adc0eb; --brand-3:#85a0e0; --brand-4:#5c81d6; --brand-5:#3361cc; --brand-6:#294ea3;
+  --accent:#5c81d6;
+  --shadow-1:0 0 0 1px #0000000f; --shadow-2-1:0 8px 32px 4px #0000000f;
+  --shadow-3:0 0 0 1px #0000000f, 0 16px 48px 0 #00000059;
+  --shadow-win:0 0 0 1px #0000000f, 0 25px 50px -12px rgba(0,0,0,.6);
+  --sans:system-ui,-apple-system,'PingFang SC','Noto Sans SC',sans-serif;
+  --serif-i:'Plex Serif L','IBM Plex Serif','Songti SC','Noto Serif SC',ui-serif,Georgia,serif;
+  --mono:'Plex Mono L','IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --term:#1f1f22; --term-bar:#2a2a2e; --term-1:#e8e8ea; --term-2:#a3a3a8;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html,body { width:1920px; height:1080px; overflow:hidden; background:var(--bg-2); color:var(--text-1); }
+body { font:400 15px/1.55 var(--sans); -webkit-font-smoothing:antialiased; font-variant-numeric:tabular-nums; position:relative; }
+img { display:block; }
+.it { font-family:var(--serif-i); font-style:italic; font-weight:200; font-synthesis:none; letter-spacing:-.005em; }
+.it.l { font-weight:300; }
+.hl { display:inline-flex; align-items:center; background:var(--brand-1); color:var(--brand-6); font-weight:600; border-radius:8px; padding:2px 8px; white-space:nowrap; }
+.btn { display:inline-flex; align-items:center; gap:7px; border-radius:999px; font:500 14px/1 var(--sans); padding:9px 15px; white-space:nowrap; }
+.btn svg { width:15px; height:15px; }
+.btn-k { background:#000; color:#fff; }
+.btn-g { background:var(--bg-4); color:var(--text-2); }
+.card { background:#fff; border-radius:18px; box-shadow:var(--shadow-1),var(--shadow-2-1); }
+.lights { display:flex; gap:7px; }
+.lights i { width:12px; height:12px; border-radius:50%; display:block; }
+.lights i:nth-child(1){background:#ff5f57} .lights i:nth-child(2){background:#febc2e} .lights i:nth-child(3){background:#28c840}
+
+/* ============ HERO 关键帧 ============ */
+.hero { position:absolute; left:0; top:0; width:1920px; height:904px; overflow:hidden; }
+
+/* Spaces 侧栏 */
+.rail { position:absolute; left:0; top:0; width:76px; height:904px; background:var(--bg-2); border-right:1px solid var(--bg-4);
+  display:flex; flex-direction:column; align-items:center; padding-top:26px; gap:18px; }
+.logo { width:40px; height:40px; border-radius:50%; background:#000; color:#fff; font:700 19px/40px var(--sans); text-align:center; }
+.rail .sp { width:44px; height:44px; border-radius:12px; overflow:hidden; box-shadow:var(--shadow-1); }
+.rail .sp img { width:100%; height:100%; object-fit:cover; }
+.rail .sp.cur { box-shadow:0 0 0 2px var(--accent), 0 0 0 5px var(--brand-1); }
+.rail .lb { font:500 14px/1 var(--sans); color:var(--text-3); margin-top:-10px; }
+
+/* 对话栏 */
+.chat { position:absolute; left:76px; top:0; width:664px; height:904px; background:#fff; border-right:1px solid var(--bg-4); padding:30px 40px 0; }
+.ttl { font:700 31px/1.2 var(--sans); letter-spacing:-.01em; }
+.ttl .it { font-weight:300; color:var(--text-3); font-size:30px; }
+.meta { margin-top:8px; font:400 15px/1 var(--sans); color:var(--text-3); }
+.meta b { color:var(--text-1); font-weight:600; }
+.sep { height:1px; background:var(--bg-4); margin:22px -40px 0; }
+
+.vcard { margin-top:26px; padding:14px 18px 14px 14px; display:flex; gap:16px; align-items:center; border-radius:18px; box-shadow:var(--shadow-1); }
+.vcard .th { width:52px; height:72px; border-radius:9px; overflow:hidden; position:relative; flex:none; background:#fbf8f1; box-shadow:var(--shadow-1); }
+.vcard .th img { position:absolute; left:0; bottom:0; width:100%; height:56%; object-fit:cover; }
+.vcard .th i { position:absolute; left:6px; right:6px; top:8px; height:6px; border-radius:2px; background:#00000026; }
+.vcard .th i + i { top:18px; right:16px; background:#00000014; }
+.vcard .vn { font:700 21px/1 var(--sans); }
+.vcard .vn .it { font-size:19px; color:var(--text-3); font-weight:300; margin-left:4px; }
+.vcard .vs { margin-top:9px; font:400 14px/1 var(--sans); color:var(--text-3); }
+.vcard .vs b { color:var(--text-1); font-weight:600; }
+.vcard .act { margin-left:auto; display:flex; gap:8px; }
+
+.bubble { margin:34px 0 0 auto; width:fit-content; background:var(--bg-4); border-radius:20px 20px 6px 20px; padding:11px 16px 11px 11px;
+  display:flex; align-items:center; gap:10px; font:400 18px/1.3 var(--sans); }
+.bubble .hl { font-size:15px; padding:5px 9px; }
+.who { margin-top:30px; display:flex; align-items:center; gap:9px; font:500 14px/1 var(--sans); color:var(--text-2); }
+.who .logo { width:22px; height:22px; font-size:12px; line-height:22px; }
+.reply { margin-top:11px; font:400 17px/1.5 var(--sans); color:var(--text-1); }
+.reply b { font-weight:600; }
+
+.run { margin-top:22px; padding:18px 18px 16px; }
+.run .hd { display:flex; align-items:center; gap:8px; }
+.run .hd .t { font:600 18px/1 var(--sans); }
+.run .hd .it { font-size:17px; color:var(--text-3); font-weight:300; }
+.run .hd .btn { margin-left:auto; padding:7px 12px; font-size:14px; }
+.strip { display:flex; gap:6px; margin-top:16px; position:relative; }
+.sh { width:33px; height:52px; border-radius:6px; overflow:hidden; position:relative; flex:none; background:#fbf8f1; box-shadow:var(--shadow-1); opacity:.34; filter:grayscale(.7); }
+.sh img { position:absolute; left:0; bottom:0; width:100%; height:52%; object-fit:cover; }
+.sh i { position:absolute; left:5px; right:5px; top:6px; height:4px; border-radius:1px; background:#00000030; }
+.sh i + i { top:13px; right:12px; background:#00000018; }
+.sh.lit { opacity:1; filter:none; box-shadow:0 0 0 2px var(--accent), 0 0 0 5px var(--brand-1); transform:translateY(-3px); }
+.sh.lit::after { content:''; position:absolute; left:0; right:0; bottom:0; height:100%; background:linear-gradient(180deg,#ffffff00 0%,#3361cc22 100%); }
+.sh.lit .scan { position:absolute; left:0; right:0; top:64%; height:2px; background:var(--brand-5); box-shadow:0 0 8px 1px #5c81d6aa; z-index:2; animation:scan 2.4s ease-in-out infinite alternate; }
+@keyframes scan { from { top:22%; } to { top:78%; } }
+.strip .dot { position:absolute; left:calc(12 * 39px + 16.5px - 4px); top:-17px; width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px #fff; }
+.legend { display:flex; justify-content:space-between; margin-top:10px; font:400 14px/1 var(--sans); color:var(--text-3); }
+.legend .on { color:var(--brand-6); font-weight:600; }
+.prog { display:flex; align-items:center; gap:14px; margin-top:16px; }
+.prog .l { font:500 15px/1 var(--sans); }
+.prog .bar { flex:1; height:4px; border-radius:2px; background:var(--bg-4); position:relative; overflow:hidden; }
+.prog .bar i { position:absolute; left:0; top:0; bottom:0; width:64%; border-radius:2px; background:linear-gradient(90deg,var(--brand-3),var(--brand-5)); }
+.prog .bar i::after { content:''; position:absolute; inset:0; background:linear-gradient(90deg,#fff0 0%,#ffffff99 50%,#fff0 100%); background-size:120px 100%; background-repeat:no-repeat; animation:sheen 1.6s linear infinite; }
+@keyframes sheen { from { background-position:-120px 0; } to { background-position:500px 0; } }
+.prog .n { font:700 19px/1 var(--sans); }
+.prog .n small { font-size:14px; font-weight:600; }
+.foot { display:flex; justify-content:space-between; margin-top:12px; font:400 14px/1 var(--sans); color:var(--text-3); }
+
+.composer { position:absolute; left:28px; right:28px; top:716px; height:142px; border-radius:26px; background:#fff;
+  box-shadow:0 0 0 1px #0000000f, 0 10px 36px 2px #00000012; padding:20px 20px 0 22px; }
+.composer .tx { font:400 18px/1.4 var(--sans); color:var(--text-1); display:flex; align-items:center; }
+.caret { display:inline-block; width:2px; height:23px; background:var(--brand-5); margin-left:2px; border-radius:1px; animation:blink 1.06s steps(1) 3.2s infinite; }
+@keyframes blink { 50% { opacity:0; } }
+.composer .chips { position:absolute; left:20px; bottom:20px; display:flex; gap:8px; }
+.composer .chips span { background:var(--bg-3); color:var(--text-2); border-radius:999px; padding:8px 13px; font:400 14px/1 var(--sans); }
+.send { position:absolute; right:18px; bottom:16px; width:40px; height:40px; border-radius:50%; background:#000; display:grid; place-items:center;
+  box-shadow:0 0 0 5px #0000000d; }
+.send svg { width:18px; height:18px; }
+.under { position:absolute; left:40px; right:40px; top:872px; display:flex; justify-content:space-between; font:400 14px/1 var(--sans); color:var(--text-3); }
+
+/* 预览区 */
+.pv { position:absolute; left:740px; top:0; width:1180px; height:904px; }
+.pvh { position:absolute; left:34px; right:32px; top:26px; height:48px; display:flex; align-items:center; gap:14px; }
+.pvh .v { font:700 30px/1 var(--sans); letter-spacing:-.01em; }
+.pvh .v .it { font-size:25px; color:var(--text-3); font-weight:300; margin-left:6px; letter-spacing:0; }
+.seg { margin-left:auto; display:flex; background:var(--bg-4); border-radius:999px; padding:4px; gap:2px; }
+.seg span { position:relative; font:500 14px/1 var(--sans); color:var(--text-2); padding:9px 12px; border-radius:999px; display:flex; align-items:center; gap:6px; }
+.seg span.cur { background:#fff; color:var(--text-1); box-shadow:var(--shadow-1),0 1px 3px #0000001a; }
+.pulse { width:7px; height:7px; border-radius:50%; background:var(--accent); position:relative; }
+.pulse::after { content:''; position:absolute; inset:-4px; border-radius:50%; border:2px solid var(--accent); opacity:0; animation:pulse 1.6s ease-out infinite; }
+@keyframes pulse { 0% { transform:scale(.4); opacity:.8; } 100% { transform:scale(1.5); opacity:0; } }
+.sw { display:flex; align-items:center; gap:8px; font:500 14px/1 var(--sans); color:var(--text-2); }
+.sw .tr { width:36px; height:22px; border-radius:999px; background:var(--bg-5); padding:2px; }
+.sw .kn { width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px #00000040; }
+.pvh .btn-k { opacity:.38; }
+
+.stage { position:absolute; left:32px; top:98px; width:1116px; height:782px; border-radius:26px; overflow:hidden; box-shadow:var(--shadow-1); }
+.stage > .paint { position:absolute; inset:-2%; width:104%; height:104%; object-fit:cover; object-position:50% 46%; animation:drift 14s ease-in-out infinite alternate; }
+@keyframes drift { from { transform:scale(1.0) translate(0,0); } to { transform:scale(1.035) translate(-6px,-4px); } }
+.stage::after { content:''; position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(120% 90% at 58% 46%, #0000 55%, #00000026 100%); }
+
+/* 9:16 浮窗 */
+.win { position:absolute; left:576px; top:30px; width:356px; border-radius:22px; background:#fff; box-shadow:var(--shadow-win); padding:0 13px 12px; z-index:3; }
+.titlebar { height:40px; display:flex; align-items:center; position:relative; margin:0 -1px; }
+.titlebar .tt { position:absolute; left:0; right:0; text-align:center; font:500 14px/1 var(--sans); color:var(--text-3); }
+.vid { position:relative; width:330px; height:587px; border-radius:12px; overflow:hidden; background:#fbf8f1; }
+.vid .bot { position:absolute; left:0; right:0; bottom:0; height:52%; overflow:hidden; }
+.vid .bot img.bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:44% 40%; filter:blur(1.5px) saturate(.95); transform:scale(1.04); }
+.vid .bot img.fig { position:absolute; left:50%; bottom:-6px; width:250px; transform:translateX(-50%); }
+.cap { position:absolute; left:0; right:0; top:calc(48% - 17px); text-align:center; z-index:4; font:800 24px/1 var(--sans); color:#fff; letter-spacing:.02em;
+  -webkit-text-stroke:5px #111; paint-order:stroke fill; }
+/* 标题卡：v6（旧）在下，v7（新）按渲染进度从左擦入 */
+.tc { position:absolute; left:16px; right:16px; top:44px; height:142px; border-radius:6px; background:#fff; box-shadow:0 2px 14px #0000001a; padding:22px 20px; }
+.tc .a { font:700 25px/1.15 var(--sans); }
+.tc .b { margin-top:12px; font:400 14px/1.3 var(--sans); color:var(--text-2); }
+.tc.old { filter:saturate(0) blur(.4px); opacity:.85; }
+.pend { position:absolute; top:44px; height:142px; left:calc(16px + 298px * .64); right:16px; z-index:2; border-radius:0 6px 6px 0;
+  -webkit-backdrop-filter:blur(5px) saturate(.2); backdrop-filter:blur(5px) saturate(.2);
+  background:repeating-linear-gradient(135deg,#ffffff8c 0 7px,#eef2fbb3 7px 14px); }
+.tc.new .a { font:900 33px/1.05 var(--sans); letter-spacing:-.01em; }
+.tc.new .a em { font-style:normal; background:linear-gradient(transparent 62%, var(--brand-2) 62%); padding:0 2px; }
+.tc.new .b { font-weight:600; color:var(--text-1); }
+.wipe { position:absolute; top:36px; height:158px; left:calc(16px + 298px * .64); width:2px; background:var(--brand-5); box-shadow:0 0 10px 2px #5c81d699; z-index:3; border-radius:1px; }
+.ctrl { display:flex; align-items:center; gap:10px; margin-top:12px; }
+.play { width:32px; height:32px; border-radius:50%; background:#000; display:grid; place-items:center; flex:none; }
+.play svg { width:12px; height:12px; margin-left:2px; }
+.tm { font:600 14px/1 var(--sans); white-space:nowrap; }
+.tm span { color:var(--text-3); font-weight:400; }
+.pbar { position:relative; flex:1; height:15px; }
+.pbar .tk { position:absolute; left:0; right:0; top:6px; height:3px; border-radius:2px; background:var(--bg-5); }
+.pbar .f { position:absolute; left:0; top:6px; height:3px; width:88%; border-radius:2px; background:#000; }
+.pbar .chg { position:absolute; left:88%; top:4px; width:7px; height:7px; margin-left:-3.5px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px #fff; z-index:2; }
+.pbar .kb { position:absolute; left:88%; top:1.5px; width:12px; height:12px; margin-left:-6px; border-radius:50%; background:#000; box-shadow:0 0 0 2px #fff,0 1px 3px #0000004d; }
+.pbar .chg { left:calc(88% + 13px); }
+.wf { display:flex; justify-content:space-between; margin-top:10px; font:400 14px/1 var(--sans); color:var(--text-3); }
+.wf .on { color:var(--brand-6); font-weight:600; display:flex; align-items:center; gap:6px; }
+
+/* 手绘批注圈 + 时间码胶囊（迁移自 Frame.io 的帧上批注） */
+.anno { position:absolute; left:0; top:0; width:1920px; height:904px; z-index:15; pointer-events:none; overflow:visible; }
+.anno .dotS { fill:#fff; stroke:var(--brand-5); stroke-width:3; animation:pop .35s ease-out both; }
+.anno path { fill:none; stroke:var(--brand-5); stroke-width:4; stroke-linecap:round; stroke-linejoin:round;
+  stroke-dasharray:var(--len); stroke-dashoffset:0; animation:draw var(--dur) cubic-bezier(.65,0,.35,1) var(--dl) both; filter:drop-shadow(0 1px 1.5px #00000040); }
+@keyframes draw { from { stroke-dashoffset:var(--len); } to { stroke-dashoffset:0; } }
+.pin { position:absolute; left:0; top:0; white-space:nowrap; transform-origin:50% 50%; z-index:6; display:flex; align-items:center; gap:8px; background:#fff; border-radius:999px; padding:6px 13px 6px 6px;
+  box-shadow:var(--shadow-3); font:500 14px/1 var(--sans); color:var(--text-1); animation:pop .5s cubic-bezier(.2,1.25,.3,1) 1.9s both; z-index:16; }
+.pin .hl { font-size:14px; padding:5px 8px; }
+@keyframes pop { from { opacity:0; transform:translateY(6px) scale(.96); } to { opacity:1; transform:none; } }
+
+/* 终端 */
+.term { position:absolute; left:40px; top:584px; width:506px; border-radius:14px; background:var(--term); box-shadow:var(--shadow-3); z-index:4; overflow:hidden; }
+.term .tb { height:36px; background:var(--term-bar); display:flex; align-items:center; padding:0 14px; position:relative; }
+.term .tb .tt { position:absolute; left:0; right:0; text-align:center; font:400 14px/1 var(--mono); color:var(--term-2); }
+.term pre { padding:14px 18px 18px; font:400 14px/1.75 var(--mono); color:var(--term-1); white-space:pre; }
+.term .d { color:var(--term-2); }
+.term .ok { color:#7fd18b; }
+.term .k { color:#fff; font-weight:500; }
+.term .b { color:var(--brand-2); }
+.term .sp { color:var(--brand-2); display:inline-block; animation:spin .8s steps(1) infinite; }
+@keyframes spin { 50% { opacity:.35; } }
+.term .tbar { display:inline-block; width:120px; height:7px; border-radius:4px; background:#ffffff1f; position:relative; vertical-align:1px; margin:0 8px; }
+.term .tbar::after { content:''; position:absolute; left:0; top:0; bottom:0; width:64%; border-radius:4px; background:linear-gradient(90deg,var(--brand-3),var(--brand-2)); }
+.term .cur { display:inline-block; width:8px; height:15px; background:var(--term-1); vertical-align:-2px; animation:blink 1.06s steps(1) 3.2s infinite; }
+
+/* 光标 */
+.cursor { position:absolute; left:672px; top:826px; width:26px; height:34px; z-index:20; filter:drop-shadow(0 2px 3px #00000059); }
+
+/* ============ 底部窄带 ============ */
+.band { position:absolute; left:0; top:904px; width:1920px; height:176px; background:#fff; border-top:1px solid var(--bg-5);
+  display:grid; grid-template-columns: 352px 330px 580px 1fr; column-gap:42px; padding:24px 44px 0; }
+.band .k { font:500 14px/1 var(--mono); color:var(--text-3); letter-spacing:.04em; text-transform:uppercase; display:flex; gap:10px; align-items:center; }
+.band .k b { color:var(--brand-6); font-weight:500; }
+.band h1 { margin-top:14px; font:700 34px/1 var(--sans); letter-spacing:-.01em; white-space:nowrap; }
+.band h1 .it { font-weight:200; font-size:26px; color:var(--text-2); margin-left:4px; }
+.band p { margin-top:12px; font:400 15px/1.55 var(--sans); color:var(--text-2); }
+.band p b { color:var(--text-1); font-weight:600; }
+.band .ref { margin-top:12px; font:400 14px/1.55 var(--sans); color:var(--text-2); }
+.band .ref strong { display:block; font:600 17px/1.3 var(--sans); color:var(--text-1); margin-bottom:5px; }
+.band .ref .it { font-size:15px; }
+.band .ref a { color:var(--brand-6); text-decoration:none; border-bottom:1px solid var(--brand-2); }
+.sw9 { margin-top:16px; display:flex; height:44px; border-radius:10px; overflow:hidden; box-shadow:var(--shadow-1); }
+.sw9 i { display:block; height:100%; }
+.hex { margin-top:10px; display:grid; grid-template-columns:repeat(4,auto); justify-content:space-between; row-gap:4px; font:400 14px/1.3 var(--mono); color:var(--text-2); }
+.hex span::before { content:''; display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:0; box-shadow:inset 0 0 0 1px #0000001a; background:var(--c); }
+.map { margin-top:12px; display:grid; grid-template-columns:auto 22px 1fr; column-gap:6px; row-gap:3px; font:400 14px/1.5 var(--sans); color:var(--text-2); }
+.map .ar { color:var(--text-3); text-align:center; }
+.map .to { color:var(--text-1); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <!-- Spaces 侧栏 -->
+  <aside class="rail">
+    <div class="logo">明</div>
+    <div class="sp"><img src="../assets/art/01-studio.webp" alt=""></div>
+    <div class="lb">talk</div>
+    <div class="sp cur"><img src="../assets/art/02-garden.webp" alt=""></div>
+    <div class="lb" style="color:var(--text-1);font-weight:600">第2期</div>
+    <div class="sp"><img src="../assets/art/03-cinema.webp" alt="" style="object-position:50% 20%"></div>
+    <div class="lb">第1期</div>
+  </aside>
+
+  <!-- 对话栏 -->
+  <section class="chat">
+    <div class="ttl">高性价比人生指南 <span class="it l">(第 2 期)</span></div>
+    <div class="meta">1 段口播 · 7 个版本 · 已花 <b>¥3.76</b> / 上限 ¥10</div>
+    <div class="sep"></div>
+
+    <div class="vcard">
+      <div class="th"><i></i><i></i><img src="../../assets/backgrounds/08-library.jpg" alt=""></div>
+      <div>
+        <div class="vn">v6<span class="it l">(全部重渲)</span></div>
+        <div class="vs">成片检查 <b>7 / 7</b> 全过 · 可导出</div>
+      </div>
+      <div class="act"><span class="btn btn-g">预览</span><span class="btn btn-k"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>导出</span></div>
+    </div>
+
+    <div class="bubble" id="bubble"><span class="hl">@00:44 标题卡</span>最后这张标题再狠一点</div>
+
+    <div class="who"><span class="logo">明</span>明知</div>
+    <div class="reply">明白，<b>只改第 13 段</b>这张卡，其余 13 段原样复用。</div>
+
+    <div class="card run">
+      <div class="hd"><span class="t">v7 · 标题再狠一点</span><span class="it l">(只重渲 1 段)</span><span class="btn btn-g">取消</span></div>
+      <div class="strip" id="strip"></div>
+      <div class="legend"><span>复用 ×13 · 不动</span><span class="on">第 13 段 · 重渲中</span></div>
+      <div class="prog"><span class="l">渲染中</span><span class="bar"><i></i></span><span class="n">64<small>%</small></span></div>
+      <div class="foot"><span>正在：第 13 / 14 段 · 标题卡</span><span>已用 0:01</span></div>
+    </div>
+
+    <div class="composer">
+      <div class="tx">背景换成夜景落地<span class="caret"></span></div>
+      <div class="chips"><span>节奏再快一点</span><span>换一张 B-roll</span><span>字幕换成得意</span></div>
+      <div class="send"><svg viewBox="0 0 18 18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14.5v-11M4.5 8 9 3.5 13.5 8"/></svg></div>
+    </div>
+    <div class="under"><span>＋ 插入 <span class="hl" style="font-size:14px;padding:3px 7px">@00:44 标题卡</span></span><span>本轮预估 <span class="it l">(—)</span></span></div>
+  </section>
+
+  <!-- 预览区 -->
+  <section class="pv">
+    <div class="pvh">
+      <div class="v">v7<span class="it l">(只重渲第 13 段 · 渲染中)</span></div>
+      <div class="seg"><span>v1</span><span>v2</span><span>v3</span><span>v4</span><span>v5</span><span>v6</span><span class="cur"><i class="pulse"></i>v7</span></div>
+      <div class="sw">对比<span class="tr"><span class="kn" style="display:block"></span></span></div>
+      <span class="btn btn-k"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>导出</span>
+    </div>
+
+    <div class="stage">
+      <img class="paint" src="../assets/art/02-garden.webp" alt="">
+
+      <div class="term">
+        <div class="tb"><div class="lights"><i></i><i></i><i></i></div><div class="tt">Terminal — v7 — 100×30</div></div>
+<pre><span class="d">#</span> <span class="k">v7</span> · 最后这张标题再狠一点
+<span class="ok">✓</span> <span class="k">定位</span>  <span class="b">@00:44</span> 标题卡 <span class="d">→</span> 第 13 / 14 段
+<span class="ok">✓</span> <span class="k">复用</span>  其余 13 段 <span class="d">· 不重渲</span>
+<span class="sp">⠹</span> <span class="k">渲染</span>  第 13 段<span class="tbar"></span>64%  <span class="cur"></span></pre>
+      </div>
+
+      <div class="win">
+        <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tt">v7 — 00:44 标题卡</div></div>
+        <div class="vid">
+          <div class="tc old"><div class="a">少花冤枉钱</div><div class="b">650 条，每条都有出处</div></div>
+          <div class="tc new" id="tcard"><div class="a">少花<em>冤枉钱</em></div><div class="b">650 条，每条都有出处</div></div>
+          <div class="pend"></div><div class="wipe"></div>
+          <div class="bot">
+            <img class="bg" src="../../assets/backgrounds/08-library.jpg" alt="">
+            <img class="fig" src="../assets/art/silhouette.webp" alt="">
+          </div>
+          <div class="cap">每条都有出处</div>
+        </div>
+        <div class="ctrl">
+          <div class="play"><svg viewBox="0 0 12 12"><path d="M2 1.2v9.6L10.4 6z" fill="#fff"/></svg></div>
+          <div class="tm">00:44 <span>/ 00:50</span></div>
+          <div class="pbar"><div class="tk"></div><div class="f"></div><div class="kb"></div><div class="chg"></div></div>
+        </div>
+        <div class="wf"><span>标题卡 · 第 13/14 段</span><span class="on"><i class="pulse"></i>本段重渲中</span></div>
+      </div>
+    </div>
+
+</section>
+
+  <!-- 一句话 → 那一帧：从对话气泡牵出的一笔，落成帧上的批注圈 -->
+  <svg class="anno" id="anno" viewBox="0 0 1920 904"></svg>
+  <div class="pin" id="pin"><span class="hl">00:44</span>落在这一帧 · 只重渲这一段</div>
+
+  <!-- 操作光标（悬停在发送上） -->
+  <svg class="cursor" viewBox="0 0 26 34"><path d="M2 2v25.5l6.4-6.1 4.3 10 4.4-1.9-4.2-9.8 8.8-.2z" fill="#000" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+</div>
+
+<!-- 底部窄带 -->
+<footer class="band">
+  <div>
+    <div class="k"><b>方向 B</b> · 标杆迁移 · hero keyframe</div>
+    <h1>钉在那一秒 <span class="it">(frame-accurate)</span></h1>
+    <p>真界面当主角，一句话钉在某一秒；<br><b>明亮、安静，被照顾而不被炫技</b>。</p>
+  </div>
+  <div>
+    <div class="k">色板 · 照抄 G1 + 画里取暖</div>
+    <div class="sw9">
+      <i style="flex:3;background:#fff;box-shadow:inset -1px 0 0 #0000000f"></i><i style="flex:2;background:#f7f7f7"></i><i style="flex:1.3;background:#eee"></i>
+      <i style="flex:1.6;background:#d6dff5"></i><i style="flex:1.1;background:#85a0e0"></i><i style="flex:1.1;background:#3361cc"></i><i style="flex:.9;background:#294ea3"></i>
+      <i style="flex:.9;background:#1f1f22"></i><i style="flex:1;background:#c9773a"></i><i style="flex:1;background:#6f8a3c"></i>
+    </div>
+    <div class="hex">
+      <span style="--c:#fff">#fff</span><span style="--c:#f7f7f7">#f7f7f7</span><span style="--c:#d6dff5">#d6dff5</span><span style="--c:#3361cc">#3361cc</span>
+      <span style="--c:#294ea3">#294ea3</span><span style="--c:#1f1f22">#1f1f22</span><span style="--c:#c9773a">#c9773a</span><span style="--c:#6f8a3c">#6f8a3c</span>
+    </div>
+  </div>
+  <div>
+    <div class="k">参照作品 · 已核实</div>
+    <div class="ref">
+      <strong>Adobe Frame.io V4 <span class="it l">(frame.io hero screen-loop, 4K)</span></strong>
+      第 29 届 Webby Awards <span class="it l">(2025)</span> 获奖：Creative Production, Software Services &amp; Platforms <span class="it l">(Apps &amp; Software)</span>。<br>出处：<a>webbyawards.com</a> 官方新闻稿 <span class="it l">“29th Annual Webby Awards Announce 2025 Winners”</span>
+    </div>
+  </div>
+  <div>
+    <div class="k">form 来自内容的哪里</div>
+    <p style="margin-top:12px;font-size:15px">工作台里那枚 <span class="hl" style="font-size:14px;padding:2px 7px">@00:44</span> 时间码胶囊。Frame.io 把评论钉在某一帧、画一圈；明知把一句话钉在某一秒，只亮那一段蓝点。</p>
+    <div class="map" style="margin-top:6px"><span>深色夜间</span><span class="ar">→</span><span class="to">白天的工作台 + 油画</span><span>紫色手绘圈</span><span class="ar">→</span><span class="to">品牌蓝 #3361cc</span></div>
+  </div>
+</footer>
+
+<script>
+  // 14 段分镜缩略：第 13 段亮起，其余复用
+  const strip = document.getElementById('strip');
+  const imgs = ['08-library','01-study','08-library','03-cafe','08-library','06-japanese','08-library','01-study','08-library','10-concrete','08-library','07-balcony','08-library','01-study'];
+  imgs.forEach((n, i) => {
+    const d = document.createElement('div');
+    d.className = 'sh' + (i === 12 ? ' lit' : '');
+    d.innerHTML = '<i></i><i></i><img src="../../assets/backgrounds/' + n + '.jpg" alt="">' + (i === 12 ? '<span class="scan"></span>' : '');
+    strip.appendChild(d);
+  });
+  const dot = document.createElement('span'); dot.className = 'dot'; strip.appendChild(dot);
+
+  // 连接笔画：从对话气泡右端牵出，落成标题卡外的手绘圈
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.getElementById('anno');
+  const hero = document.querySelector('.hero').getBoundingClientRect();
+  const bb = document.getElementById('bubble').getBoundingClientRect();
+  const tc = document.getElementById('tcard').getBoundingClientRect();
+  const cx = tc.left + tc.width / 2 - hero.left, cy = tc.top + tc.height / 2 - hero.top;
+  const S = { x: bb.right - hero.left + 12, y: bb.top + bb.height / 2 - hero.top };
+  // 手绘圈：原稿中心 (237,127)，按标题卡中心平移
+  const ringD = 'M262 30 C 170 14, 72 40, 52 98 C 32 158, 92 214, 214 222 C 330 230, 420 196, 422 128 C 424 64, 344 22, 238 26 C 214 27, 196 30, 182 34';
+  const E = { x: cx - 237 + 56, y: cy - 127 + 150 };
+  const linkD = `M${S.x} ${S.y} C ${S.x + 200} ${S.y + 120}, ${E.x - 300} ${E.y + 120}, ${E.x} ${E.y}`;
+  const mk = (d, dl, dur, tf) => {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d); if (tf) p.setAttribute('transform', tf);
+    svg.appendChild(p);
+    const L = Math.ceil(p.getTotalLength()) + 2;
+    p.style.setProperty('--len', L); p.style.setProperty('--dl', dl + 's'); p.style.setProperty('--dur', dur + 's');
+    return p;
+  };
+  const link = mk(linkD, .2, .8);
+  mk(ringD, .9, 1.0, `translate(${cx - 237} ${cy - 127})`);
+  const c = document.createElementNS(NS, 'circle');
+  c.setAttribute('class', 'dotS'); c.setAttribute('cx', S.x); c.setAttribute('cy', S.y); c.setAttribute('r', 5);
+  svg.appendChild(c);
+  // 胶囊落在笔画中段上方
+  const L = link.getTotalLength(), m = link.getPointAtLength(L * 0.5);
+  const pin = document.getElementById('pin');
+  pin.style.left = (m.x - pin.offsetWidth / 2) + 'px';
+  pin.style.top = (m.y - pin.offsetHeight - 14) + 'px';
+</script>
+</body>
+</html>
