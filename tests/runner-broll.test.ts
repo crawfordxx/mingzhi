@@ -37,7 +37,11 @@ describe('运行器 × B-roll 编排', () => {
     expect(withB).toHaveLength(2);
     expect(s1.shots[withB[0]].layout).toBe('broll');
     for (const i of withB) expect(existsSync(join(dir1, s1.shots[i].broll?.file ?? ''))).toBe(true); // 素材引用进版本目录
-    const credits1 = readJson<{ file: string; source: string }[]>(join(dir1, 'credits.json'));
+    const credits1 = readJson<{ file: string; source: string; modified: string[] }[]>(join(dir1, 'credits.json'));
+    // 白平衡：量人物背景图的平均色传给素材加工，图库素材向它微调（modified 带 wb）
+    const bgPath = readJson<ProjectFile>(join(dir1, 'project.json')).background?.path;
+    expect(f.calls.meanColor).toEqual([bgPath]);
+    expect(credits1.some((c) => c.modified.includes('wb'))).toBe(true);
     expect(credits1.map((c) => c.source)).toEqual(['wikimedia', 'wikimedia']);
     expect(readJson<ProjectFile>(join(dir1, 'project.json')).broll?.beats).toHaveLength(2);
     // 节拍（完整字段与落点）存进版本状态，「换一张」按原节拍重做

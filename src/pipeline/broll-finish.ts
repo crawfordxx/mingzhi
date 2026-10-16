@@ -3,7 +3,7 @@ import { existingFiles, type BrollAsset } from '../broll/fulfill.js';
 import { GENERATED_LICENSE, SCREENSHOT_LICENSE } from '../broll/paid.js';
 import { visualLayout } from '../compose/layout.js';
 import { normalizeStoryboard } from '../storyboard/normalize.js';
-import { storyboardIssues } from '../storyboard/rules.js';
+import { applyStoryboardRules, storyboardIssues } from '../storyboard/rules.js';
 import type { Storyboard } from '../storyboard/schema.js';
 
 const SOURCE: Record<BrollAsset['source'], AssetMeta['credit']['source']> = { generate: 'generated', video: 'generated', screenshot: 'screenshot', pexels: 'pexels' };
@@ -15,12 +15,36 @@ export function recordCardAssets(workDir: string, assets: readonly BrollAsset[],
     if (readAssetMeta(workDir, a.file)) continue;
     const source = SOURCE[a.source];
     const license = source === 'generated' ? GENERATED_LICENSE : source === 'screenshot' ? SCREENSHOT_LICENSE : PEXELS_LICENSE;
-    const page = source === 'screenshot' ? a.url ?? '' : source === 'pexels' ? 'https://www.pexels.com' : 'AI 生成';
+    const page = source === 'screenshot' ? a.url ?? '' : source === 'pexels' ? a.page ?? 'https://www.pexels.com' : 'AI 生成';
+    const author = source === 'pexels' && a.author ? { author: a.author, ...(a.authorUrl ? { authorUrl: a.authorUrl } : {}) } : {};
     writeAssetMeta(workDir, a.file, {
-      credit: { file: a.file, source, page, license, attributionRequired: source === 'screenshot', aiGenerated: source === 'generated', modified: [], query: '', fetchedAt },
+      credit: { file: a.file, source, page, ...author, license, attributionRequired: source === 'screenshot', aiGenerated: source === 'generated', modified: [], query: '', fetchedAt },
       candidateId: `card:${a.key}`, kind: /\.mp4$/.test(a.file) ? 'video' : 'photo', focal: { x: 0.5, y: 0.5 },
     });
   }
+}
+
+const AI_LABEL = { kind: 'ai', text: 'AI 生成' } as const;
+
+/** 卡片自带的图或视频（钩子、图片卡）按授权记录加画面角标：AI 生成的标「AI 生成」（与镜头 B-roll 的角标同一视觉）；其余与已有角标原样 */
+export function labelCardMedia(storyboard: Storyboard, workDir: string): Storyboard {
+  const shots = storyboard.shots.map((s) => {
+    const card = s.card;
+    if (!card || (card.template !== 'hook' && card.template !== 'photo') || card.props.mediaLabel) return s;
+    const file = card.props.video ?? card.props.image;
+    if (!file || !readAssetMeta(workDir, file)?.credit.aiGenerated) return s;
+    return { ...s, card: { ...card, props: { ...card.props, mediaLabel: AI_LABEL } } } as Storyboard['shots'][number];
+  });
+  return shots.some((s, i) => s !== storyboard.shots[i]) ? { ...storyboard, shots } : storyboard;
+}
+
+/**
+ * 编排后复检多样性并修正：Task 6 的规则在 B-roll 编排之前套过一次，编排（切卡、铺图、插入）之后分镜变了，再套一次。
+ * 不改时间轴；带素材的镜头去卡片时保留素材；fixes 为修正前违反的规则
+ */
+export function rebalance(storyboard: Storyboard, durationSec: number): { storyboard: Storyboard; fixes: string[] } {
+  const r = applyStoryboardRules(storyboard.shots, durationSec);
+  return { storyboard: r.shots === storyboard.shots ? storyboard : { ...storyboard, shots: r.shots }, fixes: r.fixes };
 }
 
 /** 卡片上还没有图或视频的素材需求（visual）去掉 */

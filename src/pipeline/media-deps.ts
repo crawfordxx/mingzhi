@@ -7,6 +7,7 @@ import { matteVideo } from '../matting/rvm.js';
 import { concatSources } from '../media/concat.js';
 import { extractWav16k } from '../media/extract-audio.js';
 import { probe } from '../media/probe.js';
+import { referenceColor } from '../broll/ref-color.js';
 
 /** 流程里耗时的本地媒体处理（探测、识别、剪切、抠像、合成、渲染、响度）；缺省为真实实现，仅供测试注入假实现 */
 export interface MediaDeps {
@@ -24,11 +25,13 @@ export interface MediaDeps {
   tail: typeof limitTailLoudness;
   /** 多段口播拼成一条合成原片 */
   concat: typeof concatSources;
+  /** 人物背景的平均色（B-roll 白平衡参考） */
+  meanColor: typeof referenceColor;
 }
 
 const REAL_MEDIA: MediaDeps = {
   probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut,
-  matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness, tail: limitTailLoudness, concat: concatSources,
+  matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness, tail: limitTailLoudness, concat: concatSources, meanColor: referenceColor,
 };
 
 /** 注入的实现覆盖真实实现 */

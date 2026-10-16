@@ -58,10 +58,16 @@ const SEAM_BOX: React.CSSProperties = { position: 'absolute', left: 0, top: 0, w
 /** 一个镜头在卡片层上的画法参数：local/dur 为镜头内时间，motion 为进出场，lead 为卡片内部时钟的提前量（见 cardLead） */
 type Part = { shot: Shot; local: number; dur: number; motion: Motion; lead?: number };
 
-/** 分屏的底：有素材时素材铺满 + 渐变压暗，否则米色底 + 模板固定底（钩子黑底、图片） */
+/** 分屏的底：有素材时素材铺满 + 渐变压暗（整片自检发现图上文字看不清时再整体压暗 broll.dim），否则米色底 + 模板固定底（钩子黑底、图片） */
 const SplitBase: React.FC<Part> = ({ shot, local, dur }) => (
   <div style={{ ...SEAM_BOX, background: THEME.stage }}>
-    {shot.broll ? <><BrollMedia broll={shot.broll} local={local} dur={dur} /><AbsoluteFill style={{ background: SPLIT_SHADE }} /></> : shot.card ? renderBackdrop(shot.card, local, dur) : null}
+    {shot.broll ? (
+      <>
+        <BrollMedia broll={shot.broll} local={local} dur={dur} />
+        <AbsoluteFill style={{ background: SPLIT_SHADE }} />
+        {shot.broll.dim ? <AbsoluteFill style={{ background: `rgba(0, 0, 0, ${shot.broll.dim})` }} /> : null}
+      </>
+    ) : shot.card ? renderBackdrop(shot.card, local, dur) : null}
   </div>
 );
 
@@ -88,7 +94,7 @@ const FloatMedia: React.FC<{ broll: Broll; local: number; dur: number; exit: num
 };
 
 /** 浮层：人物全屏，顶部浮一张紧凑卡片（白卡变玻璃）；带固定底的模板（钩子、图片）连底一起放进圆角小窗；没有卡片时在胸前浮素材小窗 */
-const FloatCard: React.FC<Part> = ({ shot, local, dur, motion }) => {
+const FloatCard: React.FC<Part> = ({ shot, local, dur, motion, lead }) => {
   if (!shot.card) return shot.broll ? <FloatMedia broll={shot.broll} local={local} dur={dur} exit={motion.exit} /> : null;
   const backdrop = renderBackdrop(shot.card, local, dur);
   const frame: React.CSSProperties = backdrop ? { borderRadius: THEME.radius / FLOAT_SCALE, overflow: 'hidden', boxShadow: GLASS.boxShadow } : {};
@@ -96,7 +102,7 @@ const FloatCard: React.FC<Part> = ({ shot, local, dur, motion }) => {
     <div style={{ position: 'absolute', left: 0, top: FLOAT_TOP, width: CANVAS.width, height: CANVAS.seam, transform: `scale(${FLOAT_SCALE})`, transformOrigin: 'top center', ...frame }}>
       {backdrop}
       <SurfaceContext.Provider value={backdrop ? 'paper' : 'float'}>
-        <CardMotion card={shot.card} local={local} dur={dur} motion={motion} />
+        <CardMotion card={shot.card} local={local} dur={dur} motion={motion} lead={lead} />
       </SurfaceContext.Provider>
     </div>
   );
@@ -143,16 +149,22 @@ export const CardLayer: React.FC<{ shots: Shot[]; sec: number }> = ({ shots, sec
   );
 };
 
-/** 单卡静帧合成（1080×960）：不做进出场，直接画模板在当前帧的状态；镜头时长取合成时长（可由 inputProps.dur 指定） */
-export const CardStill: React.FC<{ card: CardSpec; dur?: number }> = ({ card }) => {
+/** 隐去全部文字（整片自检量铺图卡片的文字对比度：与正常静帧逐像素相减得到文字像素与背后的底色）；!important 盖过模板的行内颜色 */
+const HIDE_TEXT = '* { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }';
+
+/**
+ * 单卡静帧合成（1080×960）：不做进出场，直接画模板在当前帧的状态；镜头时长取合成时长（可由 inputProps.dur 指定）。
+ * 给了 shot 时按成片的画法画这个镜头的卡片区（分屏素材做底、卡片排在图上）；hideText 时文字透明
+ */
+export const CardStill: React.FC<{ card: CardSpec; dur?: number; shot?: Shot; hideText?: boolean }> = ({ card, shot, hideText }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
   const local = frame / fps;
   const dur = durationInFrames / fps;
   return (
     <AbsoluteFill style={{ background: THEME.stage }}>
-      {renderBackdrop(card, local, dur)}
-      {renderCard(card, local, dur)}
+      {hideText ? <style>{HIDE_TEXT}</style> : null}
+      {shot ? <CardLayer shots={[{ ...shot, start: 0, end: dur }]} sec={local} /> : <>{renderBackdrop(card, local, dur)}{renderCard(card, local, dur)}</>}
     </AbsoluteFill>
   );
 };

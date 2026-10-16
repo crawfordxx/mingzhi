@@ -76,6 +76,14 @@ describe('进度明细', () => {
     expect(detailOfStep('qa-cards', { qa: { cards: [{ shotIndex: 0, scores: [], revised: 0, passed: false }], hard: [] } }, project)?.kind).toBe('qa');
     expect(detailOfStep('qa-cards', { qa: { cards: [], hard: [] } }, project)).toBeUndefined();
     expect(detailOfStep('qa-final', { qa: { cards: [], hard: [{ id: 'fps', ok: true, detail: '30' }] } }, project)?.kind).toBe('qa');
+    // 整片自检：以复测为准，带指标与局部重做（工作台直播显示）
+    const metric = { id: 'blank' as const, label: '上半屏空白率', value: 0.9, limit: 0.8, ok: false, detail: '最高 90%', shots: [2] };
+    const before = { ok: false, durationSec: 10, metrics: [metric], templates: [], skipped: [] };
+    const after = { ...before, ok: true, metrics: [{ ...metric, ok: true, value: 0.5, shots: [] }] };
+    const film = { before, after, actions: [{ shotIndex: 2, kind: 'overlay' as const, detail: 'title 改浮层' }], unfixed: [] };
+    expect(detailOfStep('qa-film', { film }, project)).toEqual({ kind: 'qa', data: { phase: 'film', ok: true, redone: true, actions: film.actions,
+      metrics: [{ id: 'blank', label: '上半屏空白率', value: 0.5, limit: 0.8, ok: true, detail: '最高 90%', shots: [] }] } });
+    expect(detailOfStep('qa-film', {}, project)).toBeUndefined();
     expect(detailOfStep('broll', { storyboard: { shots: [{ start: 0, end: 3, layout: 'full' }] } }, project)?.kind).toBe('shot');
     expect(detailOfStep('broll', {}, project)).toBeUndefined();
     expect(detailOfStep('plan', {}, project)).toBeUndefined();

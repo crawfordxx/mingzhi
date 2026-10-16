@@ -17,6 +17,7 @@ import type { CoverAspect } from '../cover/generate.js';
 import type { CoverStyleId } from '../cover/styles.js';
 import type { HardCheck } from '../qa/hard.js';
 import type { CardQaEntry } from '../qa/visual.js';
+import type { FilmQa } from '../qa/film-redo.js';
 
 export interface ProjectArtifacts { wav?: string; cut?: string; person?: string; ass?: string; output?: string; final?: string; cover43?: string; cover34?: string }
 
@@ -60,6 +61,8 @@ export interface ProjectFile {
   costs?: { total: number; budget: number | null; entries: CostEntry[] };
   /** 自检（P4）：卡片视觉自检报告与成片硬检查；加 --no-qa 时缺省 */
   qa?: { cards: CardQaEntry[]; hard: HardCheck[] };
+  /** 整片自检（P7）：静止、空白率、首帧、模板多样性、摄影级画面覆盖、素材复用、音效重复、铺图卡片可读性，以及局部重做与复测 */
+  film?: FilmQa;
   artifacts: ProjectArtifacts;
 }
 

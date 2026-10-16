@@ -3,6 +3,7 @@ import type { CaptionLine } from '../captions/lines.js';
 import type { Cut } from '../cut/llm-cuts.js';
 import type { HardCheck } from '../qa/hard.js';
 import type { CardQaEntry, CardScore } from '../qa/visual.js';
+import type { FilmQa } from '../qa/film-redo.js';
 import type { CardSpec, Storyboard } from '../storyboard/schema.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
 
@@ -123,6 +124,13 @@ export function hardDetail(hard: HardCheck[]): ProgressDetail {
   return { kind: 'qa', data: { phase: 'hard', ok: hard.every((c) => c.ok), checks: hard.map((c) => ({ id: c.id, ok: c.ok, detail: c.detail })) } };
 }
 
+/** 整片自检：各指标（以复测为准，没重做时为首次度量）与局部重做；data: { phase: 'film', ok, metrics, actions, redone } */
+export function filmDetail(film: FilmQa): ProgressDetail {
+  const r = film.after ?? film.before;
+  const metrics = r.metrics.map((m) => ({ id: m.id, label: m.label, value: m.value, limit: m.limit, ok: m.ok, detail: m.detail, shots: m.shots }));
+  return { kind: 'qa', data: { phase: 'film', ok: r.ok, metrics, actions: film.actions, redone: film.after !== undefined } };
+}
+
 /** 当前总花费与上限（元）；不限预算时 budget 为 null；工作台另带项目上限 cap（budget 是本版开始时的剩余额度） */
 export function costDetail(total: number, budget: number | null, cap?: number): ProgressDetail {
   return { kind: 'cost', data: { total, budget, ...(cap !== undefined ? { cap } : {}) } };
@@ -150,5 +158,6 @@ export function detailOfStep(step: string, patch: ProjectPatch, project: Project
   if ((step === 'storyboard' || step === 'broll') && patch.storyboard) return shotsDetail(patch.storyboard);
   if (step === 'qa-cards' && patch.qa && patch.qa.cards.length > 0) return cardsDetail(patch.qa.cards);
   if (step === 'qa-final' && patch.qa && patch.qa.hard.length > 0) return hardDetail(patch.qa.hard);
+  if (step === 'qa-film' && patch.film) return filmDetail(patch.film);
   return undefined;
 }

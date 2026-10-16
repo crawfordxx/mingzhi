@@ -3,6 +3,7 @@ import { AbsoluteFill, Img, staticFile, useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
 import { balanceLines, tokenize, type Token } from './headline.js';
 import { HookGraphic } from './HookGraphic.js';
+import { MediaBadge } from './MediaBadge.js';
 import { ShotVideo } from './ShotVideo.js';
 import { HOOK_MARK_SEC, HOOK_MARK_STAGGER, HOOK_MARK_START } from './timing.js';
 import { CONTENT_W, SafeArea, clampLines, easeAt, fitFontSize, fitScale, lineCount, maxFontSize, springAt, type PropsOf, type TemplateProps } from './parts.js';
@@ -26,7 +27,7 @@ const STAT_PX = 150;
 const STAT_LABEL_PX = 40;
 const LIME_SOFT = 'rgba(212, 242, 60, 0.12)';
 
-/** 钩子卡底：有视频时静音循环铺满、有图时铺图（缓慢推近），都压暗；没有素材时用本地图形兜底（动态几何 + 大号关键词）；不随卡片进出场移动 */
+/** 钩子卡底：有视频时静音循环铺满、有图时铺图（缓慢推近），都压暗，带角标（AI 生成）；没有素材时用本地图形兜底（动态几何 + 大号关键词）；不随卡片进出场移动 */
 export const HookBackdrop: React.FC<TemplateProps<'hook'>> = ({ props, local }) => {
   if (!props.video && !props.image) return <HookGraphic props={props} local={local} />;
   return (
@@ -36,6 +37,7 @@ export const HookBackdrop: React.FC<TemplateProps<'hook'>> = ({ props, local }) 
       )}
       <AbsoluteFill style={{ background: 'rgba(14, 15, 12, 0.5)' }} />
       <AbsoluteFill style={{ background: 'linear-gradient(180deg, rgba(14, 15, 12, 0.5) 0%, rgba(14, 15, 12, 0) 45%, rgba(14, 15, 12, 0.35) 100%)' }} />
+      {props.mediaLabel ? <MediaBadge label={props.mediaLabel} /> : null}
     </AbsoluteFill>
   );
 };

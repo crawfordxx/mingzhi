@@ -39,10 +39,15 @@ const HookVisual = z.discriminatedUnion('source', [generateNeed, videoNeed]);
 const PhotoVisual = z.discriminatedUnion('source', [screenshotNeed, generateNeed]).refine(hasTarget, TARGET_MSG);
 const BrowserVisual = screenshotNeed.refine(hasTarget, TARGET_MSG);
 
+/** 画面角标：网页截图标来源站点（kind=source），AI 生成标「AI 生成」（kind=ai）；镜头 B-roll 与卡片自带的图（钩子、图片卡）共用同一种角标 */
+export const MediaLabelSchema = z.object({ kind: z.enum(['source', 'ai']), text: z.string().trim().min(1).max(30) });
+/** 卡片自带的图或视频的角标（由素材步骤按授权记录填写） */
+const mediaLabel = MediaLabelSchema.optional();
+
 const card = <T extends TemplateId, P extends z.ZodTypeAny>(template: T, props: P) => z.object({ template: z.literal(template), props });
 
 export const CardSpecSchema = z.discriminatedUnion('template', [
-  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(chip).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional(), video: z.string().optional(), visual: HookVisual.optional(), source: short.optional() })),
+  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(chip).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional(), video: z.string().optional(), visual: HookVisual.optional(), source: short.optional(), mediaLabel })),
   card('title', z.object({ title: text, subtitle: text.optional(), crumb: short.optional() })),
   card('bigNumber', z.object({ value: z.string().trim().min(1).max(10), unit: short.optional(), label: text, chips: z.array(chip).max(18).optional(), highlight: z.array(chip).max(6).optional() })),
   card('chips', z.object({ groups: z.array(z.object({ label: chip, items: z.array(z.object({ text: chip, mark: z.enum(['yes', 'no', 'maybe']) })).min(1).max(5) })).min(1).max(2) })),
@@ -52,7 +57,7 @@ export const CardSpecSchema = z.discriminatedUnion('template', [
   card('toggles', z.object({ title: short.optional(), rows: z.array(z.object({ label: chip, on: z.boolean() })).min(1).max(4), footnote: text.optional() })),
   card('strikeList', z.object({ title: short.optional(), items: z.array(chip).min(1).max(5), reveal })),
   card('browser', z.object({ url: z.string().trim().min(1).max(80), title: text.optional(), image: z.string().optional(), visual: BrowserVisual.optional() })),
-  card('photo', z.object({ image: z.string().min(1).optional(), video: z.string().min(1).optional(), visual: PhotoVisual.optional(), label: short.optional(), sublabel: text.optional() })),
+  card('photo', z.object({ image: z.string().min(1).optional(), video: z.string().min(1).optional(), visual: PhotoVisual.optional(), label: short.optional(), sublabel: text.optional(), mediaLabel })),
   /** placed：CTA 已提前到倒数第 5–8 秒（见 compose/ending 的 placeCta），归一化时不再把它拉回末尾，也不当作位置错误降级 */
   card('cta', z.object({ actions: z.array(z.string().trim().min(1).max(6)).min(1).max(3), placed: z.boolean().optional() })),
   card('flow', z.object({ crumb: short.optional(), title: short.optional(), steps: z.array(z.object({ label: chip, note: short.optional() })).min(2).max(5), loop: z.boolean().optional(), reveal })),
@@ -90,12 +95,18 @@ export const BrollSchema = z.object({
   kenBurns: z.object({ from: RectSchema, to: RectSchema }).optional(),
   durationSec: z.number().finite().positive().optional(),
   /** 画面角标：网页截图标来源站点（kind=source），AI 生成标「AI 生成」（kind=ai）；图库素材不标（署名在 credits 与导出文本里） */
-  label: z.object({ kind: z.enum(['source', 'ai']), text: z.string().trim().min(1).max(30) }).optional(),
+  label: MediaLabelSchema.optional(),
+  /** 分屏铺图时底图额外压暗（叠加黑色的不透明度）：整片自检发现图上的浅色字对比度不够时加 */
+  dim: z.number().min(0).max(0.8).optional(),
 }).refine((b) => (BROLL_EXTS[b.kind] as readonly string[]).includes(extOf(b.file)), '素材扩展名与类型不符');
 export type Broll = z.infer<typeof BrollSchema>;
 
-export const ShotSchema = z.object({ start: z.number().finite(), end: z.number().finite(), layout: z.enum(LAYOUTS), card: CardSpecSchema.optional(), broll: BrollSchema.optional() });
-export type Shot = { start: number; end: number; layout: Layout; card?: CardSpec; broll?: Broll };
+/**
+ * lead：卡片内部时钟的起点（秒）。整片自检把静止的卡片镜头切成两段、后段换版式时，后段延续前段的卡片（计数、弹入、逐条出现不重放）；
+ * 缺省按 compose/card-carry 的 cardLead 规则
+ */
+export const ShotSchema = z.object({ start: z.number().finite(), end: z.number().finite(), layout: z.enum(LAYOUTS), card: CardSpecSchema.optional(), broll: BrollSchema.optional(), lead: z.number().min(0).max(MAX_SHOT_SEC).optional() });
+export type Shot = { start: number; end: number; layout: Layout; card?: CardSpec; broll?: Broll; lead?: number };
 /** 背景乐情绪；模型漏写或写错时按 chill */
 export const MOODS = ['chill', 'tech', 'upbeat'] as const satisfies readonly Mood[];
 export const DEFAULT_MOOD: Mood = 'chill';

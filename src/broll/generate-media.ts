@@ -55,10 +55,12 @@ async function convertTo30fps(cfg: AppConfig, input: string, output: string): Pr
   }
 }
 
-interface PexelsResponse { photos?: { src?: { large2x?: string } }[] }
+interface PexelsResponse { photos?: { src?: { large2x?: string }; url?: string; photographer?: string; photographer_url?: string }[] }
+/** Pexels 命中的署名信息：作品页、摄影师与主页（Pexels License 不强制署名，但记录下来随 credits 导出） */
+export interface PexelsHit { page: string; author?: string; authorUrl?: string }
 
-/** Pexels 图库（用户自备 key，可选）：搜一张方图下载；没有结果返回 false */
-export async function searchPexels(apiKey: string, query: string, dest: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<boolean> {
+/** Pexels 图库（用户自备 key，可选）：搜一张方图下载，返回作品页与摄影师；没有结果返回 false */
+export async function searchPexels(apiKey: string, query: string, dest: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<PexelsHit | false> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const res = await fetchImpl(`https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=square`, {
     headers: { Authorization: apiKey },
@@ -66,8 +68,9 @@ export async function searchPexels(apiKey: string, query: string, dest: string, 
   });
   if (!res.ok) throw new Error(`Pexels 搜索失败 ${res.status}：${(await res.text()).slice(0, 200)}`);
   const json = (await res.json()) as PexelsResponse;
-  const photoUrl = json.photos?.[0]?.src?.large2x;
-  if (!photoUrl) return false;
+  const photo = json.photos?.[0];
+  const photoUrl = photo?.src?.large2x;
+  if (!photo || !photoUrl) return false;
   await downloadTo(photoUrl, dest, fetchImpl);
-  return true;
+  return { page: photo.url ?? 'https://www.pexels.com', ...(photo.photographer ? { author: photo.photographer } : {}), ...(photo.photographer_url ? { authorUrl: photo.photographer_url } : {}) };
 }

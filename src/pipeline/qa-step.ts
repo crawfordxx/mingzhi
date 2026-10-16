@@ -8,6 +8,9 @@ import type { LlmClient } from '../llm/kexiang.js';
 import { hardChecks as realHardChecks, type HardCheck } from '../qa/hard.js';
 import { defaultPalette } from '../qa/palette.js';
 import { qaCards as realQaCards, type CardQaEntry, type QaCardsOptions } from '../qa/visual.js';
+import { filmSummary, type FilmReport } from '../qa/film.js';
+import { contentEnd, measureFilm } from '../qa/film-measure.js';
+import { planRedo, type FilmQa, type RedoAction } from '../qa/film-redo.js';
 import { CANVAS, type Storyboard } from '../storyboard/schema.js';
 import { captionCenterY, visualLayout } from '../compose/layout.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
@@ -15,9 +18,9 @@ import type { ProjectFile, ProjectPatch } from './project.js';
 /** 自检结果：卡片视觉自检报告与成片硬检查（跳过自检时两者都为空） */
 export interface PipelineQa { cards: CardQaEntry[]; hard: HardCheck[] }
 /** 仅供测试注入的自检实现；缺省时用真实实现（不跑 Remotion 打包） */
-export interface QaDeps { qaCards?: typeof realQaCards; hardChecks?: typeof realHardChecks }
+export interface QaDeps { qaCards?: typeof realQaCards; hardChecks?: typeof realHardChecks; /** 整片度量（抽帧、渲染静帧）；测试注入假实现 */ film?: typeof measureFilm }
 
-type Complete<S extends 'qa-cards' | 'qa-final'> = (step: S, message: string, patch?: ProjectPatch) => ProjectFile;
+type Complete<S extends 'qa-cards' | 'qa-final' | 'qa-film'> = (step: S, message: string, patch?: ProjectPatch) => ProjectFile;
 
 export const cardsSummary = (report: CardQaEntry[]): string => {
   const passed = report.filter((e) => e.passed).length;
@@ -92,4 +95,64 @@ export async function runQaFinal(ctx: QaFinalContext, video: string, storyboard:
   }
   complete('qa-final', message, { qa: { cards, hard } });
   return hard;
+}
+
+/** redo：是否允许局部重做（CLI 与工作台首版重做；修改版本只检查，免得改掉用户点名的版式）；measure 缺省为真实度量 */
+export interface QaFilmContext { cfg: AppConfig; workDir: string; redo: boolean; signal?: AbortSignal; measure?: typeof measureFilm }
+/** 一版成片：视频文件、它对应的分镜与片尾开始时刻 */
+export interface FilmCut { video: string; storyboard: Storyboard; outroStartSec?: number }
+
+const actionText = (actions: RedoAction[]): string => actions.map((a) => `第 ${a.shotIndex + 1} 镜：${a.detail}`).join('；');
+
+async function measureCut(ctx: QaFilmContext, cut: FilmCut): Promise<FilmReport> {
+  const o = { ffmpeg: ctx.cfg.ffmpeg, workDir: ctx.workDir, video: cut.video, storyboard: cut.storyboard, signal: ctx.signal };
+  return (ctx.measure ?? measureFilm)(cut.outroStartSec === undefined ? o : { ...o, outroStartSec: cut.outroStartSec });
+}
+
+/**
+ * 整片自检：度量 → 不达标且允许时按指标出一轮局部重做（只改目标镜头）→ 重渲（分段缓存只重渲受影响的镜头）→ 复测。
+ * 度量或重渲出错（余额不足、取消除外）只记进度，沿用原成片
+ */
+export async function runQaFilm(ctx: QaFilmContext, cut: FilmCut, captions: TimedCaption[], rerender: (storyboard: Storyboard) => Promise<FilmCut>, complete: Complete<'qa-film'>): Promise<{ cut: FilmCut; film?: FilmQa }> {
+  let before: FilmReport;
+  try {
+    before = await measureCut(ctx, cut);
+  } catch (err) {
+    rethrowIfCancelled(err);
+    complete('qa-film', `整片自检失败，已跳过（成片不受影响）：${err instanceof Error ? err.message : String(err)}`);
+    return { cut };
+  }
+  const plan = before.ok || !ctx.redo ? undefined : planRedo(cut.storyboard, before, captions, contentEnd(cut.storyboard));
+  const unfixed = plan?.unfixed ?? [];
+  const head = filmSummary(before);
+  if (!plan || plan.actions.length === 0) {
+    const film: FilmQa = { before, actions: [], unfixed };
+    complete('qa-film', [head, ...before.skipped, ...unfixed].join(' · '), { film });
+    return { cut, film };
+  }
+  complete('qa-film', `${head} · 局部重做：${actionText(plan.actions)}`);
+  return redoOnce(ctx, cut, { before, actions: plan.actions, unfixed }, plan.storyboard, rerender, complete);
+}
+
+/** 按重做后的分镜重渲并复测；重渲失败时保留原成片 */
+async function redoOnce(ctx: QaFilmContext, cut: FilmCut, film: FilmQa, storyboard: Storyboard, rerender: (s: Storyboard) => Promise<FilmCut>, complete: Complete<'qa-film'>): Promise<{ cut: FilmCut; film: FilmQa }> {
+  let next: FilmCut;
+  try {
+    next = await rerender(storyboard);
+  } catch (err) {
+    rethrowIfBalance(err);
+    rethrowIfCancelled(err);
+    complete('qa-film', `局部重做渲染失败，保留原成片：${err instanceof Error ? err.message : String(err)}`, { film });
+    return { cut, film };
+  }
+  let after: FilmReport | undefined;
+  try {
+    after = await measureCut(ctx, next);
+  } catch (err) {
+    rethrowIfCancelled(err);
+  }
+  const done: FilmQa = { ...film, ...(after ? { after } : {}) };
+  const tail = [...(after?.skipped ?? []), ...film.unfixed];
+  complete('qa-film', [`局部重做后：${after ? filmSummary(after) : '复测失败'}`, ...tail].join(' · '), { film: done, storyboard: next.storyboard });
+  return { cut: next, film: done };
 }

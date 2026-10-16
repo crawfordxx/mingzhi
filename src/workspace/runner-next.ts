@@ -10,7 +10,7 @@ import { validateBroll } from '../pipeline/broll-step.js';
 import { validateStyles } from '../pipeline/finish-step.js';
 import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
-import { brollStage, composeStage, finalQaStage, placeEnding, qaCardsStage, type BrollStageExtra } from '../pipeline/stages.js';
+import { brollStage, composeStage, filmQaStage, finalQaStage, placeEnding, qaCardsStage, whiteBalanceOf, type BrollStageExtra } from '../pipeline/stages.js';
 import type { BrollMark } from '../pipeline/broll-redo.js';
 import type { BeatRecord } from '../pipeline/broll-beats.js';
 import { writeStoryboardCredits } from '../broll/credit-store.js';
@@ -97,9 +97,10 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
   // CTA 提前（幂等：剪辑改了时间线或片尾设置变了会重新放置；已提前的 CTA 先还原再放）
   const placed = placeEnding(args, timed.storyboard, timed.captions, plan.outputDurationSec);
   // 素材名额先让给没改动的卡片（它们的视频已经付过费），改动过的卡片排在后面
-  const storyboard = c.stages.has('broll')
-    ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, { captions: timed.captions, deferShots: changedShots(p.state, placed), edit: brollEdit(p, c) })
-    : placed;
+  const storyboard = c.stages.has('broll') ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, {
+    captions: timed.captions, deferShots: changedShots(p.state, placed), edit: brollEdit(p, c),
+    whiteBalance: await whiteBalanceOf(args, env.record({}).background?.path ?? person.person),
+  }) : placed;
   linkBroll(storyboard, env.base, env.dir);
   // 节拍记录：素材步骤跑了用它更新后的，否则沿用父版本
   const brollBeats = c.stages.has('broll') ? env.record({}).broll?.beats : parentBeats(p);
@@ -203,6 +204,8 @@ async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change,
   };
   const res = await composeStage(args, input, env.complete);
   env.complete('compose', `分段渲染：重渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
+  // 修改版本只做整片自检、不局部重做：用户点名的改动不被自检改掉
+  await filmQaStage(args, input, res, env.complete, false);
   return { changed: changedAgainstParent(p, res), rerendered: rerenderedAgainst(p, res), hashes: res.hashes, contents: res.contents, ...(res.outroStartSec === undefined ? {} : { outroStartSec: res.outroStartSec }) };
 }
 
@@ -214,7 +217,7 @@ async function cover(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, 
   if (linked.length === COVER_FILES.length) env.record({ artifacts: { cover34, cover43 }, ...(p.project?.cover ? { cover: p.project.cover } : {}) });
 }
 
-/** 修改版本：校验应用 → 只重跑受影响的阶段 → 只检查改动过的卡片 → 渲染（复用缓存）→ 成片检查（每版都做）→ 封面 */
+/** 修改版本：校验应用 → 只重跑受影响的阶段 → 只检查改动过的卡片 → 渲染（复用缓存）→ 整片自检（只检查）→ 成片检查（每版都做）→ 封面 */
 export async function produceNext(env: VersionEnv, input: string, parentN: number, raw: EditOp[], summary: string): Promise<VersionOutcome> {
   const p = readParent(env, parentN);
   const c = planChange(env, p.state, raw);

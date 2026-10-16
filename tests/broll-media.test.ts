@@ -81,15 +81,17 @@ describe('generateVideoFromImage', () => {
 });
 
 describe('searchPexels', () => {
-  it('带 key 搜方图，下载第一张 large2x；没有结果返回 false', async () => {
+  it('带 key 搜方图，下载第一张 large2x 并返回作品页与摄影师；没有结果返回 false', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mz-px-'));
     const seen: { url: string; auth?: string }[] = [];
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       seen.push({ url, auth: (init?.headers as Record<string, string> | undefined)?.Authorization });
-      if (url.startsWith('https://api.pexels.com')) return new Response(JSON.stringify({ photos: url.includes('nothing') ? [] : [{ src: { large2x: 'https://images.pexels.com/p.jpg' } }] }));
+      const photo = { src: { large2x: 'https://images.pexels.com/p.jpg' }, url: 'https://www.pexels.com/photo/coins-123/', photographer: 'Ann Lee', photographer_url: 'https://www.pexels.com/@ann' };
+      if (url.startsWith('https://api.pexels.com')) return new Response(JSON.stringify({ photos: url.includes('nothing') ? [] : [photo] }));
       return new Response('img');
     }) as unknown as typeof fetch;
-    expect(await searchPexels('pk', 'coins jar', join(dir, 'p.jpg'), { fetchImpl })).toBe(true);
+    // 返回作品页与摄影师（Pexels 卡片兜底素材也要有作者记录）
+    expect(await searchPexels('pk', 'coins jar', join(dir, 'p.jpg'), { fetchImpl })).toEqual({ page: 'https://www.pexels.com/photo/coins-123/', author: 'Ann Lee', authorUrl: 'https://www.pexels.com/@ann' });
     expect(seen[0].url).toContain('query=coins%20jar');
     expect(seen[0].auth).toBe('pk');
     expect(await searchPexels('pk', 'nothing', join(dir, 'q.jpg'), { fetchImpl })).toBe(false);

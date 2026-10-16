@@ -124,7 +124,8 @@ function evidenceToTitle(card: Extract<CardSpec, { template: 'evidenceList' }>):
 }
 
 const replaceAt = (shots: Shot[], i: number, shot: Shot): Shot[] => shots.map((s, k) => (k === i ? shot : s));
-const demote = (s: Shot): Shot => ({ start: s.start, end: s.end, layout: 'full' });
+/** 去掉卡片：编排后带素材的分屏保留素材（只剩上半屏铺图，不把已放好的 B-roll 丢掉），否则回人物全屏 */
+const demote = (s: Shot): Shot => (s.broll && s.layout === 'split' ? { start: s.start, end: s.end, layout: 'split', broll: s.broll } : { start: s.start, end: s.end, layout: 'full' });
 
 /** 换掉第 i 个镜头的卡片：evidenceList 能转标题卡且不新造连续段就转，否则改为人物全屏 */
 function breakAt(shots: Shot[], i: number): Shot[] {

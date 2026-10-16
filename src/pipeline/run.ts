@@ -23,7 +23,7 @@ import { costDetail, detailOfStep, type ProgressDetail } from './detail.js';
 import type { PipelineQa, QaDeps } from './qa-step.js';
 import type { MediaDeps } from './media-deps.js';
 import {
-  analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, finalQaStage, matteStage, qaCardsStage, storyboardStage,
+  analyzeStage, backgroundStage, captionsStage, composeStage, coverStage, cutStage, filmQaStage, finalQaStage, matteStage, qaCardsStage, storyboardStage, whiteBalanceOf,
   type Analysis, type Complete,
 } from './stages.js';
 
@@ -32,7 +32,7 @@ export { throttledMatteProgress, throttledRenderProgress } from './stages.js';
 /** edit：工作台修改版本的说明（应用了哪些修改、复用了什么）；runPipeline 不发 */
 export type PipelineStep =
   | 'probe' | 'audio' | 'asr' | 'cuts' | 'plan' | 'render' | 'background' | 'matte' | 'captions' | 'storyboard' | 'broll'
-  | 'qa-cards' | 'compose' | 'loudness' | 'qa-final' | 'cover' | 'edit' | 'done';
+  | 'qa-cards' | 'compose' | 'loudness' | 'qa-film' | 'qa-final' | 'cover' | 'edit' | 'done';
 /** detail 是给工作台「剪辑直播」用的结构化数据（可选，旧调用方可以忽略；message 文本不变） */
 export interface ProgressEvent { step: PipelineStep; message: string; detail?: ProgressDetail }
 export interface PipelineArgs {
@@ -145,13 +145,16 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
   await cutStage(args, a.plan.keep, cut, complete);
   let base = cut;
   let subject: SubjectBox | null = null;
+  let bgPath: string | undefined;
   if (args.background) {
     const bg = await backgroundStage(args, args.background, complete);
+    bgPath = bg.path;
     base = join(args.workDir, 'person.mp4');
     subject = (await matteStage(args, cut, bg.path, { person: base }, complete)).subject;
   }
   const captions = await captionsStage(args, a, join(args.workDir, 'captions.ass'), complete);
-  const storyboard = await storyboardStage(args, captions, a.plan.outputDurationSec, args.workDir, complete);
+  const whiteBalance = await whiteBalanceOf(args, bgPath ?? base);
+  const storyboard = await storyboardStage(args, captions, a.plan.outputDurationSec, args.workDir, complete, whiteBalance);
   return { captions, storyboard, base, subject };
 }
 
@@ -159,15 +162,17 @@ async function produce(args: PipelineArgs, a: Analysis, complete: Complete): Pro
 async function runSteps(args: PipelineArgs, projectPath: string, complete: Complete, meter: CostMeter): Promise<PipelineResult> {
   const analysis = await analyzeStage(args, join(args.workDir, 'audio16k.wav'), complete);
   const p = await produce(args, analysis, complete);
-  const { storyboard, cards } = await qaCardsStage(args, meter, p.storyboard, p.captions, complete);
-  // 授权记录按卡片自检之后的最终分镜重写（自检可能改掉带图的卡）
-  if (args.broll?.enabled) writeStoryboardCredits(storyboard, args.workDir, args.workDir);
+  const checked = await qaCardsStage(args, meter, p.storyboard, p.captions, complete);
   const raw = join(args.workDir, 'final.raw.mp4');
   const cacheDir = args.cacheDir ?? join(args.workDir, 'segments');
   const outputDurationSec = analysis.plan.outputDurationSec;
-  const input = { person: p.base, subject: p.subject, captions: p.captions, storyboard, outputDurationSec, raw, output: args.output, cacheDir };
-  const composed = await composeStage(args, input, complete);
-  const hard = await finalQaStage(args, args.output, storyboard, cards, complete, composed.outroStartSec);
+  const input = { person: p.base, subject: p.subject, captions: p.captions, storyboard: checked.storyboard, outputDurationSec, raw, output: args.output, cacheDir };
+  const film = await filmQaStage(args, input, await composeStage(args, input, complete), complete, true);
+  const { storyboard } = film;
+  const cards = checked.cards;
+  // 授权记录按卡片自检、整片自检之后的最终分镜重写（自检可能改掉带图的卡、去掉复用的素材）
+  if (args.broll?.enabled) writeStoryboardCredits(storyboard, args.workDir, args.workDir);
+  const hard = await finalQaStage(args, args.output, storyboard, cards, complete, film.composed.outroStartSec);
   await coverStage(args, meter, storyboard, p.captions, p.base, complete);
   complete('done', args.output);
   return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: p.captions, storyboard, qa: { cards, hard } };

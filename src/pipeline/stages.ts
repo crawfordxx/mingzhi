@@ -32,7 +32,7 @@ import { cardScoreDetail, progressDetail } from './detail.js';
 import { runCover, runLoudness } from './finish-step.js';
 import { mediaOf } from './media-deps.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
-import { runQaCards, runQaFinal } from './qa-step.js';
+import { runQaCards, runQaFilm, runQaFinal, type FilmCut } from './qa-step.js';
 import type { PipelineArgs, PipelineStep, ProgressEvent } from './run.js';
 
 /** 每步完成：先把这一步的结果落盘到 project.json，再回调进度 */
@@ -157,12 +157,27 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
   return res.storyboard;
 }
 
-/** 分镜 → 素材（素材文件写到 brollDir/broll，缓存按需求内容命中） */
+/** 分镜 → 素材（素材文件写到 brollDir/broll，缓存按需求内容命中）；whiteBalance 为人物背景平均色（见 whiteBalanceOf） */
 export async function storyboardStage(
-  args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete,
+  args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete, whiteBalance?: BrollStageExtra['whiteBalance'],
 ): Promise<Storyboard> {
   const planned = placeEnding(args, await planStoryboard(args.llm, captions, durationSec, complete), captions, durationSec);
-  return brollStage(args, planned, durationSec, brollDir, complete, { captions });
+  return brollStage(args, planned, durationSec, brollDir, complete, { captions, ...(whiteBalance ? { whiteBalance } : {}) });
+}
+
+/**
+ * B-roll 白平衡参考色：人物背景图（没换背景时用人像视频第一帧）的平均色；素材获取关闭时不量。
+ * 量不出来不影响出片（素材只套项目 LUT），在进度里说明
+ */
+export async function whiteBalanceOf(args: PipelineArgs, file: string): Promise<BrollStageExtra['whiteBalance']> {
+  if (!args.broll?.enabled) return undefined;
+  try {
+    return await mediaOf(args.media).meanColor(args.cfg.ffmpeg, file);
+  } catch (err) {
+    rethrowIfCancelled(err);
+    args.onProgress?.({ step: 'broll', message: `白平衡参考色量取失败，素材只套项目 LUT：${err instanceof Error ? err.message : String(err)}` });
+    return undefined;
+  }
 }
 
 /** CTA 提前到倒数第 5–8 秒（分镜阶段落盘，之后的归一化认 placed 标记不再拉回）；放不下就留在末尾 */
@@ -170,8 +185,8 @@ export function placeEnding(args: PipelineArgs, storyboard: Storyboard, captions
   return { ...storyboard, shots: placeCta(storyboard.shots, captions, contentSec, resolveOutro(args.outro).enabled) };
 }
 
-/** 素材步骤的附加输入：字幕（节拍规划要用）、排到最后取的卡片素材镜头、修改版本的重做请求（有它就不重新规划节拍） */
-export interface BrollStageExtra { captions?: TimedCaption[]; deferShots?: number[]; edit?: BrollContext['edit'] }
+/** 素材步骤的附加输入：字幕（节拍规划要用）、排到最后取的卡片素材镜头、修改版本的重做请求（有它就不重新规划节拍）、白平衡参考色 */
+export interface BrollStageExtra { captions?: TimedCaption[]; deferShots?: number[]; edit?: BrollContext['edit']; whiteBalance?: BrollContext['whiteBalance'] }
 
 /** 只跑素材步骤（修改版本的 regenerateVisual、换一张 B-roll 也走这里，预算与 maxVideos 由 args.broll / args.meter 约束）；素材写到 brollDir/broll，credits.json 写到 args.workDir */
 export function brollStage(
@@ -222,7 +237,7 @@ export interface ComposeInput {
 }
 
 /** 配乐音效与字幕样式落盘 → 分段渲染（命中缓存的镜头直接复用）到 raw → 响度统一得到成片；返回重渲与复用的镜头序号 */
-export async function composeStage(args: PipelineArgs, c: ComposeInput, complete: Complete): Promise<SegmentedResult & { outroStartSec?: number }> {
+export async function composeStage(args: PipelineArgs, c: ComposeInput, complete: Complete): Promise<Composed> {
   const { workDir, cfg } = args;
   const m = mediaOf(args.media);
   if (relative(workDir, c.person).startsWith('..')) throw new Error(`人像视频必须在工作目录内：${c.person}`);
@@ -272,6 +287,26 @@ async function runTailGuard(output: string, durationSec: number, outroStartSec: 
     rethrowIfCancelled(err);
     complete('loudness', `片尾响度校正失败，已保留原成片：${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+export type Composed = SegmentedResult & { outroStartSec?: number };
+
+/**
+ * 整片自检（args.qa 为 false 时跳过）：度量成片；redo 为 true 时不达标的指标做一轮局部重做，按新分镜重渲（分段缓存只重渲受影响的镜头）。
+ * 返回最终分镜与最终一次渲染的结果
+ */
+export async function filmQaStage(args: PipelineArgs, input: ComposeInput, composed: Composed, complete: Complete, redo: boolean): Promise<{ storyboard: Storyboard; composed: Composed }> {
+  if (args.qa === false) return { storyboard: input.storyboard, composed };
+  let last = composed;
+  const rerender = async (storyboard: Storyboard): Promise<FilmCut> => {
+    last = await composeStage(args, { ...input, storyboard }, complete);
+    complete('compose', `局部重做：重渲 ${last.rendered.length} 段 · 复用缓存 ${last.reused.length} 段`);
+    return { video: input.output, storyboard, ...(last.outroStartSec === undefined ? {} : { outroStartSec: last.outroStartSec }) };
+  };
+  const ctx = { cfg: args.cfg, workDir: args.workDir, redo, signal: args.signal, measure: args.qaDeps?.film };
+  const cut: FilmCut = { video: input.output, storyboard: input.storyboard, ...(composed.outroStartSec === undefined ? {} : { outroStartSec: composed.outroStartSec }) };
+  const res = await runQaFilm(ctx, cut, input.captions, rerender, complete);
+  return { storyboard: res.cut.storyboard, composed: last };
 }
 
 /** 成片硬检查（args.qa 为 false 时跳过） */

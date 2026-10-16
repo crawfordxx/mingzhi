@@ -19,6 +19,8 @@ import { runPipeline, type ProgressEvent } from '../src/pipeline/run.js';
 import type { QaDeps } from '../src/pipeline/qa-step.js';
 import type { CardQaEntry } from '../src/qa/visual.js';
 import type { HardCheck } from '../src/qa/hard.js';
+import type { FilmReport } from '../src/qa/film.js';
+import type { Storyboard } from '../src/storyboard/schema.js';
 import { hasModels, hasRvm } from './helpers/models.js';
 
 describe('burnSubtitles', () => {
@@ -40,10 +42,12 @@ describe('burnSubtitles', () => {
 
 const FAKE_STORYBOARD = { shots: [{ start: 0, end: 2, layout: 'split', card: { template: 'title', props: { title: '测试' } } }], bgm: 'tech', coverTitle: { title: '高性价比', subtitle: '测试封面' } };
 
-/** 假卡片自检：不跑 Remotion 打包，原样返回分镜与一份报告；记录收到的参数 */
+/** 假卡片自检：不跑 Remotion 打包，原样返回分镜与一份报告；记录收到的参数。整片自检给达标的假度量 */
 const fakeQa = (report: CardQaEntry[] = []): { deps: QaDeps; seen: { meter?: unknown; storyboard?: unknown }[] } => {
   const seen: { meter?: unknown; storyboard?: unknown }[] = [];
-  return { seen, deps: { qaCards: async (o) => { seen.push({ meter: o.meter, storyboard: o.storyboard }); return { storyboard: o.storyboard, report }; } } };
+  // 整片自检默认给达标的假度量（流程顺序确定，不触发局部重做）；要真实度量的用例自己去掉 film
+  const film: QaDeps['film'] = async () => ({ ok: true, durationSec: 0, metrics: [], templates: [], skipped: [] });
+  return { seen, deps: { qaCards: async (o) => { seen.push({ meter: o.meter, storyboard: o.storyboard }); return { storyboard: o.storyboard, report }; }, film } };
 };
 
 describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
@@ -75,13 +79,17 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
       if (e.step === 'plan') snapshots.plan = JSON.parse(readFileSync(join(work, 'project.json'), 'utf8')) as ProjectFile;
     };
     const input = join(import.meta.dirname, 'fixtures', 'talk.mp4');
-    const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, qaDeps: fakeQa().deps, onProgress });
+    // 整片自检用真实度量（成片抽帧、分镜指标）
+    const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, qaDeps: { ...fakeQa().deps, film: undefined }, onProgress });
     const src = await probe(input, cfg);
     const out = await probe(res.output, cfg);
     // 成片 = 剪后口播 + 最后一句后的留白 + 品牌片尾（OUTRO_SEC）；扣掉片尾后仍比原片短（留白不足 1 秒）
     expect(out.durationSec - OUTRO_SEC).toBeLessThan(src.durationSec - 1.0);
     // 渲染进度事件（compose）会连续出现多次，按相邻去重后比较
-    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1])).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
+    // 整片自检不达标时会局部重做一轮（再渲染一次、再测一次），所以中段可能重复出现 compose、loudness、qa-film
+    const order = events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]);
+    expect(order.slice(0, 11)).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness']);
+    expect(order.slice(-4)).toEqual(['qa-film', 'qa-final', 'cover', 'done']);
     // 兜底分行按字数换行，「高性价比」可能被拆到相邻两行，所以拼接所有字幕行再断言
     const assText = readFileSync(join(work, 'captions.ass'), 'utf8').split('\n')
       .filter((l) => l.startsWith('Dialogue:')).map((l) => l.split(',').slice(9).join(',')).join('');
@@ -107,6 +115,10 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     // 成片硬检查用真实实现（只跑 ffmpeg）：7 项，结果落盘，未通过也不影响出片
     expect(project.qa?.hard.map((c) => c.id)).toEqual(['resolution', 'fps', 'loudness', 'truePeak', 'outroLoudness', 'blackFrames', 'safeArea', 'contrast']);
     expect(project.qa?.cards).toEqual([]);
+    // 整片自检：真实成片抽帧得到静止、空白率、首帧三项，加上分镜类指标，写进 project.json
+    expect(project.film?.before.metrics.map((m) => m.id)).toEqual(['static', 'blank', 'firstFrame', 'diversity', 'coverage', 'reuse', 'sfx', 'readability']);
+    expect(project.film?.before.skipped).toEqual([]);
+    expect(events.find((e) => e.step === 'qa-film')?.message).toMatch(/^整片自检 \d\/8 达标/);
     expect(events.find((e) => e.step === 'qa-final')?.message).toMatch(/^成片检查/);
     expect(res.qa).toEqual(project.qa);
     expect(project.storyboardDropped).toBe(0);
@@ -147,7 +159,7 @@ describe.skipIf(!hasModels())('runPipeline 配乐、响度与封面（需要本�
     } });
     expect(rawSeen).toBe(true);
     expect(existsSync(join(workDir, 'final.raw.mp4'))).toBe(false);
-    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-5)).toEqual(['compose', 'loudness', 'qa-final', 'cover', 'done']);
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-6)).toEqual(['compose', 'loudness', 'qa-film', 'qa-final', 'cover', 'done']);
     const notes = events.filter((e) => e.message.includes('pnpm fetch-assets'));
     expect(notes).toHaveLength(2);
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
@@ -177,7 +189,7 @@ describe.skipIf(!hasModels() || !hasRvm())('runPipeline 换背景（需要 ASR �
     expect(matteMessages.length).toBeGreaterThan(1);
     expect(matteMessages[0]).toMatch(/抠像 \d+\/\d+ 帧/);
     expect(matteMessages[matteMessages.length - 1]).toContain('抠像换背景完成');
-    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
+    expect(steps).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-film', 'qa-final', 'cover', 'done']);
     const project = JSON.parse(readFileSync(join(workDir, 'project.json'), 'utf8')) as ProjectFile;
     expect(project.background?.spec).toEqual({ kind: 'preset', id: 'study' });
     expect(project.artifacts.person).toBe(join(workDir, 'person.mp4'));
@@ -250,6 +262,27 @@ describe.skipIf(!hasModels())('runPipeline 自检步骤（需要本地模型）'
     expect(existsSync(res.output)).toBe(true);
   }, 240_000);
 
+  it('整片自检不达标：局部重做只改目标镜头、按新分镜重渲一次、复测；最终分镜用于成片检查并写进 project.json', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'mz-film-'));
+    const bad: FilmReport = { ok: false, durationSec: 2, metrics: [{ id: 'blank', label: '上半屏空白率', value: 0.9, limit: 0.8, ok: false, detail: '最高 90%', shots: [0] }], templates: [], skipped: [] };
+    const measured: Storyboard[] = [];
+    const film: QaDeps['film'] = async (o) => { measured.push(o.storyboard); return measured.length === 1 ? bad : { ...bad, ok: true, metrics: [{ ...bad.metrics[0], ok: true, value: 0.4, shots: [] }] }; };
+    const hardSeen: string[] = [];
+    const events: ProgressEvent[] = [];
+    const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm, cover: false,
+      qaDeps: { ...fakeQa().deps, film, hardChecks: async (video) => { hardSeen.push(video); return []; } }, onProgress: (e) => events.push(e) });
+    expect(measured).toHaveLength(2);
+    expect(measured[0].shots[0].layout).toBe('split');
+    expect(measured[1].shots[0]).toMatchObject({ layout: 'overlay', card: { template: 'title' } });
+    expect(res.storyboard.shots[0].layout).toBe('overlay');
+    const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
+    expect(project.storyboard?.shots[0].layout).toBe('overlay');
+    expect(project.film).toMatchObject({ before: { ok: false }, actions: [{ shotIndex: 0, kind: 'overlay' }], after: { ok: true } });
+    expect(events.filter((e) => e.step === 'qa-film').map((e) => e.message).join('\n')).toMatch(/局部重做：第 1 镜：标题卡改浮层[\s\S]*局部重做后：整片自检 1\/1 达标/);
+    expect(events.some((e) => e.step === 'compose' && /^局部重做：重渲 \d+ 段/.test(e.message))).toBe(true);
+    expect(hardSeen).toEqual([join(workDir, 'out.mp4')]);
+  }, 240_000);
+
   it('qa: false 跳过两个自检步骤，project.json 没有 qa', async () => {
     const workDir = mkdtempSync(join(tmpdir(), 'mz-qa-'));
     const qaDeps: QaDeps = { qaCards: async () => { throw new Error('不应自检卡片'); }, hardChecks: async () => { throw new Error('不应检查成片'); } };
@@ -257,6 +290,7 @@ describe.skipIf(!hasModels())('runPipeline 自检步骤（需要本地模型）'
     const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm, cover: false, qa: false, qaDeps, onProgress: (e) => events.push(e) });
     expect(events.map((e) => e.step)).not.toContain('qa-cards');
     expect(events.map((e) => e.step)).not.toContain('qa-final');
+    expect(events.map((e) => e.step)).not.toContain('qa-film');
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
     expect(project.qa).toBeUndefined();
     expect(res.qa).toEqual({ cards: [], hard: [] });
@@ -344,7 +378,7 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     const events: ProgressEvent[] = [];
     const res = await runPipeline({ input: CLIP, workDir, output: join(workDir, 'out.mp4'), cfg, llm: brollLlm, brollDeps: deps, qaDeps: fakeQa().deps,
       broll: { enabled: true, maxVideos: 1, budgetYuan: 10 }, onProgress: (e) => events.push(e) });
-    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-7)).toEqual(['broll', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
+    expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-8)).toEqual(['broll', 'qa-cards', 'compose', 'loudness', 'qa-film', 'qa-final', 'cover', 'done']);
     const brollEvents = events.filter((e) => e.step === 'broll').map((e) => e.message);
     // 节拍编排先于卡片素材；假模型不会规划节拍：节拍整体跳过，不中断出片；钩子先生图，图生视频在 B-roll 上限（短片 ¥1）下放不下
     expect(brollEvents[0]).toContain('节拍规划失败');

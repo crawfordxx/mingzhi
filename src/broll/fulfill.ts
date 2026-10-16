@@ -10,8 +10,10 @@ import { normalizeStoryboard } from '../storyboard/normalize.js';
 import type { Storyboard, Visual } from '../storyboard/schema.js';
 import { visualsOf, type VisualNeed } from '../storyboard/visuals.js';
 import type { NamedSource } from './gather.js';
+import type { PexelsHit } from './generate-media.js';
 
-export interface BrollAsset { key: string; file: string; source: 'screenshot' | 'generate' | 'pexels' | 'video'; url?: string; cost?: number; cached?: boolean }
+/** page、author、authorUrl：图库（Pexels）素材的作品页与摄影师，写进授权记录 */
+export interface BrollAsset { key: string; file: string; source: 'screenshot' | 'generate' | 'pexels' | 'video'; url?: string; cost?: number; cached?: boolean; page?: string; author?: string; authorUrl?: string }
 export interface BrollDeps {
   /** size：截图视口（缺省 1080×1350） */
   screenshot(url: string, out: string, size?: { width: number; height: number }): Promise<void>;
@@ -20,7 +22,8 @@ export interface BrollDeps {
   image(prompt: string, out: string, opts?: { size?: string }): Promise<{ cost?: number; url?: string }>;
   /** Seedance 图生视频：以 imageUrl 为首帧（不做文生视频）；onStatus：长任务的状态回调 */
   video(prompt: string, imageUrl: string, out: string, onStatus?: (status: string) => void): Promise<{ cost?: number }>;
-  pexels?(query: string, out: string): Promise<boolean>;
+  /** Pexels 卡片兜底：返回作品页与摄影师（旧实现返回 true）；没有结果返回 false */
+  pexels?(query: string, out: string): Promise<boolean | PexelsHit>;
   /** 免费图库来源（Wikimedia 免 key；Pexels、Pixabay 有 key 才有）；测试注入假来源，缺省为空 */
   sources?: NamedSource[];
   /** 下载图库素材用的 fetch（测试注入） */
@@ -95,7 +98,7 @@ const yuanOf = (assets: BrollAsset[]): number => assets.reduce((s, a) => s + (a.
  * 校验非空后再改名为正式文件，这样中途失败或进程被杀都不会留下看似有效的缓存。
  * 失败（抛错、没结果、没写出文件或文件为空）返回原因。
  */
-async function produce<T extends { cost?: number } | boolean | void>(out: string, fn: (tmp: string) => Promise<T>): Promise<{ result: T } | string> {
+async function produce<T extends { cost?: number } | PexelsHit | boolean | void>(out: string, fn: (tmp: string) => Promise<T>): Promise<{ result: T } | string> {
   const tmp = out.replace(/\.(\w+)$/, '.part.$1');
   rmSync(tmp, { force: true });
   try {
@@ -176,7 +179,9 @@ async function tryPexels(env: Env, key: string, term: string): Promise<Attempt> 
   if (!pexels) return { reason: '未配置图库' };
   const file = relFile(key, 'jpg');
   const r = await produce(join(env.workDir, file), (tmp) => pexels(term, tmp));
-  return typeof r === 'string' ? { reason: `图库失败：${r}` } : { asset: { key, file, source: 'pexels' } };
+  if (typeof r === 'string') return { reason: `图库失败：${r}` };
+  const hit = typeof r.result === 'object' ? r.result : {};
+  return { asset: { key, file, source: 'pexels', ...hit } };
 }
 
 const firstWords = (prompt: string): string => prompt.split(/\s+/).slice(0, PEXELS_WORDS).join(' ');

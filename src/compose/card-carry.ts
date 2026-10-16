@@ -33,9 +33,10 @@ export function cardCarry(shots: Shot[], sec: number): { index: number; t: numbe
  */
 export const FRESH_LEAD_SEC = 0.4;
 
-/** 第 index 个镜头卡片内部时钟的提前量（秒）：从无卡镜头切进分屏为 FRESH_LEAD_SEC，其余为 0。shots 为画面时间轴 */
+/** 第 index 个镜头卡片内部时钟的提前量（秒）：镜头给了 lead（延续前段的卡片）就用它；从无卡镜头切进分屏为 FRESH_LEAD_SEC，其余为 0。shots 为画面时间轴 */
 export function cardLead(shots: Shot[], index: number): number {
   const shot = shots[index];
+  if (shot?.lead !== undefined) return shot.lead;
   const prev = shots[index - 1];
   return shot && prev && visualLayout(shot) === 'split' && !drawsCard(prev) ? FRESH_LEAD_SEC : 0;
 }

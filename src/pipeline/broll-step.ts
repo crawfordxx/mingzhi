@@ -8,7 +8,7 @@ import { PROJECT_LUT } from '../broll/process.js';
 import type { BeatEnv } from '../broll/realize.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { runBeats, type BeatRecord, type BeatsCtx } from './broll-beats.js';
-import { brollMix, finalize, keepExisting, mixSummary, recheck, recordCardAssets, writeCredits } from './broll-finish.js';
+import { brollMix, finalize, keepExisting, labelCardMedia, mixSummary, rebalance, recheck, recordCardAssets, writeCredits } from './broll-finish.js';
 import { redoShots, type BrollMark } from './broll-redo.js';
 import { brollDetail } from './detail.js';
 import { rethrowIfCancelled } from '../cancel.js';
@@ -200,10 +200,14 @@ async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: St
   }
 }
 
-/** 归一化 → 规则复检 → credits.json → 记录并汇总 */
+/** 归一化 → 多样性复检并修正（首版）→ 卡片图角标 → 规则复检 → credits.json → 记录并汇总 */
 function finishBroll(ctx: BrollContext, placed: Shots, assets: BrollAsset[], failures: { shotIndex: number; reason: string }[], budget: BrollBudget, durationSec: number, complete: Complete): Storyboard {
-  const final = finalize(placed.storyboard, ctx.workDir, durationSec);
+  const normalized = finalize(placed.storyboard, ctx.workDir, durationSec);
+  // 首版编排后复检多样性并修正；修改版本不套规则（用户点名的改动不被规则改掉）
+  const ruled = ctx.edit ? { storyboard: normalized, fixes: [] } : rebalance(normalized, durationSec);
+  const final = labelCardMedia(ruled.storyboard, ctx.workDir);
   const issues = recheck(final, durationSec);
+  if (ruled.storyboard !== normalized) ctx.onProgress?.({ step: 'broll', message: `编排后复检修正：${ruled.fixes.join('；')}` });
   writeCredits(final, ctx.workDir, ctx.creditsDir ?? ctx.workDir);
   const mix = brollMix(final, ctx.workDir);
   const spent = budget.spent();

@@ -4,6 +4,7 @@
  * - flat：stage 再加上白卡/窗口里没有内容的平坦留白（白卡面积 − 内容高 × 卡内宽）。近似审片报告的「平坦块」口径
  *   （6×6 块标准差 < 2.5，白卡内部的纯白也算平坦），两者关系：flat = stage + 卡内留白 / 卡片区面积
  * 带固定底的模板（钩子、图片）整块铺满，两个口径都按 0 计（图片与钩子图形的纹理不建模）；cta 叠在全屏人物上，不适用（0）
+ * 口径统一（Task 10）：这里只是分镜与模板阶段的快速估计；整片验收以成片抽帧的平坦块口径为准（src/qa/film-frames.ts，任何时刻 ≤ 80%）
  */
 import type { CardSpec } from '../../src/storyboard/schema.js';
 import type { PropsOf } from './parts.js';

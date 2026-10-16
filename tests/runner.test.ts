@@ -59,12 +59,15 @@ describe('runFirstVersion', () => {
     expect(f.calls.qaOnly).toEqual([undefined]);
     expect(f.calls.covers).toEqual([{ style: 'bauhaus', workDir: join(base, 'covers', 'bauhaus') }]);
     expect(f.calls.hard).toEqual([join(v1, FINAL_FILE)]);
+    // 整片自检检查本版成片（假度量达标，不触发局部重做）；白平衡参考取人物背景图
+    expect(f.calls.film).toEqual([join(v1, FINAL_FILE)]);
+    expect(f.calls.meanColor).toEqual([readJson<ProjectFile>(join(v1, 'project.json')).background?.path]);
     expect(f.calls.llm).toEqual(expect.arrayContaining(['剪口误', '分镜']));
     expect(meta.costYuan).toBeCloseTo(f.calls.llm.length * 0.01 + 1.2); // 每次模型调用 ¥0.01 + 封面
     expect(meta.qaScore).toBeCloseTo(8.5);
     expect(f.events.every((e) => e.spaceId === f.spaceId && e.version === 1)).toBe(true);
     expect(f.events.at(-1)?.step).toBe('done');
-    expect(f.events.map((e) => e.step)).toEqual(expect.arrayContaining(['probe', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover']));
+    expect(f.events.map((e) => e.step)).toEqual(expect.arrayContaining(['probe', 'asr', 'cuts', 'plan', 'render', 'background', 'matte', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-film', 'qa-final', 'cover']));
     expect(f.store.get(f.spaceId).versions[0].status).toBe('done');
   });
 
@@ -96,6 +99,8 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     const v2 = f.store.versionDir(f.spaceId, 2);
     expect(meta).toMatchObject({ n: 2, parent: 1, status: 'done', summary: '换字幕样式' });
     expect(f.calls).toMatchObject({ llm: [], renderCut: [], matte: [], composite: [], covers: [], qaOnly: [] });
+    // 修改版本也做整片自检（只检查，不局部重做）
+    expect(f.calls.film).toEqual([join(f.store.versionDir(f.spaceId, 2), FINAL_FILE)]);
     for (const name of ['cut.mp4', 'person.mp4', 'cover-3x4.png']) expect(inode(join(v2, name)), name).toBe(inode(join(v1, name)));
     // 字幕样式影响每一帧：全部镜头重渲
     expect(meta.changedShots).toEqual(stateOf(f, 2).storyboard.shots.map((_, i) => i));
