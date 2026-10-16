@@ -11,6 +11,7 @@ import type { Storyboard, Visual } from '../storyboard/schema.js';
 import { visualsOf, type VisualNeed } from '../storyboard/visuals.js';
 import type { NamedSource } from './gather.js';
 import type { PexelsHit } from './generate-media.js';
+import { hostOf, verifiedOrder } from './verify-url.js';
 
 /** page、author、authorUrl：图库（Pexels）素材的作品页与摄影师，写进授权记录 */
 export interface BrollAsset { key: string; file: string; source: 'screenshot' | 'generate' | 'pexels' | 'video'; url?: string; cost?: number; cached?: boolean; page?: string; author?: string; authorUrl?: string }
@@ -135,14 +136,11 @@ function findCached(env: Env, key: string, source: Visual['source'], videoReques
   return hit ? { key, file: relFile(key, hit[0]), source: hit[1], cached: true } : undefined;
 }
 
-const hostOf = (url: string): string => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
-
-/** 截图网址：分镜给的网址只是模型记忆，必须联网核实（搜索结果里有同一域名才用它，否则用搜索给出的网址）；只有搜索词时直接搜 */
+/** 截图网址：分镜给的网址只是模型记忆，必须联网核实（与 B-roll 节拍同一口径，见 verifiedOrder）；只有搜索词时直接搜 */
 async function screenshotUrls(env: Env, need: { url?: string; query?: string }): Promise<string[]> {
   const host = need.url ? hostOf(need.url) : '';
   const found = await env.deps.search(host ? `${host} ${need.query ?? ''}`.trim() : need.query ?? '');
-  const verified = need.url && found.some((u) => hostOf(u) === host) ? [need.url, ...found.filter((u) => u !== need.url)] : found;
-  return verified.slice(0, SEARCH_TRIES);
+  return verifiedOrder(need.url, found).slice(0, SEARCH_TRIES);
 }
 
 async function tryScreenshot(env: Env, key: string, need: { url?: string; query?: string }, spend: Spend): Promise<Attempt> {

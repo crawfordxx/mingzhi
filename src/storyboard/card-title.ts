@@ -83,18 +83,16 @@ export function cardTitleComplete(card: CardSpec): boolean {
  * 不改入参；完整标题与无卡片镜头原样返回同一个对象
  */
 export function completeCardTitles(shots: Shot[], captions: TimedCaption[]): TitleCheck {
-  const fixes: string[] = [];
-  const unfixed: string[] = [];
-  const out = shots.map((s, i): Shot => {
+  const checked = shots.map((s, i): { shot: Shot; fix?: string; unfixed?: string } => {
     const title = s.card ? titleOf(s.card) : undefined;
-    if (!s.card || title === undefined || isCompleteTitle(title)) return s;
+    if (!s.card || title === undefined || isCompleteTitle(title)) return { shot: s };
     const next = repairedTitle(title, captions, s);
-    if (next === undefined) {
-      unfixed.push(`第 ${i + 1} 个镜头的标题「${title}」话没说完，应以句末或完整短语结束`);
-      return s;
-    }
-    fixes.push(`第 ${i + 1} 个镜头的标题「${title}」话没说完，已改为「${next}」`);
-    return { ...s, card: withTitle(s.card, next) };
+    if (next === undefined) return { shot: s, unfixed: `第 ${i + 1} 个镜头的标题「${title}」话没说完，应以句末或完整短语结束` };
+    return { shot: { ...s, card: withTitle(s.card, next) }, fix: `第 ${i + 1} 个镜头的标题「${title}」话没说完，已改为「${next}」` };
   });
-  return { shots: out, fixes, unfixed };
+  return {
+    shots: checked.map((c) => c.shot),
+    fixes: checked.flatMap((c) => (c.fix ? [c.fix] : [])),
+    unfixed: checked.flatMap((c) => (c.unfixed ? [c.unfixed] : [])),
+  };
 }

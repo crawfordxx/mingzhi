@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type { LlmClient } from '../llm/kexiang.js';
 import { rethrowIfBalance } from '../llm/errors.js';
+import { rethrowIfCancelled } from '../cancel.js';
 import { SHEET_MAX } from './contact-sheet.js';
 import { dedupHash, DUPLICATE_HAMMING, hamming } from './dhash.js';
 import { stillOf } from './still-fetch.js';
@@ -201,7 +202,7 @@ function fitBox(box: FocalBox): FocalBox | undefined {
 
 /**
  * 对选中的单张图再问一次视觉模型：主体中心与包围框（0-1 坐标）。
- * 取不到有效结果时回退画面中心；余额不足照常抛出（继续重试只会白白耗时）
+ * 取不到有效结果时回退画面中心；余额不足与取消照常抛出（继续重试只会白白耗时）
  */
 export async function locateFocal(client: LlmClient, imageFile: string): Promise<FocalResult> {
   try {
@@ -214,6 +215,7 @@ export async function locateFocal(client: LlmClient, imageFile: string): Promise
     return box ? { focal, box } : { focal };
   } catch (err) {
     rethrowIfBalance(err);
+    rethrowIfCancelled(err);
     return { focal: { ...CENTER } };
   }
 }

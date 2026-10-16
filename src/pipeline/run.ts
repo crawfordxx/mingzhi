@@ -176,8 +176,8 @@ async function runSteps(args: PipelineArgs, projectPath: string, complete: Compl
   const film = await filmQaStage(args, input, await composeStage(args, input, complete), complete, true);
   const { storyboard } = film;
   const cards = checked.cards;
-  // 授权记录按卡片自检、整片自检之后的最终分镜重写（自检可能改掉带图的卡、去掉复用的素材）
-  if (args.broll?.enabled) writeStoryboardCredits(storyboard, args.workDir, args.workDir);
+  // 授权记录按卡片自检、整片自检之后的最终分镜重写（自检可能改掉带图的卡、去掉复用的素材）；与工作台一样每次都写（关了素材也写一份空的）
+  writeStoryboardCredits(storyboard, args.workDir, args.workDir);
   const hard = await finalQaStage(args, args.output, storyboard, cards, complete, film.composed.outroStartSec);
   const cover = await coverStage(args, meter, storyboard, p.captions, p.base, complete);
   complete('done', args.output);

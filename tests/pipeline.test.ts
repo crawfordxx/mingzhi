@@ -382,6 +382,8 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
     expect(project.broll).toBeUndefined();
     expect(existsSync(join(workDir, 'broll'))).toBe(false);
+    // 与工作台一致：关了素材也写 credits.json（没有素材时为空）
+    expect(JSON.parse(readFileSync(join(workDir, 'credits.json'), 'utf8'))).toEqual([]);
     expect(existsSync(res.output)).toBe(true);
   }, 240_000);
 });

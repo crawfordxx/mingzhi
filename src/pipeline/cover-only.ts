@@ -51,6 +51,13 @@ export async function runCoverOnly(args: CoverOnlyArgs): Promise<CoverResult> {
   const rec = projectRecorder(join(args.workDir, 'project.json'), project.input, project);
   const record: typeof rec = (patch) => rec(patch.costs ? { ...patch, costs: mergeCosts(project.costs, patch.costs) } : patch);
   const complete = makeComplete({ record, meter: args.meter, onProgress: args.onProgress });
+  // 项目上限是累计口径：之前已花的加上这次封面超过上限就不生成（--budget 只管这一次时，同一条片可能累计超过 ¥10）
+  const prior = project.costs?.total ?? 0;
+  if (prior + COVER_YUAN > args.meter.budget + 1e-9) {
+    const reason = `项目累计已花 ¥${prior.toFixed(2)}，再生成封面（约 ¥${COVER_YUAN.toFixed(2)}）会超过上限 ¥${args.meter.budget.toFixed(2)}`;
+    complete('cover', `预算不足，已跳过封面：${reason}`, { coverError: reason });
+    return { missing: reason };
+  }
   const ctx = { workDir: args.workDir, output: args.output, cfg: args.cfg, llm: args.llm, task: args.task, coverDeps: args.coverDeps, meter: args.meter };
   const result = await runCover(ctx, args.cover, project.storyboard, project.captions ?? [], person, complete);
   rec({ costs: mergeCosts(project.costs, costsOf(args.meter)) });

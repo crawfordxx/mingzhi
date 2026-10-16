@@ -10,6 +10,7 @@ import { dedupHash, dhash, hamming } from '../src/broll/dhash.js';
 import { buildContactSheet, contactSheet } from '../src/broll/contact-sheet.js';
 import { downloadImage, THUMB_MAX_BYTES } from '../src/broll/still-fetch.js';
 import { InsufficientBalanceError } from '../src/llm/errors.js';
+import { CancelledError } from '../src/cancel.js';
 import { chooseUnique, EMPTY_PICKED, locateFocal, MIN_QUALITY, MIN_RELEVANCE, pickBest, rankPassing, scoreCandidates, SCORE_MODEL, totalOf, type CandidateScore } from '../src/broll/select.js';
 
 const FFMPEG = process.env.MINGZHI_FFMPEG ?? 'ffmpeg';
@@ -424,5 +425,10 @@ describe('locateFocal', () => {
   it('余额不足照常抛出，不当成普通失败吞掉', async () => {
     const broke: LlmClient = { chatJson: async () => { throw new InsufficientBalanceError(); } };
     await expect(locateFocal(broke, p('red.png'))).rejects.toBeInstanceOf(InsufficientBalanceError);
+  });
+
+  it('取消照常抛出，不回退画面中心', async () => {
+    const stopped: LlmClient = { chatJson: async () => { throw new CancelledError(); } };
+    await expect(locateFocal(stopped, p('red.png'))).rejects.toBeInstanceOf(CancelledError);
   });
 });

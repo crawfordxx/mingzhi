@@ -9,6 +9,7 @@ import { isFullPresent } from './gather.js';
 import type { Beat } from './plan.js';
 import type { BeatEnv } from './realize.js';
 import type { Candidate } from './sources/types.js';
+import { hostOf, verifiedOrder } from './verify-url.js';
 
 /** 付费来源：联网核实网址后截图、GPT Image 生图（兜底）、Seedance 图生视频 */
 export interface PaidDeps {
@@ -27,7 +28,6 @@ export const SCREENSHOT_VIEWPORT = { width: 1080, height: 1350 } as const;
 const IMAGE_SIZE: Record<Beat['present'], string> = { 'broll-full': '9:16', pip: '9:16', split: '4:3', overlay: '16:9' };
 
 const short = (text: string): string => createHash('sha1').update(text).digest('hex').slice(0, 12);
-const hostOf = (url: string): string => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
@@ -39,9 +39,7 @@ export async function verifiedUrls(deps: Pick<PaidDeps, 'search'>, beat: Beat): 
   const hint = beat.urlHint;
   const hintHost = hint ? hostOf(hint) : '';
   const found = await deps.search(hintHost ? `${hintHost} ${topic}` : topic);
-  const same = (u: string): boolean => u.replace(/\/$/, '') === hint?.replace(/\/$/, '');
-  const first = hint && found.some(same) ? [hint] : found.filter((u) => hintHost !== '' && hostOf(u) === hintHost);
-  return [...new Set([...first, ...found])].slice(0, MAX_SHOTS);
+  return verifiedOrder(hint, found).slice(0, MAX_SHOTS);
 }
 
 /** 先写临时文件，非空再改名 */

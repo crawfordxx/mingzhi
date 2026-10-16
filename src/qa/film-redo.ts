@@ -83,7 +83,8 @@ function hookFirst(w: Work, captions: TimedCaption[]): Work {
   const renumbered = w.shots.map((x) => (x.card?.template === 'hook' ? { ...x, card: { ...x.card, props: { ...x.card.props, index: x.card.props.index + 1, total } } } : x));
   const card: CardSpec = { template: 'hook', props: { index: 1, total, headline: text, highlight: [] } };
   const base = { ...w, shots: renumbered };
-  if (s.end - s.start <= HOOK_MAX_SEC + 1e-9) return edit(base, 0, { start: s.start, end: s.end, layout: 'split', card }, 'hook', `改成钩子：${text}`);
+  // 整个镜头改钩子时，原来的 B-roll（可能付过费）留作钩子的铺图底（分屏铺图变体，焦点、压暗、角标原样），不撤
+  if (s.end - s.start <= HOOK_MAX_SEC + 1e-9) return edit(base, 0, { start: s.start, end: s.end, layout: 'split', card, ...(s.broll ? { broll: s.broll } : {}) }, 'hook', `改成钩子：${text}`);
   const at = cutPoint(captions, s.start + 1.5, s.start + HOOK_MAX_SEC, s.start + 3);
   return split(base, { index: 0, at, head: { start: s.start, end: at, layout: 'split', card }, tail: { ...s, start: at } }, `前 ${(at - s.start).toFixed(1)} 秒改成钩子：${text}`);
 }

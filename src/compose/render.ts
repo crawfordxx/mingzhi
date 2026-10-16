@@ -9,6 +9,7 @@ import { CancelledError, throwIfCancelled } from '../cancel.js';
 import { CANVAS, type CardSpec, type TalkProps } from '../storyboard/schema.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { CoverProps } from '../cover/styles.js';
+import type { Palette } from './palette.js';
 import { run } from '../media/exec.js';
 import { loadConfig } from '../config.js';
 import { browserOptions } from './browser.js';
@@ -159,22 +160,22 @@ export function cardSampleFrames(durationSec: number): number[] {
 }
 
 /** 在已有打包上渲染三个取样帧到 files */
-async function renderSamples(serveUrl: string, card: CardSpec, durationSec: number, stills: { frame: number; file: string }[]): Promise<void> {
-  const inputProps = { card, dur: durationSec };
+async function renderSamples(serveUrl: string, card: CardSpec, durationSec: number, stills: { frame: number; file: string }[], palette?: Palette): Promise<void> {
+  const inputProps = { card, dur: durationSec, ...(palette ? { palette } : {}) };
   const composition = await selectComposition({ ...browserOptions(), serveUrl, id: 'CardStill', inputProps });
   for (const s of stills) await renderStill({ ...browserOptions(), composition, serveUrl, inputProps, output: s.file, frame: s.frame, imageFormat: 'png' });
 }
 
-/** 视觉自检用的三联图：卡片在镜头开头后 0.3 秒、中点、结束前 0.3 秒的静帧，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径（调用方用完自行删除）。ffmpeg 由调用方传入（不在渲染层读配置）。传入 serveUrl 时复用已有打包（批量检查时只打一次包），否则自己打包 */
-export async function renderCardFrames(workDir: string, card: CardSpec, durationSec: number, ffmpeg: string, serveUrl?: string): Promise<string> {
+/** 视觉自检用的三联图：卡片在镜头开头后 0.3 秒、中点、结束前 0.3 秒的静帧，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径（调用方用完自行删除）。ffmpeg 由调用方传入（不在渲染层读配置）。传入 serveUrl 时复用已有打包（批量检查时只打一次包），否则自己打包；palette 为这条片的片色（打分对象与成片同一配色），缺省原配色 */
+export async function renderCardFrames(workDir: string, card: CardSpec, durationSec: number, ffmpeg: string, serveUrl?: string, palette?: Palette): Promise<string> {
   const tmp = mkdtempSync(join(tmpdir(), 'mz-strip-'));
   const outDir = join(workDir, 'qa');
   mkdirSync(outDir, { recursive: true });
   const output = join(outDir, `card-${randomUUID()}.png`);
   try {
     const stills = cardSampleFrames(durationSec).map((frame, i) => ({ frame, file: join(tmp, `f${i}.png`) }));
-    if (serveUrl) await renderSamples(serveUrl, card, durationSec, stills);
-    else await withBundle(workDir, (url) => renderSamples(url, card, durationSec, stills));
+    if (serveUrl) await renderSamples(serveUrl, card, durationSec, stills, palette);
+    else await withBundle(workDir, (url) => renderSamples(url, card, durationSec, stills, palette));
     const inputs = stills.flatMap((s) => ['-i', s.file]);
     await run(ffmpeg, ['-v', 'error', '-y', ...inputs, '-filter_complex', 'hstack=inputs=3,scale=1620:480', '-frames:v', '1', output]);
     return output;

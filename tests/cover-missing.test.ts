@@ -146,6 +146,19 @@ describe('--cover-only：复用工作目录里的成片与分镜，只跑封面'
     expect(readFileSync(output, 'utf8')).toBe('film');
   });
 
+  it('项目累计花费加上封面会超过上限：不生成、不花钱，返回原因并记 coverError，成片不动', async () => {
+    const { workDir, output } = finishedWorkDir();
+    const p = readProject(workDir);
+    writeFileSync(join(workDir, 'project.json'), JSON.stringify({ ...p, costs: { ...p.costs!, total: 9.2 } }));
+    const seen: { personVideo?: string; title?: string }[] = [];
+    const res = await runCoverOnly(args(workDir, output, okCovers(seen)));
+    expect(res.missing).toMatch(/累计已花 ¥9\.20.*超过上限 ¥10\.00/);
+    expect(seen).toEqual([]);
+    expect(readProject(workDir).coverError).toMatch(/累计已花/);
+    expect(readProject(workDir).costs?.total).toBeCloseTo(9.2, 4);
+    expect(readFileSync(output, 'utf8')).toBe('film');
+  });
+
   it('没有人像视频（没换背景）时用剪切结果；封面又失败（余额不足）：不抛错，返回原因，coverError 保留，成片不动', async () => {
     const { workDir, output } = finishedWorkDir();
     const p = readProject(workDir);

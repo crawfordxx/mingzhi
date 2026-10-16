@@ -137,10 +137,10 @@ describe('fulfillVisuals 缓存校验', () => {
 });
 
 describe('fulfillVisuals 截图', () => {
-  it('有 url 先联网核实（搜索结果里有同一域名）再截图，相对路径写回 browser.image，visual 保留', async () => {
+  it('有 url 先联网核实（搜索结果里有这个网址）再截图，相对路径写回 browser.image，visual 保留', async () => {
     const dir = workDir();
     const visual: Visual = { source: 'screenshot', url: 'https://example.com/page' };
-    const { deps, calls } = fakeDeps({ search: async (q) => { calls.search.push(q); return ['https://www.example.com/about']; } });
+    const { deps, calls } = fakeDeps({ search: async (q) => { calls.search.push(q); return ['https://www.example.com/about', 'https://example.com/page/']; } });
     const r = await fulfillVisuals(board(browser(0, visual)), deps, opts(dir));
     expect(calls.search).toEqual(['example.com']);
     expect(calls.screenshot).toEqual(['https://example.com/page']);
@@ -148,6 +148,14 @@ describe('fulfillVisuals 截图', () => {
     expect(existsSync(join(dir, file))).toBe(true);
     expect(shotCard(r.storyboard, 0)).toMatchObject({ template: 'browser', props: { image: file, visual } });
     expect(r.assets[0]).toMatchObject({ source: 'screenshot', url: 'https://example.com/page', file });
+  });
+
+  it('搜索结果只对上域名：截搜索里同域名的网址（模型给的路径可能是编的），与 B-roll 节拍同一口径', async () => {
+    const dir = workDir();
+    const visual: Visual = { source: 'screenshot', url: 'https://example.com/made-up-path' };
+    const { deps, calls } = fakeDeps({ search: async (q) => { calls.search.push(q); return ['https://other.example/x', 'https://www.example.com/about']; } });
+    await fulfillVisuals(board(browser(0, visual)), deps, opts(dir));
+    expect(calls.screenshot).toEqual(['https://www.example.com/about']);
   });
 
   it('只有 query 时先搜索，第一个网址失败则用第二个', async () => {
