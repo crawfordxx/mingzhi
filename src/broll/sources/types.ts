@@ -2,7 +2,7 @@
 export interface Candidate {
   /** 来源:原始id */
   id: string;
-  source: 'pexels' | 'pixabay' | 'wikimedia' | 'screenshot' | 'generated';
+  source: 'pexels' | 'pixabay' | 'openverse' | 'wikimedia' | 'screenshot' | 'generated';
   kind: 'video' | 'photo';
   /** 缩略图 URL 或本地路径 */
   thumb: string;

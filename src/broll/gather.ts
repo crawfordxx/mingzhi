@@ -4,7 +4,7 @@ import type { Beat } from './plan.js';
 import type { Candidate, Source, SourceQuery } from './sources/types.js';
 
 /** 一个免费图库来源 */
-export interface NamedSource { name: 'pexels' | 'pixabay' | 'wikimedia'; search: Source }
+export interface NamedSource { name: 'pexels' | 'pixabay' | 'openverse' | 'wikimedia'; search: Source }
 
 /** 每个来源每次取的候选数（5–8） */
 export const PER_SOURCE = 6;

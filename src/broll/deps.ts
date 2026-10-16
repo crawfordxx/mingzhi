@@ -6,6 +6,7 @@ import type { NamedSource } from './gather.js';
 import { generateImage, generateVideoFromImage, searchPexels } from './generate-media.js';
 import { screenshotUrl } from './screenshot.js';
 import { searchUrls } from './search.js';
+import { openverseSource } from './sources/openverse.js';
 import { pexelsSource } from './sources/pexels.js';
 import { pixabaySource } from './sources/pixabay.js';
 import { wikimediaSource } from './sources/wikimedia.js';
@@ -13,11 +14,12 @@ import { wikimediaSource } from './sources/wikimedia.js';
 /** 联网搜索每次最多取几个网址 */
 const SEARCH_TRIES = 2;
 
-/** 免费图库来源：Wikimedia 免 key 一直在；Pexels、Pixabay 只有填了 key 才用 */
+/** 免费图库来源：Openverse（只有照片）与 Wikimedia 免 key 一直在，顺序 Pexels → Pixabay → Openverse → Wikimedia；Pexels、Pixabay 只有填了 key 才用 */
 export function freeSources(cfg: Pick<AppConfig, 'dataDir'>, keys: { pexelsKey?: string; pixabayKey?: string }): NamedSource[] {
   return [
     ...(keys.pexelsKey ? [{ name: 'pexels' as const, search: pexelsSource(keys.pexelsKey) }] : []),
     ...(keys.pixabayKey ? [{ name: 'pixabay' as const, search: pixabaySource(keys.pixabayKey, { dataDir: cfg.dataDir }) }] : []),
+    { name: 'openverse', search: openverseSource() },
     { name: 'wikimedia', search: wikimediaSource() },
   ];
 }

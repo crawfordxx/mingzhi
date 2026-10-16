@@ -59,6 +59,14 @@ describe('attributionText', () => {
     expect(text).toBe('素材：Wikimedia Commons（CC BY 4.0 https://creativecommons.org/licenses/by/4.0/）@Eve（https://commons.wikimedia.org/wiki/User:Eve https://commons.wikimedia.org/wiki/File:B.jpg）');
   });
 
+  it('Openverse CC BY：同 Wikimedia，写出许可链接、作者主页与来源页；CC0 只写来源名', () => {
+    const by = attributionText([entry({
+      source: 'openverse', author: 'Eve', authorUrl: 'https://www.flickr.com/photos/eve', page: 'https://www.flickr.com/photos/eve/1',
+      license: 'CC BY 2.0', licenseUrl: 'https://creativecommons.org/licenses/by/2.0/', attributionRequired: true, modified: [],
+    })]);
+    expect(by).toBe('素材：Openverse（CC BY 2.0 https://creativecommons.org/licenses/by/2.0/）@Eve（https://www.flickr.com/photos/eve https://www.flickr.com/photos/eve/1）');
+  });
+
   it('只有 AI 生成；空列表返回空串', () => {
     expect(attributionText([entry({ source: 'generated', aiGenerated: true, author: undefined, modified: [] })])).toBe('部分画面为 AI 生成');
     expect(attributionText([])).toBe('');

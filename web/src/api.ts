@@ -78,7 +78,7 @@ export type StockProvider = 'pexels' | 'pixabay';
 export interface StockKeyInfo { configured: boolean; source?: KeySource; masked?: string }
 export type StockKeys = Record<StockProvider, StockKeyInfo>;
 
-export type CreditSource = 'pexels' | 'pixabay' | 'wikimedia' | 'screenshot' | 'generated';
+export type CreditSource = 'pexels' | 'pixabay' | 'openverse' | 'wikimedia' | 'screenshot' | 'generated';
 export type CreditMark = 'replace' | 'remove';
 /** 素材来源面板的一条（src/server/credits.ts publicEntry）：file 只是文件名，不含本机路径 */
 export interface CreditItem {

@@ -2,7 +2,7 @@
 import type { CreditItem, CreditMark, CreditSource } from '../api';
 
 const SOURCE: Record<CreditSource, string> = {
-  pexels: 'Pexels', pixabay: 'Pixabay', wikimedia: 'Wikimedia Commons', screenshot: '网页截图', generated: 'AI 生成',
+  pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse', wikimedia: 'Wikimedia Commons', screenshot: '网页截图', generated: 'AI 生成',
 };
 export const sourceLabel = (s: CreditSource): string => SOURCE[s];
 

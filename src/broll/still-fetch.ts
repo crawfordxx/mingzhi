@@ -19,7 +19,7 @@ const HTTP = /^https?:\/\//i;
 const isVideoFile = (path: string): boolean => VIDEO_EXT.test(path);
 const stillName = (id: string): string => createHash('sha1').update(id).digest('hex').slice(0, 16);
 /** Wikimedia 要求带 User-Agent；其它来源原样用传入的 fetch */
-const fetchFor = (c: Candidate, fetchImpl: typeof fetch): typeof fetch => (c.source === 'wikimedia' ? wikimediaFetch(fetchImpl) : fetchImpl);
+const fetchFor = (c: Candidate, fetchImpl: typeof fetch): typeof fetch => (c.source === 'wikimedia' || c.source === 'openverse' ? wikimediaFetch(fetchImpl) : fetchImpl);
 
 /** 流式读取响应体，累计超过 maxBytes 立即中止 */
 async function readCapped(res: Response, maxBytes: number, url: string): Promise<Buffer> {

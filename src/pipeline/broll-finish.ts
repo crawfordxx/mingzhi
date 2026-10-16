@@ -33,7 +33,7 @@ export interface BrollMix { total: number; footage: number; photo: number; scree
 /** 分镜里 B-roll 的构成：实拍（图库视频）、图片（图库照片）、截图、AI 生成，全屏插入次数与镜头素材总时长 */
 export function brollMix(storyboard: Storyboard, workDir: string): BrollMix {
   const metas = storyboardFiles(storyboard).flatMap((f) => { const m = readAssetMeta(workDir, f); return m ? [m] : []; });
-  const stock = metas.filter((m) => ['pexels', 'pixabay', 'wikimedia'].includes(m.credit.source));
+  const stock = metas.filter((m) => ['pexels', 'pixabay', 'openverse', 'wikimedia'].includes(m.credit.source));
   const withBroll = storyboard.shots.filter((s) => s.broll && visualLayout(s) !== 'full');
   return {
     total: metas.length,

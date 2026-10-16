@@ -14,7 +14,7 @@ const VIDEO_TIMEOUT_MS = 180_000;
 export const WIKI_PHOTO_EDGE = 2560;
 const VIDEO_TYPE = /^(video\/|application\/octet-stream)/i;
 
-const fetchFor = (c: Candidate, fetchImpl: typeof fetch): typeof fetch => (c.source === 'wikimedia' ? wikimediaFetch(fetchImpl) : fetchImpl);
+const fetchFor = (c: Candidate, fetchImpl: typeof fetch): typeof fetch => (c.source === 'wikimedia' || c.source === 'openverse' ? wikimediaFetch(fetchImpl) : fetchImpl);
 
 /**
  * Wikimedia 大图取指定宽度的缩略图：缩略图地址形如 …/thumb/a/ab/Name.jpg/640px-Name.jpg，把宽度段换成需要的宽度；

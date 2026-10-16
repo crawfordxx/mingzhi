@@ -15,7 +15,7 @@ export const isCreditAction = (v: unknown): v is CreditAction => (CREDIT_ACTIONS
 
 const EntrySchema = z.object({
   file: z.string().min(1),
-  source: z.enum(['pexels', 'pixabay', 'wikimedia', 'screenshot', 'generated']),
+  source: z.enum(['pexels', 'pixabay', 'openverse', 'wikimedia', 'screenshot', 'generated']),
   page: z.string(),
   author: z.string().optional(),
   authorUrl: z.string().optional(),

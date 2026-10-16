@@ -20,7 +20,10 @@ export interface CreditEntry {
   fetchedAt: string;
 }
 
-const SOURCE_NAME: Partial<Record<Candidate['source'], string>> = { pexels: 'Pexels', pixabay: 'Pixabay', wikimedia: 'Wikimedia Commons' };
+const SOURCE_NAME: Partial<Record<Candidate['source'], string>> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse', wikimedia: 'Wikimedia Commons' };
+
+/** 这些来源的许可各不相同，署名文本里要写出许可与链接、CC BY 再附来源页 */
+const LICENSE_LINKED = new Set<Candidate['source']>(['wikimedia', 'openverse']);
 
 export function writeCredits(dir: string, entries: readonly CreditEntry[]): string {
   mkdirSync(dir, { recursive: true });
@@ -43,12 +46,12 @@ function groupLabel(e: CreditEntry): string | undefined {
   const name = SOURCE_NAME[e.source];
   if (!name) return undefined;
   // CC BY 要求给出许可链接
-  return e.source === 'wikimedia' ? `${name}（${[e.license, e.licenseUrl].filter(Boolean).join(' ')}）` : name;
+  return LICENSE_LINKED.has(e.source) ? `${name}（${[e.license, e.licenseUrl].filter(Boolean).join(' ')}）` : name;
 }
 
 /** 作者后的链接：作者主页；Wikimedia 要署名的再附来源页（CC BY 要求在合理范围内给出出处） */
 function linksOf(e: CreditEntry): string[] {
-  return [e.authorUrl, e.source === 'wikimedia' && e.attributionRequired ? e.page : undefined].filter((u): u is string => !!u);
+  return [e.authorUrl, LICENSE_LINKED.has(e.source) && e.attributionRequired ? e.page : undefined].filter((u): u is string => !!u);
 }
 
 function authorMention(name: string, urls: readonly string[]): string {
