@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Track } from '../src/assets/catalog.js';
+import type { SfxId, Track } from '../src/assets/catalog.js';
 import { DUCK_DB, OPEN_DB, OUTRO_DB, PURE_NUMBER, TIMING, bgmEnvelope, dbAt, pickTrack, sfxCues } from '../src/audio/plan.js';
 import { HOOK_HIT_SEC } from '../src/audio/sfx-plan.js';
+import { HOOK_MARK_SEC, HOOK_MARK_START } from '../render/templates/timing.js';
+import { SFX, sfxPath } from '../src/assets/catalog.js';
+import { lastLoudSec, onsetSec, readWav, rmsPeakSec } from './helpers/wav.js';
+// @ts-expect-error 合成脚本是 .mjs，没有类型声明
+import { SPECS } from '../scripts/make-sfx.mjs';
 import { ANCHOR_SEC, MAX_PER_SFX, MIN_KINDS, sfxKind, sfxStats, type SfxCue } from '../src/audio/sfx-map.js';
 import { visualShots } from '../src/compose/layout.js';
 import { OUTRO_LOGO_SEC } from '../src/compose/ending.js';
@@ -14,6 +19,14 @@ import { clickTimes } from '../render/templates/Toggles.js';
 
 const cap = (start: number, end: number) => ({ start, end, text: 'x' });
 const split = (start: number, end: number, card?: CardSpec): Shot => ({ start, end, layout: 'split', card });
+type SyncKind = 'peak' | 'onset' | 'end';
+/** 音效文件的对齐方式（合成脚本清单里按文件名查） */
+const syncOf = (file: string): SyncKind => (SPECS as { name: string; sync: SyncKind }[]).find((x) => `${x.name}.wav` === file)?.sync ?? 'onset';
+/** 从 wav 实测的对齐时刻：响度峰值 / 起音 / 高潮结束（不用 ANCHOR_SEC 表，避免自我引用） */
+function measuredAnchor(id: SfxId, sync: SyncKind): number {
+  const wav = readWav(sfxPath(id));
+  return sync === 'peak' ? rmsPeakSec(wav) : sync === 'end' ? lastLoudSec(wav) : onsetSec(wav);
+}
 const kindOf = (shots: Shot[], kind: string) => sfxCues(shots).filter((c) => sfxKind(c.sfx) === kind);
 
 describe('bgmEnvelope', () => {
@@ -173,21 +186,22 @@ describe('钩子、全屏 B-roll、片尾的音效', () => {
   const broll = (start: number, end: number, layout: Shot['layout'] = 'broll'): Shot => ({ start, end, layout, broll: { file: 'broll/a.mp4', kind: 'video', focal: { x: 0.5, y: 0.5 } } });
   const FRAME = 1 / 30;
 
-  it('第一张钩子：riser 的高潮落在 hit 上，hit 在标题落定（开始后 HOOK_HIT_SEC）；之后的钩子只有 hit', () => {
+  it('第一张钩子：riser 的高潮落在 hit 上，hit 在标题高亮刷开完成（HOOK_HIT_SEC，Hook.tsx 与它共用同一常量）；之后的钩子只有 hit', () => {
     const cues = sfxCues([split(2, 5, hook(1)), split(5, 8, hook(2)), split(8, 11, hook(3))]);
     const risers = cues.filter((c) => sfxKind(c.sfx) === 'riser');
     const hits = cues.filter((c) => sfxKind(c.sfx) === 'hit');
-    expect(hits.map((c) => c.sec)).toEqual([2.4, 5.4, 8.4]);
+    expect(HOOK_HIT_SEC).toBeCloseTo(HOOK_MARK_START + HOOK_MARK_SEC, 9);
+    expect(hits.map((c) => c.sec)).toEqual([2, 5, 8].map((t) => Math.round((t + HOOK_HIT_SEC) * 1000) / 1000));
     expect(risers).toHaveLength(1);
     expect(risers[0].sfx).toBe('riser');
-    expect(risers[0].sec + ANCHOR_SEC.riser).toBeCloseTo(2.4, 3);
+    expect(risers[0].sec + ANCHOR_SEC.riser).toBeCloseTo(2 + HOOK_HIT_SEC, 3);
     expect(cues.filter((c) => sfxKind(c.sfx) === 'pop')).toHaveLength(0);
   });
-  it('钩子在片头（0 秒起）：来不及放长 riser，换短 riser 从 0 秒起播，高潮仍对上 hit', () => {
+  it('钩子在片头（0 秒起）：来不及放长 riser，换短 riser，高潮仍对上 hit', () => {
     const cues = sfxCues([split(0, 3, hook(1, 1))]);
     const riser = cues.find((c) => sfxKind(c.sfx) === 'riser');
     expect(riser?.sfx).toBe('riserShort');
-    expect(riser?.sec).toBe(0);
+    expect(riser?.sec).toBeCloseTo(HOOK_HIT_SEC - ANCHOR_SEC.riserShort, 3);
     expect((riser?.sec ?? 0) + ANCHOR_SEC.riserShort).toBeCloseTo(HOOK_HIT_SEC, 3);
   });
   it('全屏 B-roll 插入：whoosh 的响度峰值落在画面切入帧（J-cut 晚 2 帧）', () => {
@@ -254,33 +268,29 @@ describe('音效分配规则（整片）', () => {
     const shots = Array.from({ length: 23 }, (_, i): Shot => split(i * 3, i * 3 + 3, { template: 'title', props: { title: `t${i}` } }));
     expect(sfxCues(shots)).toHaveLength(23);
   });
-  it('每个音效与对应画面动作的偏差 ≤ 2 帧（动作时刻按模板动画时间点独立推出）', () => {
+  it('每个音效与对应画面动作的偏差 ≤ 2 帧：用 wav 实测的响度峰值 / 起音 / 高潮对拍模板的动画时间点', () => {
     const shots = film();
     const vis = visualShots(shots);
     const cues = sfxCues(shots, { outroStartSec: 46 });
-    const peakAt = (c: SfxCue): number => c.sec + ANCHOR_SEC[c.sfx];
-    const expected = (kind: string): number[] => {
-      switch (kind) {
-        case 'whoosh': return vis.flatMap((s, i) => (s.broll && (shots[i].layout === 'broll' || shots[i].layout === 'pip') ? [s.start] : []));
-        case 'logo': return [46 + OUTRO_LOGO_SEC];
-        case 'riser': return [0 + HOOK_HIT_SEC];
-        default: return [];
-      }
+    const sync = new Map<string, SyncKind>(Object.entries(SFX).map(([id, file]) => [id, syncOf(file)]));
+    /** 音效在整片时间轴上「与动作对齐」的实测时刻 */
+    const landed = (c: SfxCue): number => c.sec + measuredAnchor(c.sfx, sync.get(c.sfx) as SyncKind);
+    const near = (got: number[], want: number[], label: string): void => {
+      expect(got, label).toHaveLength(want.length);
+      got.forEach((t, i) => expect(Math.abs(t - want[i]), `${label}[${i}] ${t} vs ${want[i]}`).toBeLessThanOrEqual(2 / 30 + 1e-9));
     };
-    for (const kind of ['whoosh', 'logo', 'riser'] as const) {
-      const got = cues.filter((c) => sfxKind(c.sfx) === kind).map(peakAt);
-      expect(got).toHaveLength(expected(kind).length);
-      got.forEach((t, i) => expect(Math.abs(t - expected(kind)[i])).toBeLessThanOrEqual(2 / 30 + 1e-9));
-    }
-    // hit：钩子标题落定 + 数字滚完
-    const hitTimes = cues.filter((c) => sfxKind(c.sfx) === 'hit').map(peakAt);
-    const wantHits = [0.4, 3.4, 6.4, 15 + COUNT_START + COUNT_SEC, 36 + COUNT_START + COUNT_SEC];
-    expect(hitTimes).toHaveLength(wantHits.length);
-    hitTimes.forEach((t, i) => expect(Math.abs(t - wantHits[i])).toBeLessThanOrEqual(2 / 30 + 1e-9));
-    // pop / load：卡片入场（spring 从镜头第 0 帧起）
-    const popTimes = cues.filter((c) => sfxKind(c.sfx) === 'pop').map(peakAt);
-    const cardStarts = shots.filter((s) => s.card && s.layout === 'split' && s.card.template !== 'hook').map((s) => s.start);
-    expect(popTimes).toEqual(cardStarts);
+    const times = (kind: string): number[] => cues.filter((c) => sfxKind(c.sfx) === kind).map(landed);
+    // whoosh：全屏插入是画面时间轴（J-cut 后）的切入帧，画中画是镜头开始
+    near(times('whoosh'), vis.flatMap((s, i) => (s.broll && (shots[i].layout === 'broll' || shots[i].layout === 'pip') ? [s.start] : [])), 'whoosh');
+    // logo：Outro.tsx 的 logo 弹簧从 OUTRO_LOGO_SEC 起
+    near(times('logo'), [46 + OUTRO_LOGO_SEC], 'logo');
+    // riser 的高潮、钩子 hit：Hook.tsx 第一行高亮刷开完成；数字 hit：BigNumber 滚完
+    near(times('riser'), [0 + HOOK_MARK_START + HOOK_MARK_SEC], 'riser');
+    near(times('hit'), [0, 3, 6].map((t) => t + HOOK_MARK_START + HOOK_MARK_SEC).concat([15, 36].map((t) => t + COUNT_START + COUNT_SEC)), 'hit');
+    // pop：卡片入场（CardLayer 的 spring 从镜头第 0 帧起）
+    near(times('pop'), shots.filter((s) => s.card && s.layout === 'split' && s.card.template !== 'hook').map((s) => s.start), 'pop');
+    // tick：数字滚动窗口内
+    times('tick').forEach((t) => { const rel = t - (t < 20 ? 15 : 36); expect(rel).toBeGreaterThan(COUNT_START); expect(rel).toBeLessThan(COUNT_START + COUNT_SEC + 1e-9); });
   });
   it('sfxStats：统计种类数、各音效次数与最大重复', () => {
     const stats = sfxStats([{ sec: 0, sfx: 'pop', volume: 1 }, { sec: 1, sfx: 'pop2', volume: 1 }, { sec: 2, sfx: 'pop', volume: 1 }, { sec: 3, sfx: 'hit', volume: 1 }]);

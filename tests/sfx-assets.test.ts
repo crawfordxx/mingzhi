@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { lastLoudSec, onsetSec, readWav, rmsPeakSec } from './helpers/wav.js';
 import { dirname, join } from 'node:path';
 import { SFX, sfxPath, type SfxId } from '../src/assets/catalog.js';
 import { ANCHOR_SEC, KIND_OF, MAX_PER_SFX, VARIANTS } from '../src/audio/sfx-map.js';
@@ -10,44 +11,6 @@ interface Spec { name: string; sync: 'peak' | 'onset' | 'end'; anchor: number; m
 const specs = SPECS as Spec[];
 const FRAME = 1 / 30;
 const SFX_DIR = dirname(sfxPath('click'));
-
-/** 读 16 bit 单声道 PCM wav，返回采样与采样率 */
-function readWav(path: string): { data: Float64Array; rate: number } {
-  const buf = readFileSync(path);
-  expect(buf.toString('ascii', 0, 4)).toBe('RIFF');
-  const rate = buf.readUInt32LE(24);
-  const bits = buf.readUInt16LE(34);
-  expect(bits).toBe(16);
-  const channels = buf.readUInt16LE(22);
-  let offset = 12;
-  while (offset + 8 <= buf.length && buf.toString('ascii', offset, offset + 4) !== 'data') offset += 8 + buf.readUInt32LE(offset + 4);
-  const size = buf.readUInt32LE(offset + 4);
-  const n = Math.floor(size / 2 / channels);
-  return { data: Float64Array.from({ length: n }, (_, i) => buf.readInt16LE(offset + 8 + i * 2 * channels) / 32768), rate };
-}
-
-/** 20ms 窗均方根最大处的中心时刻 */
-function rmsPeakSec(data: Float64Array, rate: number): number {
-  const win = Math.round(rate * 0.02);
-  let best = -1; let at = 0;
-  for (let i = 0; i + win <= data.length; i += win / 2) {
-    const e = data.slice(i, i + win).reduce((s, v) => s + v * v, 0);
-    if (e > best) { best = e; at = i + win / 2; }
-  }
-  return at / rate;
-}
-
-function onsetSec(data: Float64Array, rate: number): number {
-  const peak = data.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-  return data.findIndex((v) => Math.abs(v) > peak * 0.2) / rate;
-}
-
-function lastLoudSec(data: Float64Array, rate: number): number {
-  const peak = data.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-  let i = data.length - 1;
-  while (i > 0 && Math.abs(data[i]) < peak * 0.2) i -= 1;
-  return i / rate;
-}
 
 describe('音效素材', () => {
   it('SFX 清单、种类表、锚点表覆盖同一批 id', () => {
@@ -69,8 +32,15 @@ describe('音效素材', () => {
       expect(data.reduce((m, v) => Math.max(m, Math.abs(v)), 0), id).toBeGreaterThan(0.1);
     }
   });
-  it('入库的 wav 与合成脚本逐字节一致（改了脚本要重新生成：node scripts/make-sfx.mjs）', () => {
-    for (const spec of specs) expect(readFileSync(join(SFX_DIR, `${spec.name}.wav`)).equals(toWav(spec.make())), spec.name).toBe(true);
+  it('入库的 wav 与合成脚本一致（改了脚本要重新生成：node scripts/make-sfx.mjs）；Math 函数跨平台可能差 1 个 LSB，所以按样本比较、容差 2 LSB', () => {
+    for (const spec of specs) {
+      const a = readFileSync(join(SFX_DIR, `${spec.name}.wav`));
+      const b = toWav(spec.make());
+      expect(a.length, spec.name).toBe(b.length);
+      let worst = 0;
+      for (let i = 44; i + 1 < a.length; i += 2) worst = Math.max(worst, Math.abs(a.readInt16LE(i) - b.readInt16LE(i)));
+      expect(worst, spec.name).toBeLessThanOrEqual(2);
+    }
   });
   it('合成脚本的清单与 SFX 文件名一一对应，锚点与 ANCHOR_SEC 一致', () => {
     const byFile = new Map<string, SfxId>(Object.entries(SFX).map(([id, file]) => [file, id as SfxId]));
@@ -82,9 +52,9 @@ describe('音效素材', () => {
   });
   it('锚点实测：whoosh 的响度峰值、riser 的结尾、其余的起音，都在锚点 ±2 帧内', () => {
     for (const spec of specs) {
-      const { data, rate } = readWav(join(SFX_DIR, `${spec.name}.wav`));
-      expect(rate).toBe(SAMPLE_RATE);
-      const measured = spec.sync === 'peak' ? rmsPeakSec(data, rate) : spec.sync === 'end' ? lastLoudSec(data, rate) : onsetSec(data, rate);
+      const wav = readWav(join(SFX_DIR, `${spec.name}.wav`));
+      expect(wav.rate).toBe(SAMPLE_RATE);
+      const measured = spec.sync === 'peak' ? rmsPeakSec(wav) : spec.sync === 'end' ? lastLoudSec(wav) : onsetSec(wav);
       expect(Math.abs(measured - spec.anchor), `${spec.name} 实测 ${measured.toFixed(3)}s 锚点 ${spec.anchor}s`).toBeLessThanOrEqual(2 * FRAME);
     }
   });

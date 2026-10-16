@@ -76,14 +76,15 @@ export async function runQaCards(ctx: QaCardsContext, storyboard: Storyboard, ca
   return res;
 }
 
-export interface QaFinalContext { cfg: AppConfig; hardChecks?: typeof realHardChecks }
+/** outroStartSec：有品牌片尾时给出，成片硬检查会多检查片尾响度 */
+export interface QaFinalContext { cfg: AppConfig; hardChecks?: typeof realHardChecks; outroStartSec?: number }
 
 /** 成片硬检查：不通过只在进度消息里列出，检查本身出错也不让成片失败 */
 export async function runQaFinal(ctx: QaFinalContext, video: string, storyboard: Storyboard, cards: CardQaEntry[], complete: Complete<'qa-final'>): Promise<HardCheck[]> {
   let hard: HardCheck[] = [];
   let message: string;
   try {
-    hard = await (ctx.hardChecks ?? realHardChecks)(video, { captionCenters: captionCentersOf(storyboard) }, defaultPalette(), ctx.cfg);
+    hard = await (ctx.hardChecks ?? realHardChecks)(video, { captionCenters: captionCentersOf(storyboard) }, defaultPalette(), ctx.cfg, ctx.outroStartSec);
     message = hardSummary(hard);
   } catch (err) {
     rethrowIfCancelled(err);

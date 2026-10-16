@@ -163,8 +163,8 @@ async function runSteps(args: PipelineArgs, projectPath: string, complete: Compl
   const cacheDir = args.cacheDir ?? join(args.workDir, 'segments');
   const outputDurationSec = analysis.plan.outputDurationSec;
   const input = { person: p.base, subject: p.subject, captions: p.captions, storyboard, outputDurationSec, raw, output: args.output, cacheDir };
-  await composeStage(args, input, complete);
-  const hard = await finalQaStage(args, args.output, storyboard, cards, complete);
+  const composed = await composeStage(args, input, complete);
+  const hard = await finalQaStage(args, args.output, storyboard, cards, complete, composed.outroStartSec);
   await coverStage(args, meter, storyboard, p.captions, p.base, complete);
   complete('done', args.output);
   return { output: args.output, projectPath, cuts: analysis.cuts, plan: analysis.plan, captions: p.captions, storyboard, qa: { cards, hard } };

@@ -31,7 +31,7 @@ const SettingsPatch = z.object({
   budgetYuan: z.number().finite().min(0).max(1000).optional(),
   broll: z.boolean().optional(),
   maxVideos: z.number().int().min(0).max(10).optional(),
-  outro: z.object({ enabled: z.boolean(), text: z.string().trim().max(OUTRO_TEXT_MAX) }).strict().optional(),
+  outro: z.object({ enabled: z.boolean(), text: z.string().trim().refine((t) => [...t].length <= OUTRO_TEXT_MAX, `片尾文字最多 ${OUTRO_TEXT_MAX} 个字`) }).strict().optional(),
   grain: z.boolean().optional(),
 }).strict();
 export type SettingsPatchInput = z.infer<typeof SettingsPatch>;

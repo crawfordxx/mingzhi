@@ -32,12 +32,11 @@ export function resolveOutro(options: Partial<OutroOptions> | undefined): OutroO
   return { enabled: options?.enabled ?? DEFAULT_OUTRO.enabled, text: (options?.text ?? DEFAULT_OUTRO.text).trim() };
 }
 
+/** 结尾的时间线：留白与片尾都在口播内容之后，不属于任何镜头 */
 export interface EndingPlan {
-  /** 渲染用镜头：CTA 已提前，覆盖 [0, 内容结尾]，之后的留白与片尾不属于任何镜头 */
-  shots: Shot[];
   /** 整片时长（秒）= 留白结束（片尾开始）+ 片尾时长；没有片尾时等于留白结束 */
   durationSec: number;
-  /** 留白结束的时刻：有片尾时是片尾开始；人像在内容结尾到这里定格 */
+  /** 留白结束的时刻：有片尾时是片尾开始；人像与末镜头的画面在内容结尾到这里定格 */
   outroStartSec: number;
   hasOutro: boolean;
 }
@@ -52,51 +51,56 @@ function mergePlain(shots: Shot[]): Shot[] {
   }, []);
 }
 
-/** 镜头不超出口播内容：起点不早于内容结尾的镜头去掉，末镜头截到内容结尾（人像视频比方案略短时） */
-const trimTo = (shots: Shot[], contentSec: number): Shot[] => shots.filter((s) => s.start < contentSec - 1e-9).map((s) => (s.end > contentSec ? { ...s, end: contentSec } : s));
-
-/** CTA 起点：窗口 [lo, hi] 内尽量贴近 pref；离某个镜头边界不足 MIN_SHOT_SEC 时吸附到边界，免得留下碎镜头 */
-function ctaStart(body: Shot[], pref: number, lo: number, hi: number): number {
-  const bounds = body.flatMap((s) => [s.start, s.end]).filter((t) => t >= lo - 1e-9 && t <= hi + 1e-9 && Math.abs(t - pref) < MIN_SHOT_SEC);
-  const near = bounds.reduce<number | undefined>((best, t) => (best === undefined || Math.abs(t - pref) < Math.abs(best - pref) ? t : best), undefined);
-  return near ?? Math.min(hi, Math.max(lo, pref));
-}
-
-/**
- * 把末尾的 CTA 移到整片倒数第 CTA_FROM_END 秒范围内，并在最后一句字幕开始前结束（CTA 与最后一句不同时出现），
- * 之后的最后一句回到人物全屏。最后一句太长、窗口放不下时，CTA 退到最后一句之前（宁可偏离窗口，也不与最后一句同时出现）。
- * 不是末尾 CTA、没有字幕、会吃掉钩子卡或放不下 CTA_SEC.min 时原样返回。不改入参
- */
-function relocateCta(shots: Shot[], captions: TimedCaption[], totalSec: number): Shot[] {
-  const last = shots[shots.length - 1];
-  const final = lastCaption(captions);
-  if (!last || last.card?.template !== 'cta' || !final) return shots;
-  const body = shots.slice(0, -1);
-  const latest = final.start - CTA_SEC.min;
-  const lo = totalSec - CTA_FROM_END.max;
-  const hi = Math.min(totalSec - CTA_FROM_END.min, latest);
-  const pref = final.start - CTA_SEC.pref;
-  const start = snapFrame(lo <= hi ? ctaStart(body, pref, lo, hi) : Math.max(0, pref));
-  const end = Math.min(floorFrame(final.start), snapFrame(start + CTA_SEC.max));
-  if (start < 0 || end - start < CTA_SEC.min - 1 / CANVAS.fps) return shots;
-  if (body.some((s) => s.card?.template === 'hook' && s.end > start)) return shots;
-  const kept = body.flatMap((s): Shot[] => (s.end <= start ? [s] : s.start < start ? [{ ...s, end: start }] : []));
-  const tail: Shot[] = [{ ...last, start, end }, { start: end, end: last.end, layout: 'full' }];
-  const gap = start - (kept[kept.length - 1]?.end ?? 0);
-  const before: Shot[] = gap > 1e-9 ? [...kept, { start: start - gap, end: start, layout: 'full' }] : kept;
-  return mergePlain([...before, ...tail]);
-}
-
-/**
- * 结尾规划：最后一句字幕后留 ≥ HOLD_SEC（人像定格），再接 OUTRO_SEC 的品牌片尾；CTA 提前到倒数第 5–8 秒。
- * contentSec 是口播内容（人像视频）的时长；返回的镜头只覆盖内容部分。不改入参
- */
-export function planEnding(shots: Shot[], captions: TimedCaption[], contentSec: number, outro: boolean): EndingPlan {
-  const content = trimTo(shots, contentSec);
+/** 结尾时间线：最后一句字幕后留 ≥ HOLD_SEC（定格），再接 OUTRO_SEC 的品牌片尾（关闭时只有留白）。contentSec 是口播内容（人像视频）的时长 */
+export function planEnding(captions: TimedCaption[], contentSec: number, outro: boolean): EndingPlan {
   const spoken = lastCaption(captions)?.end ?? 0;
   const outroStartSec = Math.max(snapFrame(contentSec), ceilFrame(spoken > 0 ? spoken + HOLD_SEC : 0));
   const durationSec = outro ? round3(outroStartSec + Math.round(OUTRO_SEC * CANVAS.fps) / CANVAS.fps) : outroStartSec;
-  return { shots: relocateCta(content, captions, durationSec), durationSec, outroStartSec, hasOutro: outro };
+  return { durationSec, outroStartSec, hasOutro: outro };
+}
+
+const isCta = (s: Shot | undefined): s is Shot & { card: Extract<NonNullable<Shot['card']>, { template: 'cta' }> } => s?.card?.template === 'cta';
+
+/** 已提前的 CTA（placed）之后全是纯人像镜头时，还原成「CTA 在末尾、覆盖到内容结尾」的原始形态；其余原样返回 */
+function unplaceCta(shots: Shot[]): Shot[] {
+  const i = shots.map((s) => isCta(s) && s.card.props.placed === true).lastIndexOf(true);
+  if (i < 0 || !shots.slice(i + 1).every(isPlain)) return shots;
+  const { placed: _drop, ...props } = (shots[i].card as { props: { actions: string[]; placed?: boolean } }).props;
+  return [...shots.slice(0, i), { ...shots[i], card: { template: 'cta', props }, end: shots[shots.length - 1].end }];
+}
+
+/** 能放 CTA 的起点范围：整片倒数 5–8 秒、最晚在最后一句开始前留 CTA_SEC.min；窗口放不下时退到最后一句之前；起点不得早于最后一个非纯人像镜头的结尾（不吃别的卡片与素材） */
+function ctaRange(body: Shot[], final: TimedCaption, totalSec: number): { lo: number; hi: number; fence: number } {
+  const fence = body.reduce((m, s) => (isPlain(s) ? m : Math.max(m, s.end)), 0);
+  const latest = final.start - CTA_SEC.min;
+  const lo = totalSec - CTA_FROM_END.max;
+  const hi = Math.min(totalSec - CTA_FROM_END.min, latest);
+  return lo <= hi ? { lo: Math.max(lo, fence), hi, fence } : { lo: Math.max(0, fence), hi: latest, fence };
+}
+
+/**
+ * 在分镜里放置 CTA（分镜阶段调用，结果落盘）：把末尾 CTA 移到整片倒数第 5–8 秒，并在最后一句字幕开始前结束（与最后一句不同时出现），
+ * 之后的最后一句回到人物全屏；CTA 标 placed，归一化不再拉回。再次调用幂等（先还原再放置）。
+ * 只占用纯人像镜头：会吃掉或截断其他卡片、B-roll 素材时不提前，CTA 留在末尾；没有字幕、放不下 CTA_SEC.min 时同理。不改入参
+ */
+export function placeCta(shots: Shot[], captions: TimedCaption[], contentSec: number, outro: boolean): Shot[] {
+  const base = unplaceCta(shots);
+  const last = base[base.length - 1];
+  const final = lastCaption(captions);
+  if (!isCta(last) || !final) return base;
+  const body = base.slice(0, -1);
+  const { lo, hi, fence } = ctaRange(body, final, planEnding(captions, contentSec, outro).durationSec);
+  if (lo > hi) return base;
+  const pref = Math.min(hi, Math.max(lo, final.start - CTA_SEC.pref));
+  // 离最后一个非纯人像镜头结尾不足 1 秒时吸附过去，免得留下碎镜头
+  const start = snapFrame(fence >= lo && fence <= hi && Math.abs(pref - fence) < MIN_SHOT_SEC ? fence : pref);
+  const end = Math.min(floorFrame(final.start), floorFrame(last.end - MIN_SHOT_SEC), snapFrame(start + CTA_SEC.max));
+  if (end - start < CTA_SEC.min - 1 / CANVAS.fps || start >= last.end) return base;
+  const kept = body.flatMap((s): Shot[] => (s.end <= start ? [s] : s.start < start ? [{ ...s, end: start }] : []));
+  const gapFrom = kept[kept.length - 1]?.end ?? 0;
+  const gap: Shot[] = start - gapFrom > 1e-9 ? [{ start: gapFrom, end: start, layout: 'full' }] : [];
+  const cta: Shot = { ...last, start, end, card: { template: 'cta', props: { ...last.card.props, placed: true } } };
+  return mergePlain([...kept, ...gap, cta, { start: end, end: last.end, layout: 'full' }]);
 }
 
 /** 渲染用的片尾字段；没有片尾返回 undefined */

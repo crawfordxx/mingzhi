@@ -125,3 +125,19 @@ describe('项目级预算（I1）', () => {
     expect((budgetEvent?.detail?.data as { budget: number }).budget).toBeCloseTo(2 - failedCost);
   });
 });
+
+describe('品牌片尾与版本对比', () => {
+  it('只改片尾文字（顺带只换配乐，不动画面）：changedShots 恰好是末镜头（片尾所在的末段），哈希数与分镜镜头数一致', async () => {
+    const f = await afterV1();
+    f.store.update(f.spaceId, (space) => ({ ...space, settings: { ...space.settings, outro: { enabled: true, text: '某某出品' } } }));
+    const n = stateOf(f, 1).storyboard.shots.length;
+    const v2 = await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'setBgm', bgm: 'none' } as EditOp], '只换配乐');
+    expect(stateOf(f, 2).storyboard.shots).toHaveLength(n);
+    expect(v2.changedShots).toEqual([n - 1]);
+    expect(v2.shotHashes).toHaveLength(n);
+  });
+  it('片尾设置随版本快照保存：之后改项目设置，不影响在旧版本上再改的那一版沿用的快照字段存在', async () => {
+    const f = await afterV1({ outro: { enabled: false, text: '' } });
+    expect(stateOf(f, 1).settings.outro).toEqual({ enabled: false, text: '' });
+  });
+});

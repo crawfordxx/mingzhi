@@ -103,10 +103,14 @@ function clampAndResolve(shots: Shot[], durationSec: number): { placed: Shot[]; 
   return { placed, dropped };
 }
 
+/** 已提前的 cta（props.placed）：位置由 compose/ending 的 placeCta 决定，归一化不动它 */
+const isPlacedCta = (s: Shot): boolean => s.card?.template === 'cta' && s.card.props.placed === true;
+
 /** 最后一个 cta 若是结束最晚的卡片镜头，则延伸到片尾并吸收其后的无卡片镜头，保证 cta 不被补齐或合并吞掉、时间轴不重叠 */
 function extendCta(shots: Shot[], durationSec: number): Shot[] {
   const ctaIdx = shots.map((s) => s.card?.template).lastIndexOf('cta');
   if (ctaIdx < 0) return shots;
+  if (isPlacedCta(shots[ctaIdx])) return shots;
   const cardEnd = Math.max(...shots.filter((s) => s.card).map((s) => s.end));
   if (shots[ctaIdx].end < cardEnd) return shots;
   // cta 之后的镜头必然没有卡片（否则 cta 不是结束最晚的卡片镜头），整段并入 cta
@@ -206,7 +210,9 @@ function applyPlacementRules(shots: Shot[]): Shot[] {
       return no === undefined ? plain(s) : { ...s, card: { template: 'hook', props: { ...card.props, index: no, total: hookIdx.length } } };
     }
     if (card.template === 'cta') {
-      return i === shots.length - 1 ? { ...s, layout: 'full' } : plain(s);
+      // 已提前的 cta 之后只能是纯人像镜头（否则位置已被改乱，当作非末尾降级）
+      const keepPlaced = isPlacedCta(s) && shots.slice(i + 1).every((t) => !t.card && !t.broll);
+      return i === shots.length - 1 || keepPlaced ? { ...s, layout: 'full' } : plain(s);
     }
     return s;
   });

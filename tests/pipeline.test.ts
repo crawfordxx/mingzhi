@@ -105,7 +105,7 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(existsSync(join(work, 'final.raw.mp4'))).toBe(false);
     expect(events.find((e) => e.step === 'cover')?.message).toContain('封面生成失败');
     // 成片硬检查用真实实现（只跑 ffmpeg）：7 项，结果落盘，未通过也不影响出片
-    expect(project.qa?.hard.map((c) => c.id)).toEqual(['resolution', 'fps', 'loudness', 'truePeak', 'blackFrames', 'safeArea', 'contrast']);
+    expect(project.qa?.hard.map((c) => c.id)).toEqual(['resolution', 'fps', 'loudness', 'truePeak', 'outroLoudness', 'blackFrames', 'safeArea', 'contrast']);
     expect(project.qa?.cards).toEqual([]);
     expect(events.find((e) => e.step === 'qa-final')?.message).toMatch(/^成片检查/);
     expect(res.qa).toEqual(project.qa);

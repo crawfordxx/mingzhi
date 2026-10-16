@@ -49,7 +49,9 @@ async function main(): Promise<void> {
     throw err;
   });
   const secs = Math.round((Date.now() - started) / 1000);
-  console.log(`\n完成：删除 ${res.cuts.length} 处 · 成片 ${res.plan.outputDurationSec.toFixed(1)} 秒 · ${res.storyboard.shots.length} 个镜头 · 用时 ${secs} 秒 · 花费 ¥${meter.total.toFixed(2)}（上限 ¥${budgetYuan.toFixed(2)}）${values['no-qa'] ? '' : `\n${qaSummary(res.qa)}`}\n${res.output}`);
+  // 成片含最后一句后的留白与品牌片尾，时长以成片文件为准
+  const finalSec = (await probe(res.output, cfg)).durationSec;
+  console.log(`\n完成：删除 ${res.cuts.length} 处 · 成片 ${finalSec.toFixed(1)} 秒 · ${res.storyboard.shots.length} 个镜头 · 用时 ${secs} 秒 · 花费 ¥${meter.total.toFixed(2)}（上限 ¥${budgetYuan.toFixed(2)}）${values['no-qa'] ? '' : `\n${qaSummary(res.qa)}`}\n${res.output}`);
 }
 
 main().catch((err: Error) => {

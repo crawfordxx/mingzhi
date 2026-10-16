@@ -74,7 +74,7 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   };
   const res = await composeStage(args, composeInput, env.complete);
   env.complete('compose', `分段渲染：新渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
-  await finalQaStage(args, final, storyboard, cards, env.complete);
+  await finalQaStage(args, final, storyboard, cards, env.complete, res.outroStartSec);
   await makeCover(env, args, init.coverStyle, storyboard, captions, person);
   const state: VersionState = { ...init, plan: a.plan, captions, storyboard };
   const qaScore = qaScoreOf(cards);

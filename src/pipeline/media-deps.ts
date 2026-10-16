@@ -1,5 +1,5 @@
 import { transcribeWav } from '../asr/local-asr.js';
-import { normalizeLoudness } from '../audio/loudness.js';
+import { limitTailLoudness, normalizeLoudness } from '../audio/loudness.js';
 import type { SegmentBackend } from '../compose/segments.js';
 import { renderCut } from '../cut/render-cut.js';
 import { compositeCut } from '../matting/composite-matte.js';
@@ -20,13 +20,15 @@ export interface MediaDeps {
   /** 分段渲染的打包、渲染与拼接；缺省为真实 Remotion + ffmpeg */
   segments?: SegmentBackend;
   loudness: typeof normalizeLoudness;
+  /** 响度统一后校正品牌片尾响度（高于 -18 LUFS 只衰减片尾） */
+  tail: typeof limitTailLoudness;
   /** 多段口播拼成一条合成原片 */
   concat: typeof concatSources;
 }
 
 const REAL_MEDIA: MediaDeps = {
   probe, extractWav: extractWav16k, transcribe: transcribeWav, renderCut,
-  matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness, concat: concatSources,
+  matte: matteVideo, composite: compositeCut, loudness: normalizeLoudness, tail: limitTailLoudness, concat: concatSources,
 };
 
 /** 注入的实现覆盖真实实现 */

@@ -10,7 +10,7 @@ import { validateBroll } from '../pipeline/broll-step.js';
 import { validateStyles } from '../pipeline/finish-step.js';
 import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
-import { brollStage, composeStage, finalQaStage, qaCardsStage } from '../pipeline/stages.js';
+import { brollStage, composeStage, finalQaStage, placeEnding, qaCardsStage } from '../pipeline/stages.js';
 import type { SegmentedResult } from '../compose/segments.js';
 import type { CardQaEntry } from '../qa/visual.js';
 import type { CardSpec, Storyboard } from '../storyboard/schema.js';
@@ -41,8 +41,8 @@ function planChange(env: VersionEnv, parent: VersionState, raw: EditOp[]): Chang
   const { ops, dropped } = validateOps(raw, parent);
   if (raw.length > 0 && ops.length === 0) throw new Error(`没有可执行的修改：${dropped.join('；')}`);
   const applied = applyOps(parent, ops);
-  const { budgetYuan, broll, maxVideos, grain } = env.space.settings;
-  const next = { ...applied, settings: { ...applied.settings, budgetYuan, broll, maxVideos, ...(grain === undefined ? {} : { grain }) } };
+  const { budgetYuan, broll, maxVideos, grain, outro } = env.space.settings;
+  const next = { ...applied, settings: { ...applied.settings, budgetYuan, broll, maxVideos, ...(grain === undefined ? {} : { grain }), ...(outro === undefined ? {} : { outro }) } };
   return { next, ops, dropped, stages: stagesFor(ops), newCover: next.coverStyle !== parent.coverStyle };
 }
 
@@ -91,10 +91,12 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
   const person = await nextPerson(env, args, p, c, plan);
   const timed = recutting ? retime(env, a, p.state, c.next, plan) : { captions: c.next.captions, storyboard: c.next.storyboard };
   if (!recutting) env.record({ artifacts: { ass: writeAss(env, a, timed.captions) } });
+  // CTA 提前（幂等：剪辑改了时间线或片尾设置变了会重新放置；已提前的 CTA 先还原再放）
+  const placed = placeEnding(args, timed.storyboard, timed.captions, plan.outputDurationSec);
   // 素材名额先让给没改动的卡片（它们的视频已经付过费），改动过的卡片排在后面
   const storyboard = c.stages.has('broll')
-    ? await brollStage(args, timed.storyboard, plan.outputDurationSec, env.base, env.complete, changedShots(p.state, timed.storyboard))
-    : timed.storyboard;
+    ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, changedShots(p.state, placed))
+    : placed;
   linkBroll(storyboard, env.base, env.dir);
   return { ...person, plan, captions: timed.captions, storyboard };
 }
@@ -145,7 +147,7 @@ function checkChanged(env: VersionEnv, args: PipelineArgs, parent: VersionState,
   return qaCardsStage(args, env.meter, m.storyboard, m.captions, env.complete, changed, userCards(c.ops, m.storyboard, changed));
 }
 
-interface Rendered { changed: number[]; hashes?: string[] }
+interface Rendered { changed: number[]; hashes?: string[]; outroStartSec?: number }
 
 /** 画面和父版本比：父版本没记哈希（旧数据）时退回实际重渲的镜头 */
 function diffWithParent(parentHashes: string[] | undefined, res: SegmentedResult): number[] {
@@ -166,7 +168,7 @@ async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change,
   };
   const res = await composeStage(args, input, env.complete);
   env.complete('compose', `分段渲染：重渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
-  return { changed: diffWithParent(p.hashes, res), hashes: res.hashes };
+  return { changed: diffWithParent(p.hashes, res), hashes: res.hashes, ...(res.outroStartSec === undefined ? {} : { outroStartSec: res.outroStartSec }) };
 }
 
 /** 封面只在换了封面风格时重做，否则引用父版本的封面 */
@@ -189,7 +191,7 @@ export async function produceNext(env: VersionEnv, input: string, parentN: numbe
   const { storyboard, cards } = await checkChanged(env, args, p.state, c, made);
   const m = { ...made, storyboard };
   const rendered = await render(env, args, p, c, m);
-  await finalQaStage(args, join(env.dir, FINAL_FILE), storyboard, cards, env.complete);
+  await finalQaStage(args, join(env.dir, FINAL_FILE), storyboard, cards, env.complete, rendered.outroStartSec);
   await cover(env, args, p, c, m);
   env.record({ plan: m.plan, captions: m.captions, storyboard });
   const qaScore = qaScoreOf(cards) ?? env.space.versions.find((v) => v.n === parentN)?.qaScore;

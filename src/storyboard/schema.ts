@@ -53,7 +53,8 @@ export const CardSpecSchema = z.discriminatedUnion('template', [
   card('strikeList', z.object({ title: short.optional(), items: z.array(chip).min(1).max(5), reveal })),
   card('browser', z.object({ url: z.string().trim().min(1).max(80), title: text.optional(), image: z.string().optional(), visual: BrowserVisual.optional() })),
   card('photo', z.object({ image: z.string().min(1).optional(), video: z.string().min(1).optional(), visual: PhotoVisual.optional(), label: short.optional(), sublabel: text.optional() })),
-  card('cta', z.object({ actions: z.array(z.string().trim().min(1).max(6)).min(1).max(3) })),
+  /** placed：CTA 已提前到倒数第 5–8 秒（见 compose/ending 的 placeCta），归一化时不再把它拉回末尾，也不当作位置错误降级 */
+  card('cta', z.object({ actions: z.array(z.string().trim().min(1).max(6)).min(1).max(3), placed: z.boolean().optional() })),
   card('flow', z.object({ crumb: short.optional(), title: short.optional(), steps: z.array(z.object({ label: chip, note: short.optional() })).min(2).max(5), loop: z.boolean().optional(), reveal })),
 ]);
 export type CardSpec = z.infer<typeof CardSpecSchema>;

@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, relative } from 'node:path';
 import type { Transcript } from '../asr/types.js';
+import type { AppConfig } from '../config.js';
 import { toAss } from '../captions/ass.js';
 import { keptIndices, timeCaptions, type TimedCaption } from '../captions/lines.js';
 import { polishCaptions, type PolishResult } from '../captions/polish.js';
 import { PRESETS } from '../background/presets.js';
 import { resolveBackground, type BackgroundSpec, type ResolvedBackground } from '../background/resolve.js';
 import { rethrowIfCancelled } from '../cancel.js';
-import { outroProps, planEnding, resolveOutro } from '../compose/ending.js';
+import { outroProps, placeCta, planEnding, resolveOutro } from '../compose/ending.js';
 import { renderSegmented, type SegmentedResult } from '../compose/segments.js';
 import { stageOutroLogo } from '../compose/stage-assets.js';
 import { COVER_YUAN } from '../cost/estimate.js';
@@ -21,7 +22,8 @@ import type { SubjectBox } from '../matting/composite.js';
 import type { MatteResult } from '../matting/rvm.js';
 import type { MediaInfo } from '../media/probe.js';
 import { generateStoryboard } from '../storyboard/generate.js';
-import { DEFAULT_MOOD, type Storyboard } from '../storyboard/schema.js';
+import { DEFAULT_MOOD, type Shot, type Storyboard } from '../storyboard/schema.js';
+import { limitTailLoudness } from '../audio/loudness.js';
 import type { CardQaEntry, CardScore } from '../qa/visual.js';
 import type { HardCheck } from '../qa/hard.js';
 import { prepareAudio } from './audio-step.js';
@@ -159,8 +161,13 @@ async function planStoryboard(llm: LlmClient, captions: TimedCaption[], duration
 export async function storyboardStage(
   args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete,
 ): Promise<Storyboard> {
-  const planned = await planStoryboard(args.llm, captions, durationSec, complete);
+  const planned = placeEnding(args, await planStoryboard(args.llm, captions, durationSec, complete), captions, durationSec);
   return brollStage(args, planned, durationSec, brollDir, complete);
+}
+
+/** CTA 提前到倒数第 5–8 秒（分镜阶段落盘，之后的归一化认 placed 标记不再拉回）；放不下就留在末尾 */
+export function placeEnding(args: PipelineArgs, storyboard: Storyboard, captions: TimedCaption[], contentSec: number): Storyboard {
+  return { ...storyboard, shots: placeCta(storyboard.shots, captions, contentSec, resolveOutro(args.outro).enabled) };
 }
 
 /** 只跑素材步骤（修改版本的 regenerateVisual 等也走这里，预算与 maxVideos 由 args.broll / args.meter 约束；deferShots 的需求排到最后） */
@@ -211,19 +218,20 @@ export interface ComposeInput {
 }
 
 /** 配乐音效与字幕样式落盘 → 分段渲染（命中缓存的镜头直接复用）到 raw → 响度统一得到成片；返回重渲与复用的镜头序号 */
-export async function composeStage(args: PipelineArgs, c: ComposeInput, complete: Complete): Promise<SegmentedResult> {
+export async function composeStage(args: PipelineArgs, c: ComposeInput, complete: Complete): Promise<SegmentedResult & { outroStartSec?: number }> {
   const { workDir, cfg } = args;
   const m = mediaOf(args.media);
   if (relative(workDir, c.person).startsWith('..')) throw new Error(`人像视频必须在工作目录内：${c.person}`);
   const baseInfo = await m.probe(c.person, cfg);
   // 成片时长不超过人像视频的实际时长（剪切编码后可能比方案略短），避免末尾取不到帧
   const contentSec = Math.min(c.outputDurationSec, baseInfo.durationSec);
-  // 结尾：最后一句后留白、CTA 提前、接品牌片尾；分镜里仍存原样（cta 在末尾），只有渲染用的镜头做调整
+  // 结尾：最后一句后留白、接品牌片尾（CTA 已在分镜阶段提前，见 placeEnding）；末镜头截到人像实际时长，不改镜头数量与顺序
   const outroOptions = resolveOutro(args.outro);
-  const ending = planEnding(c.storyboard.shots, c.captions, contentSec, outroOptions.enabled);
+  const ending = planEnding(c.captions, contentSec, outroOptions.enabled);
+  const shots = clampLastShot(c.storyboard.shots, contentSec);
   const outro = ending.hasOutro ? outroProps(ending, outroOptions, await stageOutroLogo(workDir)) : undefined;
   const audioArgs = { workDir, cfg, input: args.input, audio: args.audio, captionStyle: args.captionStyle };
-  const audio = await prepareAudio(audioArgs, { ...c.storyboard, shots: ending.shots }, c.captions, ending.durationSec, outro?.startSec);
+  const audio = await prepareAudio(audioArgs, { ...c.storyboard, shots }, c.captions, ending.durationSec, outro?.startSec);
   audio.notes.forEach((note) => complete('compose', note));
   complete('compose', audio.summary, { audio: audio.info, captionStyle: audio.props.captionStyle });
   const progress = throttledRenderProgress((e) => args.onProgress?.(e));
@@ -232,7 +240,7 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
     onProgress: (done, total) => progress(total > 0 ? done / total : 1),
     props: {
       person: relative(workDir, c.person), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: c.subject,
-      captions: c.captions, shots: ending.shots, durationSec: ending.durationSec, ...(outro ? { outro } : {}), ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
+      captions: c.captions, shots, durationSec: ending.durationSec, ...(outro ? { outro } : {}), ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
     },
   }).catch((err: unknown) => {
     rethrowIfCancelled(err);
@@ -241,15 +249,31 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
   progress(1);
   complete('compose', '成片渲染完成');
   await runLoudness(cfg, c.raw, c.output, complete, m.loudness);
-  // 结尾规划可能让渲染用的镜头比分镜多（CTA 提前后拆出的全屏镜头）；对外仍按分镜的镜头序号，多出的不报
-  const count = c.storyboard.shots.length;
-  return { rendered: res.rendered.filter((i) => i < count), reused: res.reused.filter((i) => i < count), hashes: res.hashes.slice(0, count) };
+  if (outro) await runTailGuard(c.output, ending.durationSec, outro.startSec, cfg, complete, m.tail);
+  return { ...res, ...(outro ? { outroStartSec: outro.startSec } : {}) };
+}
+
+/** 末镜头不超出人像视频的实际时长（编码后可能比方案略短）；只改末镜头的结束时间 */
+function clampLastShot(shots: Shot[], contentSec: number): Shot[] {
+  const last = shots[shots.length - 1];
+  return last && last.end > contentSec && last.start < contentSec ? [...shots.slice(0, -1), { ...last, end: contentSec }] : shots;
+}
+
+/** 响度统一后测片尾：高于上限就只衰减片尾并写进度；失败不让成片失败 */
+async function runTailGuard(output: string, durationSec: number, outroStartSec: number, cfg: AppConfig, complete: Complete, limit: typeof limitTailLoudness = limitTailLoudness): Promise<void> {
+  try {
+    const r = await limit(output, durationSec, outroStartSec, cfg);
+    if (r.attenuatedDb > 0) complete('loudness', `片尾响度 ${r.before.toFixed(1)} → ${r.after.toFixed(1)} LUFS（片尾衰减 ${r.attenuatedDb.toFixed(1)} dB，口播不动）`);
+  } catch (err) {
+    rethrowIfCancelled(err);
+    complete('loudness', `片尾响度校正失败，已保留原成片：${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /** 成片硬检查（args.qa 为 false 时跳过） */
-export function finalQaStage(args: PipelineArgs, video: string, storyboard: Storyboard, cards: CardQaEntry[], complete: Complete): Promise<HardCheck[]> {
+export function finalQaStage(args: PipelineArgs, video: string, storyboard: Storyboard, cards: CardQaEntry[], complete: Complete, outroStartSec?: number): Promise<HardCheck[]> {
   if (args.qa === false) return Promise.resolve([]);
-  return runQaFinal({ cfg: args.cfg, hardChecks: args.qaDeps?.hardChecks }, video, storyboard, cards, complete);
+  return runQaFinal({ cfg: args.cfg, hardChecks: args.qaDeps?.hardChecks, outroStartSec }, video, storyboard, cards, complete);
 }
 
 /** 封面（args.cover 为 false 时跳过；失败只降级为进度消息） */

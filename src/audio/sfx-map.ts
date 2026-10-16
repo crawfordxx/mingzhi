@@ -67,7 +67,7 @@ const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 /**
  * 按时间顺序给每个意图选变体：同类里用得最少的优先（并列取靠前的），所以相邻的 pop、tick 会轮换音高；
- * 变体都满了（各 MAX_PER_SFX 次）的意图丢弃；扣除 anchor 后早于 0 秒的音效也丢弃（赶不及在动作前起播）。返回按播放时刻排序的触发点
+ * 变体都满了（各 MAX_PER_SFX 次）、或都来不及在动作前起播（扣除 anchor 后早于 0 秒）的意图丢弃。返回按播放时刻排序的触发点
  */
 export function assignVariants(intents: SfxIntent[]): SfxCue[] {
   const used = new Map<SfxId, number>();
@@ -75,11 +75,11 @@ export function assignVariants(intents: SfxIntent[]): SfxCue[] {
   const sorted = [...intents].sort((a, b) => a.at - b.at);
   const cues = sorted.flatMap((intent): SfxCue[] => {
     const pool = intent.id ? [intent.id] : VARIANTS[intent.kind as Exclude<SfxKind, 'riser'>];
-    const open = pool.filter((id) => count(id) < MAX_PER_SFX);
+    // 同类里用得最少的优先（并列取靠前的）；来不及提前起播的变体（anchor 太长）换下一个
+    const open = pool.filter((id) => count(id) < MAX_PER_SFX && intent.at - ANCHOR_SEC[id] >= 0);
     const pick = open.reduce<SfxId | undefined>((best, id) => (best === undefined || count(id) < count(best) ? id : best), undefined);
     if (pick === undefined) return [];
     const sec = round3(intent.at - ANCHOR_SEC[pick]);
-    if (sec < 0) return [];
     used.set(pick, count(pick) + 1);
     return [{ sec, sfx: pick, volume: intent.volume }];
   });

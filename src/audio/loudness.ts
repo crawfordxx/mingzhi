@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { run } from '../media/exec.js';
 import { probe } from '../media/probe.js';
+import { TAIL_MAX_LUFS, TAIL_SEC, measureTailLufs } from '../qa/hard.js';
 
 /** 成片响度目标：-14 LUFS 积分响度，真峰值 ≤ -1.5 dBTP，响度范围 11 LU */
 export const TARGET = { I: -14, TP: -1.5, LRA: 11 } as const;
@@ -128,6 +129,53 @@ export async function normalizeLoudness(input: string, output: string, cfg: AppC
     await rename(tmp, output);
     return result;
   } finally {
+    await rm(tmp, { force: true });
+  }
+}
+
+/** 衰减时多压的余量与片尾衰减的渐入时长（避免卡在 -18 边缘、避免衰减起点爆音） */
+const TAIL_MARGIN_DB = 1;
+const TAIL_RAMP_SEC = 0.4;
+const TAIL_MAX_TRIES = 3;
+
+export interface TailResult {
+  /** 衰减前、后的片尾响度 */
+  before: number;
+  after: number;
+  /** 片尾衰减的分贝数（0 表示没动） */
+  attenuatedDb: number;
+}
+
+/**
+ * 响度统一之后测成片最后 TAIL_SEC 秒，高于 TAIL_MAX_LUFS 就只对片尾（outroStartSec 起）做渐入式衰减，直到达标：
+ * 口播不动；每次从衰减前的成片重新编码，最多 TAIL_MAX_TRIES 次，仍不达标则保留最后一次（after 如实返回）。
+ * 成片没有音轨、或片尾没有声音（-70）时原样返回。durationSec 是成片时长
+ */
+export async function limitTailLoudness(video: string, durationSec: number, outroStartSec: number, cfg: AppConfig): Promise<TailResult> {
+  const from = durationSec - TAIL_SEC;
+  const before = await measureTailLufs(video, from, cfg);
+  if (!(before > TAIL_MAX_LUFS)) return { before, after: before, attenuatedDb: 0 };
+  const src = `${video}.pre-tail.mp4`;
+  const tmp = `${video}.tail.mp4`;
+  await rename(video, src);
+  try {
+    let db = before - TAIL_MAX_LUFS + TAIL_MARGIN_DB;
+    let after = before;
+    for (let i = 0; i < TAIL_MAX_TRIES; i += 1) {
+      const gain = `if(lt(t,${outroStartSec}),1,pow(10,-${db.toFixed(2)}*min(1,(t-${outroStartSec})/${TAIL_RAMP_SEC})/20))`;
+      await run(cfg.ffmpeg, ['-y', '-hide_banner', '-nostats', '-i', src, '-map', '0:v', '-map', '0:a:0', '-c:v', 'copy',
+        '-af', `volume=eval=frame:volume='${gain}'`, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart', tmp]);
+      after = await measureTailLufs(tmp, from, cfg);
+      if (after <= TAIL_MAX_LUFS) break;
+      db += after - TAIL_MAX_LUFS + TAIL_MARGIN_DB;
+    }
+    await rename(tmp, video);
+    return { before, after, attenuatedDb: db };
+  } catch (err) {
+    await rename(src, video).catch(() => undefined);
+    throw err;
+  } finally {
+    await rm(src, { force: true });
     await rm(tmp, { force: true });
   }
 }

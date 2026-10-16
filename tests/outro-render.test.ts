@@ -38,6 +38,12 @@ async function pixel(ffmpeg: string, file: string, n: number, x: number, y: numb
   return [buf[0], buf[1], buf[2]];
 }
 
+/** 第 n 帧缩成 27×48 的 RGB 像素 */
+async function smallFrame(ffmpeg: string, file: string, n: number): Promise<number[]> {
+  const buf = await runBuffer(ffmpeg, ['-v', 'error', '-i', file, '-vf', `select=eq(n\\,${n}),scale=27:48,format=rgb24`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+  return [...buf];
+}
+
 /** 一段时间内的最大音量（dB） */
 async function maxVolume(ffmpeg: string, file: string, fromSec: number, toSec: number): Promise<number> {
   const { stderr } = await run(ffmpeg, ['-hide_banner', '-nostats', '-i', file, '-vn', '-af', `atrim=${fromSec}:${toSec},asetpts=N/SR/TB,volumedetect`, '-f', 'null', '-']);
@@ -51,14 +57,16 @@ describe('品牌片尾真实渲染', () => {
   const outroStart = Math.max(SPEECH_SEC, Math.ceil((LAST_CAPTION_END + HOLD_SEC) * 30 - 1e-6) / 30);
 
   /** 渲染样片：口播 3 秒 + 留白 + 片尾；bgm 为 'none' 或合成配乐 */
-  async function renderSample(bgm: 'none' | 'track'): Promise<string> {
+  async function renderSample(bgm: 'none' | 'track', opts: { voiceDb?: number; shots?: Shot[] } = {}): Promise<{ output: string; messages: string[] }> {
     const workDir = mkdtempSync(join(tmpdir(), 'mz-outro-'));
-    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-i', join(process.cwd(), 'tests/fixtures/talk.mp4'), '-t', String(SPEECH_SEC), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', join(workDir, 'person.mp4')]);
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-i', join(process.cwd(), 'tests/fixtures/talk.mp4'), '-t', String(SPEECH_SEC), '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      ...(opts.voiceDb ? ['-af', `volume=${opts.voiceDb}dB`] : []), '-c:a', 'aac', join(workDir, 'person.mp4')]);
     const output = join(workDir, 'final.mp4');
-    const complete: Complete = () => ({}) as never;
+    const messages: string[] = [];
+    const complete: Complete = (_step, message) => { messages.push(message); return {} as never; };
     const args = { input: join(workDir, 'in.mp4'), workDir, output, cfg, audio: { bgm: bgm === 'none' ? 'none' : track.id } } as PipelineArgs;
-    await composeStage(args, { person: join(workDir, 'person.mp4'), subject: null, captions, storyboard: { shots, bgm: 'chill' }, outputDurationSec: SPEECH_SEC, raw: join(workDir, 'final.raw.mp4'), output, cacheDir: join(workDir, 'segments') }, complete);
-    return output;
+    await composeStage(args, { person: join(workDir, 'person.mp4'), subject: null, captions, storyboard: { shots: opts.shots ?? shots, bgm: 'chill' }, outputDurationSec: SPEECH_SEC, raw: join(workDir, 'final.raw.mp4'), output, cacheDir: join(workDir, 'segments') }, complete);
+    return { output, messages };
   }
 
   beforeAll(async () => {
@@ -69,7 +77,7 @@ describe('品牌片尾真实渲染', () => {
   });
 
   it('留白 ≥ 0.6 秒、片尾 2–3 秒、片尾 3 秒响度 ≤ -18 LUFS，整片响度仍在目标附近，片尾画面是品牌 logo', async () => {
-    const output = await renderSample('track');
+    const { output } = await renderSample('track');
     const info = await probe(output, cfg);
     expect(outroStart - LAST_CAPTION_END).toBeGreaterThanOrEqual(HOLD_SEC - 1e-9);
     expect(info.durationSec - outroStart).toBeGreaterThanOrEqual(OUTRO_SEC - 0.15);
@@ -92,10 +100,32 @@ describe('品牌片尾真实渲染', () => {
   }, 300_000);
 
   it('留白里人像定格且不出声（无配乐时口播结束后到片尾 logo 音之前一片寂静）', async () => {
-    const output = await renderSample('none');
+    const { output } = await renderSample('none');
     // 口播音轨末尾有约 0.1 秒的 AAC 填充，窗口从口播结束后 0.2 秒起
     expect(await maxVolume(cfg.ffmpeg, output, SPEECH_SEC + 0.2, outroStart)).toBeLessThan(-60);
     // 对照：口播里确实有声音
     expect(await maxVolume(cfg.ffmpeg, output, 0.5, 2.5)).toBeGreaterThan(-30);
+  }, 300_000);
+
+  it('安静的人声（约 -28 LUFS，手机录音常见电平）：片尾仍 ≤ -18 LUFS，校正只动片尾（口播不动）并写进度', async () => {
+    const quiet = await renderSample('track', { voiceDb: -9 });
+    const info = await probe(quiet.output, cfg);
+    const tail = await lufsOf(cfg.ffmpeg, quiet.output, info.durationSec - TAIL_SEC, info.durationSec);
+    expect(tail).toBeLessThanOrEqual(MAX_TAIL_LUFS);
+    // 口播响度仍统一在 -14 附近（校正没有拉低整片）
+    const speech = await lufsOf(cfg.ffmpeg, quiet.output, 0.2, SPEECH_SEC - 0.1);
+    expect(speech).toBeGreaterThan(-18);
+    expect(quiet.messages.some((m) => m.includes('片尾衰减'))).toBe(true);
+  }, 300_000);
+
+  it('末镜头带卡片：留白期间卡片与人像整体定格，不瞬间消失（留白帧与口播末帧的上下半屏几乎一致）', async () => {
+    const withCard: Shot[] = [{ start: 0, end: 1.5, layout: 'full' }, { start: 1.5, end: SPEECH_SEC, layout: 'split', card: { template: 'title', props: { title: '定格的卡片' } } }];
+    const { output } = await renderSample('none', { shots: withCard });
+    const lastSpeech = Math.round(SPEECH_SEC * 30) - 2;
+    const held = Math.round((SPEECH_SEC + 0.2) * 30);
+    const a = await smallFrame(cfg.ffmpeg, output, lastSpeech);
+    const b = await smallFrame(cfg.ffmpeg, output, held);
+    const diff = a.reduce((sum, v, i) => sum + Math.abs(v - b[i]), 0) / a.length;
+    expect(diff).toBeLessThan(6);
   }, 300_000);
 });

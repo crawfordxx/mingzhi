@@ -1,7 +1,10 @@
 import { visualLayout, visualShots } from '../compose/layout.js';
 import { OUTRO_LOGO_SEC } from '../compose/ending.js';
+import { HOOK_HIT_SEC } from '../../render/templates/timing.js';
 import type { CardSpec, Shot } from '../storyboard/schema.js';
 import { ANCHOR_SEC, assignVariants, type SfxCue, type SfxIntent, type SfxKind } from './sfx-map.js';
+
+export { HOOK_HIT_SEC };
 
 /** 各种音效的基准音量 */
 const VOLUME = { pop: 0.2, whoosh: 0.4, whooshPip: 0.3, hit: 0.5, riser: 0.35, tick: 0.15, ui: 0.35, logo: 0.33 } as const;
@@ -18,7 +21,7 @@ const round3 = (n: number): number => Math.round(n * 1000) / 1000;
  * - 标签弹入：render/templates/Chips.tsx 的 FIRST_POP + 序号 * STAGGER（对拍 TIMING.chips*）
  * - 数字滚动：render/templates/BigNumber.tsx 的 PURE_NUMBER 与 COUNT_START/COUNT_SEC（tick 落在窗内，滚完落 hit）
  * - 卡片入场：render/layers/CardLayer.tsx 的 spring 从镜头第 0 帧起，pop 对准镜头开始
- * - 钩子标题：render/templates/Hook.tsx 三行标题从 0.12 秒起每行晚 0.1 秒上滑，弹簧约 0.3 秒落定，hit 取 HOOK_HIT_SEC
+ * - 钩子 hit：render/templates/timing.ts 的 HOOK_HIT_SEC（Hook.tsx 第一行高亮刷开完成的时刻，同一常量驱动动画）
  */
 const EXIT_SEC = 0.25;
 const TOGGLE_FIRST = 0.6;
@@ -35,8 +38,6 @@ const COUNT_START = 0.05;
 const COUNT_SEC = 0.6;
 const TICK_COUNT = 5;
 const TICK_GAP = 0.1;
-/** 钩子标题落定、hit 响起的时刻（相对镜头开始） */
-export const HOOK_HIT_SEC = 0.4;
 export const PURE_NUMBER = /^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/;
 /** 供测试与模板源头对拍的常量 */
 export const TIMING = { exitSec: EXIT_SEC, chipsFirst: CHIPS_FIRST, chipsStagger: CHIPS_STAGGER } as const;
