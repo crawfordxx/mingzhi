@@ -97,7 +97,7 @@ fn start_service(shared: &Shared, plan: &Plan, rx: &Receiver<Command>) -> Flow<S
     match started {
         Ok(service) => {
             shared.set(Stage::Running, None, Some(service.url().to_string()));
-            eprintln!("工作台已就绪：{}", service.url());
+            crate::signal::say(&format!("工作台已就绪：{}", service.url()));
             Flow::Next(service)
         }
         Err(e) => {
@@ -121,8 +121,8 @@ fn watch(
                 return Flow::Again;
             }
             Ok(Command::Quit) => {
-                eprintln!("收到退出信号，正在停止工作台服务……");
-                service.stop();
+                crate::signal::say("正在停止工作台服务……");
+                service.stop_within(crate::signal::SERVICE_STOP_GRACE);
                 return Flow::Exit;
             }
             Ok(Command::Retry | Command::SettingsChanged) => {
@@ -135,7 +135,7 @@ fn watch(
             continue;
         };
         if exit.is_user_quit() {
-            eprintln!("工作台已退出（用户主动退出），启动器随之退出");
+            crate::signal::say("工作台已退出（用户主动退出），启动器随之退出");
             return Flow::Exit;
         }
         shared.set(Stage::Crashed, Some(crash_problem(&exit.reason)), None);

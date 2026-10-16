@@ -180,22 +180,12 @@ jobs:
         env:
           CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
-          NOTARY_ID: ${{ secrets.APPLE_ID }}
-          NOTARY_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          NOTARY_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
+          # 只判断能不能签名；公证凭据是否齐全由 macos-sign.sh 自己判断并打印说明
           if [[ -n "$CERT" && -n "$SIGN_IDENTITY" ]]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
-            # 公证凭据三项齐全，macos-sign.sh 才会公证
-            if [[ -n "$NOTARY_ID" && -n "$NOTARY_TEAM" && -n "$NOTARY_PASSWORD" ]]; then
-              echo "notarize=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "notarize=false" >> "$GITHUB_OUTPUT"
-              echo "::warning::Apple 公证凭据不全：macOS 启动器已签名但未公证"
-            fi
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "notarize=false" >> "$GITHUB_OUTPUT"
             echo "::notice::未配置 Apple 签名 secrets：macOS 启动器只做 ad-hoc 签名，不公证（用户首次打开需要放行）"
           fi
 
@@ -210,9 +200,9 @@ jobs:
           security create-keychain -p "$KC_PASS" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          trap 'rm -f "$RUNNER_TEMP/cert.p12"' EXIT
           printf '%s' "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -T /usr/bin/codesign -f pkcs12 -k "$KEYCHAIN"
-          rm -f "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KEYCHAIN" > /dev/null
           # 把临时钥匙串加进搜索列表（保留原有的）
           KEYCHAINS=("$KEYCHAIN")
@@ -245,7 +235,9 @@ jobs:
           grep -q arm64 "$RUNNER_TEMP/archs.txt" && grep -q x86_64 "$RUNNER_TEMP/archs.txt"
           codesign --verify --strict --verbose=2 "$DIR/mingzhi-launcher"
           if [[ "$SIGNED" == "true" ]]; then
-            codesign -dvv "$DIR/mingzhi-launcher" 2>&1 | grep -E "Authority=Developer ID Application|flags=.*runtime"
+            INFO="$(codesign -dvv "$DIR/mingzhi-launcher" 2>&1)"
+            grep -q "Authority=Developer ID Application" <<< "$INFO"
+            grep -q "flags=.*runtime" <<< "$INFO"
           fi
           ls -l out
 

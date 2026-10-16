@@ -30,6 +30,7 @@ function installStubs(dir: string) {
     'xcrun',
     `echo "xcrun $*" >> "$STUB_LOG"
 if [[ "$1" == notarytool && "$2" == submit ]]; then
+  echo "Conducting pre-submission checks..." >&2
   echo "{\\"id\\":\\"0000-test\\",\\"status\\":\\"\${FAKE_NOTARY_STATUS:-Accepted}\\",\\"message\\":\\"x\\"}"
 fi
 if [[ "$1" == notarytool && "$2" == log ]]; then echo "公证日志：某某问题"; fi
@@ -121,25 +122,86 @@ describe.skipIf(!mac)('scripts/macos-sign.sh', () => {
       expect(verify.status, verify.stderr).toBe(0);
     });
 
-    it('.command：提示语、切到自己所在目录运行启动器、退出后提示可关窗口，并把启动器退出码带回', () => {
+    it('.command 里写入了 zip 内启动器的 sha256（没有残留占位符）', () => {
       const r = run(baseArgs());
       const dir = unzip(join(r.out, ZIP_NAME));
       const cmd = readFileSync(join(dir, COMMAND_NAME), 'utf8');
-      expect(cmd.startsWith('#!/bin/bash')).toBe(true);
-      expect(cmd).toContain('明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出');
-      expect(cmd).toContain('com.apple.quarantine');
+      const sha = execFileSync('/usr/bin/shasum', ['-a', '256', join(dir, 'mingzhi-launcher')], { encoding: 'utf8' }).split(/\s+/)[0];
+      expect(cmd).toContain(`EXPECTED_SHA256="${sha}"`);
+      expect(cmd).not.toContain('@LAUNCHER_SHA256@');
+    });
 
-      // 把启动器换成会汇报「我在哪个目录」的脚本，从别的目录运行 .command
-      const marker = join(work, 'cwd.txt');
-      writeFileSync(join(dir, 'mingzhi-launcher'), `#!/bin/bash\npwd > "${marker}"\nexit 7\n`);
-      chmodSync(join(dir, 'mingzhi-launcher'), 0o755);
-      const other = mkdtempSync(join(work, 'cwd-'));
-      const ran = spawnSync('/bin/bash', [join(dir, COMMAND_NAME)], { cwd: other, encoding: 'utf8' });
-      expect(ran.status).toBe(7);
-      expect(ran.stdout).toContain('明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出');
-      expect(ran.stdout).toContain('已退出，可以关闭这个窗口');
+    describe('.command 的运行行为（把启动器换成假脚本，从别的目录运行）', () => {
+      const QUARANTINE = 'com.apple.quarantine';
+      const hasQuarantine = (f: string) => spawnSync('/usr/bin/xattr', ['-p', QUARANTINE, f]).status === 0;
+      const quarantine = (f: string) => execFileSync('/usr/bin/xattr', ['-w', QUARANTINE, '0081;00000000;Safari;', f]);
       const real = (p: string) => execFileSync('/bin/realpath', [p], { encoding: 'utf8' }).trim();
-      expect(real(readFileSync(marker, 'utf8').trim())).toBe(real(dir));
+
+      /** 解开 zip，把启动器换成会汇报 cwd 的假脚本，并把新的 sha 写回 .command（模拟「发布时就是这个文件」）。 */
+      function prepare() {
+        const r = run(baseArgs());
+        const dir = unzip(join(r.out, ZIP_NAME));
+        const marker = join(work, `cwd-${Math.random().toString(36).slice(2)}.txt`);
+        const fake = join(dir, 'mingzhi-launcher');
+        writeFileSync(fake, `#!/bin/bash\npwd > "${marker}"\nexit 7\n`);
+        chmodSync(fake, 0o755);
+        const sha = execFileSync('/usr/bin/shasum', ['-a', '256', fake], { encoding: 'utf8' }).split(/\s+/)[0];
+        const cmdPath = join(dir, COMMAND_NAME);
+        writeFileSync(cmdPath, readFileSync(cmdPath, 'utf8').replace(/EXPECTED_SHA256="[0-9a-f]+"/, `EXPECTED_SHA256="${sha}"`));
+        return { dir, marker, fake, cmdPath };
+      }
+      const exec = (cmdPath: string) =>
+        spawnSync('/bin/bash', [cmdPath], { cwd: mkdtempSync(join(work, 'cwd-')), encoding: 'utf8' });
+
+      it('提示语、切到自己所在目录运行启动器、退出后提示可关窗口，并把启动器退出码带回', () => {
+        const { dir, marker, cmdPath } = prepare();
+        const ran = exec(cmdPath);
+        expect(ran.status).toBe(7);
+        expect(ran.stdout).toContain('明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出');
+        expect(ran.stdout).toContain('已退出，可以关闭这个窗口');
+        expect(real(readFileSync(marker, 'utf8').trim())).toBe(real(dir));
+      });
+
+      it('校验通过后只清启动器与脚本自身的隔离标记，同文件夹（含子目录）里别的文件不碰', () => {
+        const { dir, fake, cmdPath } = prepare();
+        const other = join(dir, 'other.dmg');
+        mkdirSync(join(dir, 'sub'));
+        const nested = join(dir, 'sub', 'other2.pkg');
+        writeFileSync(other, 'x');
+        writeFileSync(nested, 'y');
+        for (const f of [fake, cmdPath, other, nested]) quarantine(f);
+        exec(cmdPath);
+        expect(hasQuarantine(fake)).toBe(false);
+        expect(hasQuarantine(cmdPath)).toBe(false);
+        expect(hasQuarantine(other)).toBe(true);
+        expect(hasQuarantine(nested)).toBe(true);
+      });
+
+      it('启动器被替换（sha256 对不上）：提示并退出，不清标记、不运行', () => {
+        const { fake, cmdPath, marker } = prepare();
+        writeFileSync(fake, `#!/bin/bash\npwd > "${marker}"\nexit 9\n# 被改过\n`);
+        quarantine(fake);
+        const ran = exec(cmdPath);
+        expect(ran.status).toBe(1);
+        expect(ran.stdout).toContain('校验和不一致');
+        expect(hasQuarantine(fake)).toBe(true);
+        expect(existsSync(marker)).toBe(false);
+      });
+
+      it('启动器不在旁边（.command 被单独移走）：提示「请把整个文件夹解压后再双击」，退出码 1，不动别的文件', () => {
+        const { dir, cmdPath } = prepare();
+        const lone = mkdtempSync(join(work, 'lone-'));
+        const moved = join(lone, COMMAND_NAME);
+        copyFileSync(cmdPath, moved);
+        const bystander = join(lone, 'bystander.dmg');
+        writeFileSync(bystander, 'z');
+        quarantine(bystander);
+        const ran = exec(moved);
+        expect(ran.status).toBe(1);
+        expect(ran.stdout).toContain('请把整个「明知AI剪辑」文件夹解压后再双击');
+        expect(hasQuarantine(bystander)).toBe(true);
+        expect(existsSync(join(dir, 'mingzhi-launcher'))).toBe(true);
+      });
     });
 
     it('给两个二进制时用 lipo 合成通用二进制（两个架构都在）', () => {
@@ -193,6 +255,7 @@ describe.skipIf(!mac)('scripts/macos-sign.sh', () => {
       const submit = c[iSubmit];
       expect(submit).toMatch(/submit \S+\.zip /);
       expect(submit).toContain('--wait');
+      expect(submit).toContain('--timeout 30m');
       expect(submit).toContain('--apple-id dev@example.com');
       expect(submit).toContain('--team-id TEAM123456');
       expect(submit).toContain('--password abcd-efgh-ijkl-mnop');

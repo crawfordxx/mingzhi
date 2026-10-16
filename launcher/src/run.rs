@@ -280,6 +280,12 @@ impl Service {
         if let Some(job) = &self.job {
             job.terminate();
         }
+        // 服务在独立进程组里（见 detach_from_terminal），整组强杀，不留 Chrome / ffmpeg 子进程
+        #[cfg(unix)]
+        // SAFETY：pid 是刚创建、尚未回收的子进程，它同时是自己进程组的组长
+        unsafe {
+            libc::killpg(self.child.id() as libc::pid_t, libc::SIGKILL);
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

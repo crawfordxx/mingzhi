@@ -144,7 +144,7 @@ Every run also makes **two covers, 3:4 and 4:3**, in one of 10 styles. The speak
 
 No Node, no commands to type:
 
-1. **Download the launcher** from [Releases][releases]. On macOS download `Mingzhi-macos.zip` (Apple silicon and Intel in one), unzip it and double-click "明知AI剪辑.command" inside; on Windows double-click `Mingzhi.exe`. A Terminal / command-line window appears; close it to quit. The system blocks it the first time; see [First launch](#first-launch) for how to let it through.
+1. **Download the launcher** from [Releases][releases]. On macOS download `Mingzhi-macos.zip` (Apple silicon and Intel in one), unzip it and double-click "明知AI剪辑.command" inside; on Windows double-click `Mingzhi.exe`. The system blocks it the first time; see [First launch](#first-launch) for how to let it through.
 2. **A terminal (command-line) window appears and your browser opens a progress page.** That window *is* Mingzhi; keep it open while you work.
 3. **The first run downloads the runtime and local models**: the Node runtime, ffmpeg, Chrome for rendering, the speech and matting models, and the app itself. About **490 MB** on Apple silicon, **510 MB** on Intel Macs and **530 MB** on Windows; music and fonts are filled in afterwards in the background, so you can start right away. Every download resumes where it stopped and is checked against a sha256; if the network drops, click "Retry" to pick up from there.
 4. **When it is done the page jumps to the workbench.** Paste your [Kexiang AI][kexiang] key (no invite code needed) and make a cut.
@@ -179,9 +179,11 @@ Inside: `runtime/` holds Node and Chrome, `app/<version>/` the app itself, and `
 
 ### Updating
 
-When a new version is out, the top right of the workbench shows "有新版本 v0.x" (new version). Click it for the release notes, then "去下载" (download) to open the Release page. Download the new launcher and double-click it: it only fetches the new app (about 50 MB) and keeps your projects, models and settings.
+When a new version is out, the top right of the workbench shows "有新版本 v0.x" (new version). Click it for the release notes, then "去下载" (download) to open the Release page. Download the new launcher and double-click it: usually it only needs the new app (about 50–60 MB); components that did not change, such as the models, are not downloaded again, and your projects and settings stay.
 
-The check runs at most once a day and sends a single anonymous request to GitHub, with nothing that identifies you; turn it off under the gear → "检查更新" (check for updates). You can always look at [Releases][releases] yourself.
+Old versions are not removed automatically: the `app/` folder inside the app folder keeps the old version's directory (about 230–250 MB each). Once the new version works, quit and delete `app/<old version>/` by hand; delete only that folder, never `data/` or `runtime/`.
+
+The check runs at most once a day and sends a single anonymous request to GitHub, with nothing that identifies you; it uses the `HTTPS_PROXY` environment variable or the macOS system proxy. If it fails (for example, no network at the time) you simply see nothing, and it does not retry that day; turn it off under the gear → "检查更新" (check for updates). You can always look at [Releases][releases] yourself.
 
 ### Run from source
 
@@ -202,7 +204,7 @@ pnpm build:web      # build the workbench page
 pnpm serve          # start the local server, default http://127.0.0.1:4321
 ```
 
-Open the address printed in the terminal (the port moves up if it is taken). On first visit the page asks for your Kexiang key, checks it, and only saves it if it works.
+Open the address printed in the terminal (the port moves up if it is taken). On first visit the page asks for your Kexiang key, checks it, and only saves it if it works. The server quits by itself after 2 hours with no page open and no job running (same as the launcher build); just run `pnpm serve` again.
 
 > [!WARNING]
 > Models and assets come from GitHub Releases and upstream sites, which can fail on some networks in mainland China; the first render also downloads Chrome Headless Shell (about 94 MB). Behind a proxy, prefix commands with `NODE_USE_ENV_PROXY=1` (Node 22.21+) so Node honours `HTTPS_PROXY` and friends. Every download is checked against a sha256, and re-running skips what is already there.
@@ -262,6 +264,8 @@ Both systems work the same way: **a Terminal / command-line window appears and t
 
 If it says the file **"is damaged"**: open Terminal, type `xattr -dr com.apple.quarantine ` (with a trailing space), drag the unzipped "明知AI剪辑" folder into the Terminal window, press Return, then double-click again.
 
+When "明知AI剪辑.command" starts, it only removes the "downloaded from the internet" quarantine flag from `mingzhi-launcher` in the same folder and from itself, and it first checks that the launcher's sha256 matches the value recorded at release time (if not, it changes nothing and does not run it). It never touches any other file in the folder. The script is `launcher/macos/start.command` in this repository if you want to read it.
+
 In a notarized build the launcher binary itself is no longer blocked; the ".command" script cannot be signed, so it still needs the steps above.
 
 #### Windows
@@ -296,7 +300,7 @@ The software is free. Model calls are pay-as-you-go, charged straight to your Ke
 - **Your audio never leaves the machine.** Speech recognition (SenseVoice) and matting run locally.
 - **LLMs only see text.** Cutting, caption polish and the storyboard get the recognised text only.
 - **No faces go to the image model.** For covers, a 6-frame contact sheet goes to a vision model to pick a frame, and the generated cover goes back to it to check the title; the image model only gets a text prompt asking for no people, and the speaker is composited locally. The card self-check sends screenshots of the cards.
-- **No data collection by default**: no analytics, no telemetry. The server listens on `127.0.0.1` only and checks the request origin, so other web pages cannot drive it.
+- **No data collection by default**: no analytics, no telemetry. The only automatic network query is a once-a-day anonymous check of the latest version number on GitHub, which you can turn off in settings. The server listens on `127.0.0.1` only and checks the request origin, so other web pages cannot drive it.
 - **Your key lives in the system keychain** (macOS Keychain; DPAPI-encrypted on Windows), falling back to the local data directory only if the keychain is unavailable. Or keep it in the `MINGZHI_KX_KEY` environment variable and never write it to disk.
 
 ## Minimum specs

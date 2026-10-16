@@ -16,6 +16,7 @@
 #   有身份、没有完整公证凭据       启动器用 Developer ID 签名，未公证（说明缺哪几项）
 #   身份与公证凭据齐全             启动器签名 + 提交 zip 公证（Gatekeeper 联网核对公证票据）
 # 只有二进制能签名：.command 是脚本，无法签名，首次打开仍要用户放行（见 README「首次打开」）；
+# 打包时把签名后二进制的 sha256 写进 .command，它启动时先核对再去掉启动器的隔离标记；
 # zip 与裸二进制也无法 staple，公证票据留在 Apple 服务器上。
 # --sign-only：只签名，不公证（本机用 Apple Development 证书演练流程时用）
 #
@@ -107,8 +108,6 @@ else
   cp "${BINS[0]}" "$BIN"
 fi
 chmod 755 "$BIN"
-cp "$COMMAND_SRC" "$PKG/$COMMAND_NAME"
-chmod 755 "$PKG/$COMMAND_NAME"
 # 清掉扩展属性（如 com.apple.provenance），zip 里不该出现 ._ 文件
 xattr -cr "$PKG"
 
@@ -120,6 +119,12 @@ else
   codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$BIN"
 fi
 codesign --verify --strict --verbose=2 "$BIN"
+
+# ---- 2b. 把签名后二进制的 sha256 写进 .command：它启动时先核对再去掉隔离标记，二进制被单独换掉就不会放行
+SHA="$(shasum -a 256 "$BIN" | awk '{print $1}')"
+sed "s/@LAUNCHER_SHA256@/$SHA/" "$COMMAND_SRC" > "$PKG/$COMMAND_NAME"
+chmod 755 "$PKG/$COMMAND_NAME"
+grep -q "^EXPECTED_SHA256=\"$SHA\"" "$PKG/$COMMAND_NAME" || { echo "错误：没能把 sha256 写进 $COMMAND_NAME" >&2; exit 1; }
 
 # ---- 3. 打包；要公证的话提交的就是最终发布的这个 zip
 ZIP="$STAGE/$ZIP_NAME"
@@ -133,12 +138,14 @@ if [[ "$NOTARIZE" == 1 ]]; then
     AUTH=(--apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$APP_PASSWORD")
   fi
   echo "提交公证并等待结果（通常几分钟）……"
+  # stdout 只放 JSON 结果，stderr（进度、提示）单独存放，不混进要解析的内容；--timeout 防止排队时一直占着 CI
   RC=0
-  RESULT="$(xcrun notarytool submit "$ZIP" --wait --output-format json "${AUTH[@]}" 2>&1)" || RC=$?
+  RESULT="$(xcrun notarytool submit "$ZIP" --wait --timeout 30m --output-format json "${AUTH[@]}" 2>"$STAGE/notary.err")" || RC=$?
   STATUS="$(printf '%s' "$RESULT" | plutil -extract status raw -o - - 2>/dev/null || true)"
   if [[ "$STATUS" != "Accepted" ]]; then
     echo "公证失败（status=${STATUS:-未知}，退出码 ${RC}）：" >&2
     printf '%s\n' "$RESULT" >&2
+    cat "$STAGE/notary.err" >&2
     SUB_ID="$(printf '%s' "$RESULT" | plutil -extract id raw -o - - 2>/dev/null || true)"
     if [[ -n "$SUB_ID" ]]; then
       xcrun notarytool log "$SUB_ID" "${AUTH[@]}" >&2 || true

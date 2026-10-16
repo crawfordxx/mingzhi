@@ -7,7 +7,7 @@
 
 /// 打印并弹出提示（阻塞到用户点「好」）。
 pub fn alert(title: &str, message: &str) {
-    eprintln!("{title}：{message}");
+    crate::signal::say(&format!("{title}：{message}"));
     if std::env::var_os("MINGZHI_NO_BROWSER").is_some_and(|v| v == "1") {
         return;
     }

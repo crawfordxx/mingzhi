@@ -38,10 +38,12 @@ describe('macOS 打包资源', () => {
     expect(statSync(path).mode & 0o111).toBe(0o111);
     const c = readFileSync(path, 'utf8');
     expect(c.startsWith('#!/bin/bash')).toBe(true);
-    expect(c).toContain('cd "$(dirname "$0")"');
+    expect(c).toContain('cd -- "$(dirname -- "$0")"');
     expect(c).toContain('明知AI剪辑正在启动，浏览器会自动打开；关闭这个窗口即可退出。');
     expect(c).toContain('./mingzhi-launcher');
-    expect(c).toContain('xattr -dr com.apple.quarantine');
+    // 只清启动器与自身，不递归
+    expect(c).not.toMatch(/xattr -[a-z]*r/);
+    expect(c).toContain('EXPECTED_SHA256="@LAUNCHER_SHA256@"');
   });
 
   it('entitlements 为空：启动器不需要任何 hardened runtime 豁免', () => {

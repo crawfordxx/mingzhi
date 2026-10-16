@@ -73,8 +73,9 @@ const BANNER: &str = "明知AI剪辑正在启动，浏览器会自动打开；�
 
 fn run() -> Result<()> {
     signal::install();
+    signal::spawn_watcher();
     if cfg!(windows) {
-        eprintln!("{BANNER}");
+        signal::say(BANNER);
     }
     let root = AppRoot::resolve()?;
     let Some(guard) = primary_or_hand_off(&root)? else {
@@ -86,7 +87,7 @@ fn run() -> Result<()> {
     let settings = Arc::new(RwLock::new(State::load(&root.state_file())?.settings()));
     let proxy = ProxyConfig::from_env();
     for w in proxy.warnings() {
-        eprintln!("提示：{w}");
+        signal::say(&format!("提示：{w}"));
     }
     let progress = Progress::new();
     let downloader = Downloader::new(proxy, progress.clone()).with_settings(settings.clone());
@@ -107,11 +108,11 @@ fn run() -> Result<()> {
     let shared = Shared::new(progress, settings, root.state_file(), info, tx);
     let ui = server::start(shared.clone(), UI_PORT)?;
     guard.publish(&ui.url())?;
-    eprintln!("进度页：{}", ui.url());
+    signal::say(&format!("进度页：{}", ui.url()));
     open_page(&ui.url());
 
     // 主流程常驻；启动器退出时工作台服务随之退出
-    signal::spawn_watcher(shared.clone());
+    signal::attach(shared.clone());
     app::run(shared, plan, rx);
     signal::mark_finished();
     drop(guard);

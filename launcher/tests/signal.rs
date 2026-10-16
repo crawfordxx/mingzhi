@@ -36,7 +36,8 @@ fn pid_alive(pid: i32) -> bool {
 }
 
 /// 起启动器，等到「工作台已就绪」，返回（进程，服务进程 pid）。
-fn spawn_launcher(root: &std::path::Path, server: &TestServer) -> (Child, i32) {
+/// `keep_reading` 为 false 时丢掉 stderr 的读端，模拟终端窗口已经断开（之后任何写 stderr 都会失败）。
+fn spawn_launcher(root: &std::path::Path, server: &TestServer, keep_reading: bool) -> (Child, i32) {
     let node = node_targz();
     server.route("/node.tar.gz", vec![Behavior::Serve(node.clone())]);
     let mut it = archive_item(
@@ -90,8 +91,12 @@ fn spawn_launcher(root: &std::path::Path, server: &TestServer) -> (Child, i32) {
         }
     }
     assert!(ready, "启动器没有进入就绪状态");
-    // 后台继续读 stderr，避免管道写满
-    std::thread::spawn(move || for _ in lines {});
+    if keep_reading {
+        // 后台继续读 stderr，避免管道写满
+        std::thread::spawn(move || for _ in lines {});
+    } else {
+        drop(lines);
+    }
     let out = Command::new("pgrep")
         .args(["-P", &child.id().to_string()])
         .output()
@@ -115,11 +120,11 @@ fn exits_within(child: &mut Child, d: Duration) -> bool {
     false
 }
 
-fn check(sig: i32) {
+fn check(sig: i32, keep_reading: bool) {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let server = TestServer::start();
-    let (mut child, service_pid) = spawn_launcher(tmp.path(), &server);
+    let (mut child, service_pid) = spawn_launcher(tmp.path(), &server, keep_reading);
     // SAFETY：向刚起的子进程发信号
     unsafe { libc::kill(child.id() as i32, sig) };
     let status_ok = exits_within(&mut child, Duration::from_secs(12));
@@ -136,15 +141,27 @@ fn check(sig: i32) {
 
 #[test]
 fn sigint_优雅退出并带走服务() {
-    check(libc::SIGINT);
+    check(libc::SIGINT, true);
 }
 
 #[test]
 fn sighup_关闭终端窗口时优雅退出并带走服务() {
-    check(libc::SIGHUP);
+    check(libc::SIGHUP, true);
 }
 
 #[test]
 fn sigterm_优雅退出并带走服务() {
-    check(libc::SIGTERM);
+    check(libc::SIGTERM, true);
+}
+
+/// 关闭终端窗口：tty 先断开，之后写 stderr 会失败（这里用关闭管道读端模拟）。
+/// 信号路径上的日志写失败不能 panic，否则 Quit 发不出去，启动器与服务成为孤儿进程。
+#[test]
+fn sighup_终端已断开_stderr不可写时仍然退出并带走服务() {
+    check(libc::SIGHUP, false);
+}
+
+#[test]
+fn sigint_终端已断开_stderr不可写时仍然退出并带走服务() {
+    check(libc::SIGINT, false);
 }
