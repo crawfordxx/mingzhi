@@ -7,6 +7,8 @@ import { visualLayout } from '../compose/layout.js';
 import { storyboardIssues } from '../storyboard/rules.js';
 import type { Shot, Storyboard } from '../storyboard/schema.js';
 import { blankSpans, staticSpans, type FrameSeries, type Span } from './film-frames.js';
+import { FACE_BASE_FLOOR, FACE_NOISE_MAX_RATIO } from './face-noise.js';
+import type { FaceNoiseResult } from './face-noise-measure.js';
 import { MIN_CONTRAST, type ShotContrast } from './readability.js';
 
 /**
@@ -18,7 +20,7 @@ export const LIMITS = { staticSec: 25, staticPerSec: 120, staticMinSec: 2, maxBl
 /** 静止合计上限：按片长折算（2 分钟 25 秒），最少 2 秒 */
 export const staticLimit = (durationSec: number): number => Math.max(LIMITS.staticMinSec, (LIMITS.staticSec * durationSec) / LIMITS.staticPerSec);
 
-export type FilmMetricId = 'static' | 'blank' | 'firstFrame' | 'diversity' | 'coverage' | 'reuse' | 'sfx' | 'readability';
+export type FilmMetricId = 'static' | 'blank' | 'firstFrame' | 'diversity' | 'coverage' | 'reuse' | 'sfx' | 'readability' | 'faceNoise';
 /** 一项整片指标：value 与 limit 同单位；shots 为不达标时定位到的镜头序号；spans 为对应的成片时间区间（抽帧类指标） */
 export interface FilmMetric { id: FilmMetricId; label: string; value: number; limit: number; ok: boolean; detail: string; shots: number[]; spans?: Span[] }
 /** templates：各模板合计时长（秒，从多到少）；contrasts：铺图卡片逐镜的文字对比度（局部重做按深浅极性选压暗或取消底图） */
@@ -150,6 +152,18 @@ export function readabilityMetric(contrasts: ShotContrast[]): FilmMetric {
   };
 }
 
+/** 人脸区域高频噪声：成片人脸区域的拉普拉斯能量 ≤ 无颗粒基准的 FACE_NOISE_MAX_RATIO 倍；不达标时定位到比值超限的取样点所在镜头 */
+export function faceNoiseMetric(r: FaceNoiseResult, shots: Shot[]): FilmMetric {
+  const ok = r.ratio <= FACE_NOISE_MAX_RATIO + 1e-9;
+  const over = r.energies.filter((e) => e.film / Math.max(FACE_BASE_FLOOR, e.base) > FACE_NOISE_MAX_RATIO);
+  const at = (t: number): number => shots.findIndex((s) => t >= s.start && t < s.end);
+  return {
+    id: 'faceNoise', label: '人脸区域高频噪声', value: Math.round(r.ratio * 100) / 100, limit: FACE_NOISE_MAX_RATIO, ok,
+    detail: `人脸区域高频能量是无颗粒基准的 ${r.ratio.toFixed(2)} 倍（${r.samples} 处取样，上限 ${FACE_NOISE_MAX_RATIO} 倍）`,
+    shots: ok ? [] : uniq(over.map((e) => at(e.time)).filter((i) => i >= 0)),
+  };
+}
+
 export interface FilmInput {
   storyboard: Storyboard;
   /** 口播内容时长（不含最后一句后的留白与品牌片尾） */
@@ -162,6 +176,10 @@ export interface FilmInput {
   contrasts?: ShotContrast[];
   /** 可读性检查失败的原因 */
   contrastError?: string;
+  /** 人脸区域高频噪声的测量结果；没有人物框或没有可取样的镜头时缺省（该项不检查） */
+  faceNoise?: FaceNoiseResult | null;
+  /** 人脸噪声度量失败的原因 */
+  faceNoiseError?: string;
 }
 
 /** 汇总全部指标；某类度量失败时该类跳过并写进 skipped */
@@ -175,10 +193,12 @@ export function filmReport(i: FilmInput): FilmReport {
     reuseMetric(shots, i.candidateOf),
     sfxMetric(i.sfx),
     ...(i.contrastError ? [] : [readabilityMetric(i.contrasts ?? [])]),
+    ...(i.faceNoise ? [faceNoiseMetric(i.faceNoise, shots)] : []),
   ];
   const skipped = [
     ...(i.frames ? [] : [`抽帧失败，静止、空白率、首帧未检查：${i.frameError ?? '未知原因'}`]),
     ...(i.contrastError ? [`铺图卡片可读性未检查：${i.contrastError}`] : []),
+    ...(i.faceNoiseError ? [`人脸区域高频噪声未检查：${i.faceNoiseError}`] : []),
   ];
   return { ok: metrics.every((m) => m.ok), durationSec: i.durationSec, metrics, templates: templateSeconds(shots), skipped, ...(i.contrasts ? { contrasts: i.contrasts } : {}) };
 }

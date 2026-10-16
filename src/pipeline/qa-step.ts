@@ -9,6 +9,7 @@ import { hardChecks as realHardChecks, type HardCheck } from '../qa/hard.js';
 import { defaultPalette } from '../qa/palette.js';
 import { qaCards as realQaCards, type CardQaEntry, type QaCardsOptions } from '../qa/visual.js';
 import { filmSummary, type FilmReport } from '../qa/film.js';
+import type { FacePerson } from '../qa/face-noise-measure.js';
 import { contentEnd, measureFilm } from '../qa/film-measure.js';
 import { planRedo, syncBeats, type FilmQa, type RedoAction } from '../qa/film-redo.js';
 import { CANVAS, type Storyboard } from '../storyboard/schema.js';
@@ -98,14 +99,14 @@ export async function runQaFinal(ctx: QaFinalContext, video: string, storyboard:
 }
 
 /** redo：是否允许局部重做（CLI 与工作台首版重做；修改版本只检查，免得改掉用户点名的版式）；measure 缺省为真实度量 */
-export interface QaFilmContext { cfg: AppConfig; workDir: string; redo: boolean; signal?: AbortSignal; measure?: typeof measureFilm; /** 素材记录所在目录（工作台是 base），缺省 workDir */ metaDir?: string }
+export interface QaFilmContext { cfg: AppConfig; workDir: string; redo: boolean; signal?: AbortSignal; measure?: typeof measureFilm; /** 素材记录所在目录（工作台是 base），缺省 workDir */ metaDir?: string; /** 人像视频与人物框，给出时整片自检加测人脸区域高频噪声 */ face?: FacePerson }
 /** 一版成片：视频文件、它对应的分镜与片尾开始时刻 */
 export interface FilmCut { video: string; storyboard: Storyboard; outroStartSec?: number }
 
 const actionText = (actions: RedoAction[]): string => actions.map((a) => `第 ${a.shotIndex + 1} 镜：${a.detail}`).join('；');
 
 async function measureCut(ctx: QaFilmContext, cut: FilmCut): Promise<FilmReport> {
-  const o = { ffmpeg: ctx.cfg.ffmpeg, workDir: ctx.workDir, ...(ctx.metaDir ? { metaDir: ctx.metaDir } : {}), video: cut.video, storyboard: cut.storyboard, signal: ctx.signal };
+  const o = { ffmpeg: ctx.cfg.ffmpeg, workDir: ctx.workDir, ...(ctx.metaDir ? { metaDir: ctx.metaDir } : {}), video: cut.video, storyboard: cut.storyboard, signal: ctx.signal, ...(ctx.face ? { face: ctx.face } : {}) };
   return (ctx.measure ?? measureFilm)(cut.outroStartSec === undefined ? o : { ...o, outroStartSec: cut.outroStartSec });
 }
 

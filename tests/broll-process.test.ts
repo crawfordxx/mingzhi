@@ -9,8 +9,6 @@ import { CUT_SCORE, MIN_USABLE_SEC, parseFrameStats, pickSegment, speedFor, type
 import { WB_MAX, WB_MIN, wbGains } from '../src/broll/grade.js';
 import { PROJECT_LUT, UnusableAssetError, processAsset } from '../src/broll/process.js';
 import { verifyOutput } from '../src/broll/verify.js';
-import { grainNoise } from '../render/layers/GrainLayer.js';
-import { renderGrainStills } from './fixtures/grain/render.js';
 
 const cfg = loadConfig();
 const ctx = { ffmpeg: cfg.ffmpeg, ffprobe: cfg.ffprobe, lut: PROJECT_LUT };
@@ -287,34 +285,4 @@ describe('processAsset：真实 ffmpeg 处理小样', () => {
     expect(b[2] / b[0]).toBeGreaterThan(a[2] / a[0]);
     expect(b[2] / b[0]).toBeLessThan((a[2] / a[0]) * 1.25);
   });
-});
-
-describe('颗粒层', () => {
-  it('同一帧号的噪声完全相同，不同帧号不同；均值居中', () => {
-    const a = grainNoise(12, 64, 48);
-    expect(grainNoise(12, 64, 48)).toEqual(a);
-    expect(grainNoise(13, 64, 48)).not.toEqual(a);
-    let sum = 0;
-    for (let i = 0; i < a.length; i += 4) sum += a[i];
-    expect(sum / (a.length / 4)).toBeGreaterThan(118);
-    expect(sum / (a.length / 4)).toBeLessThan(138);
-  });
-  it('独立渲染：尺寸不变、渲染可复现、中灰上颗粒强度 3–5%、四角轻暗角', async () => {
-    const stills = await renderGrainStills(dir, [5, 5, 6]);
-    const [a, b, c] = await Promise.all(stills.map(async (f) => ({ file: f, info: await probeOut(f), buf: readFileSync(f) })));
-    expect(a.info).toMatchObject({ width: 1080, height: 1920 });
-    expect(a.buf.equals(b.buf)).toBe(true);
-    expect(a.buf.equals(c.buf)).toBe(false);
-    const raw = await runBuffer(cfg.ffmpeg, ['-v', 'error', '-i', a.file, '-f', 'rawvideo', '-pix_fmt', 'gray', '-']);
-    const at = (x: number, y: number): number => raw[y * 1080 + x];
-    let dev = 0, n = 0;
-    for (let y = 860; y < 1060; y += 1) for (let x = 440; x < 640; x += 1) { dev += Math.abs(at(x, y) - 128); n += 1; }
-    const strength = dev / n / 255;
-    expect(strength).toBeGreaterThan(0.03);
-    expect(strength).toBeLessThan(0.05);
-    let corner = 0;
-    for (let y = 0; y < 40; y += 1) for (let x = 0; x < 40; x += 1) corner += at(x, y);
-    expect(corner / 1600).toBeLessThan(128 * 0.92);
-    expect(corner / 1600).toBeGreaterThan(128 * 0.7);
-  }, 300_000);
 });

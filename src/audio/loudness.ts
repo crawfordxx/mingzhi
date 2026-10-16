@@ -1,6 +1,7 @@
 import { rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { AppConfig } from '../config.js';
+import { finalVideoArgs } from '../media/encode.js';
 import { run } from '../media/exec.js';
 import { probe } from '../media/probe.js';
 import { TAIL_MAX_LUFS, TAIL_SEC, measureTailLufs } from '../qa/hard.js';
@@ -77,7 +78,7 @@ async function measure(input: string, filter: string, cfg: AppConfig): Promise<L
   return parseLoudnormJson(stderr);
 }
 
-/** 第二遍：视频流拷贝，音频按第一遍的测量值归一，写到 dest（调用方传临时文件） */
+/** 第二遍：视频按成片最终编码参数重编码（限制码率），音频按第一遍的测量值归一，写到 dest（调用方传临时文件） */
 async function applyPass(input: string, dest: string, first: LoudnormMeasure, linear: boolean, cfg: AppConfig): Promise<void> {
   const filter =
     `${BASE_FILTER}:measured_I=${first.input_i}:measured_TP=${first.input_tp}:measured_LRA=${first.input_lra}` +
@@ -85,7 +86,7 @@ async function applyPass(input: string, dest: string, first: LoudnormMeasure, li
   // 只映射第一路视频：流水线成片必有视频；纯音频输入不在支持范围
   await run(cfg.ffmpeg, [
     '-y', '-hide_banner', '-nostats', '-i', input, '-map', '0:v', '-map', '0:a:0',
-    '-c:v', 'copy', '-af', filter, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', ...FASTSTART, dest,
+    ...finalVideoArgs(), '-af', filter, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', ...FASTSTART, dest,
   ]);
 }
 
@@ -97,7 +98,7 @@ function meetsTarget(m: LoudnormMeasure): boolean {
 async function normalizeInto(input: string, tmp: string, cfg: AppConfig): Promise<LoudnessResult> {
   const first = await measure(input, `${BASE_FILTER}:print_format=json`, cfg);
   if (!Number.isFinite(first.input_i)) {
-    await run(cfg.ffmpeg, ['-y', '-hide_banner', '-i', input, '-c', 'copy', ...FASTSTART, '-f', 'mp4', tmp]);
+    await run(cfg.ffmpeg, ['-y', '-hide_banner', '-i', input, ...finalVideoArgs(), '-c:a', 'copy', ...FASTSTART, '-f', 'mp4', tmp]);
     return { before: first.input_i, after: first.input_i, truePeak: first.input_tp, mode: 'linear' };
   }
   const verifyFilter = `${BASE_FILTER}:print_format=json`;
@@ -113,10 +114,10 @@ async function normalizeInto(input: string, tmp: string, cfg: AppConfig): Promis
 }
 
 /**
- * 两遍 loudnorm 把音轨统一到 -14 LUFS：视频流直接拷贝，音频重编码为 AAC 192k/48kHz，输出带 faststart。
+ * 两遍 loudnorm 把音轨统一到 -14 LUFS：视频按 FINAL_ENCODE 重编码（crf + maxrate，成片体积在这里定下来），音频重编码为 AAC 192k/48kHz，输出带 faststart。
  * 先走 linear 模式；成片复测达不到目标（响度偏差 > 1 LU 或真峰值 > -1.0 dBTP）时，
  * 从原始输入改用动态模式（linear=false，并接限幅器）重做并再次复测，mode 报告最终采用的模式。
- * 静音音轨无法归一：重封装（faststart）后原样输出，before 与 after 均为 -Infinity。
+ * 静音音轨无法归一：音轨原样拷贝（视频同样重编码、faststart），before 与 after 均为 -Infinity。
  * 所有遍次与复测都写 `<output>.tmp.mp4`，最后才改名为 output；失败时 output 不会出现，临时文件被清掉。
  */
 export async function normalizeLoudness(input: string, output: string, cfg: AppConfig): Promise<LoudnessResult> {

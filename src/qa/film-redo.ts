@@ -212,6 +212,7 @@ export function planRedo(storyboard: Storyboard, report: FilmReport, captions: T
   const still = failing(report, 'static');
   if (still) w = unfreeze(w, still, captions);
   if (failing(report, 'diversity')) w = diversify(w, durationSec);
+  if (failing(report, 'faceNoise')) w = note(w, '人脸区域颗粒偏重：颗粒强度是全片统一设置，局部重做不改；请在渲染设置里降低颗粒或关闭颗粒质感层');
   if (failing(report, 'coverage')) w = note(w, '摄影级画面不足：需要更多素材（填写 Pexels 或 Pixabay key、放宽素材预算），局部重做不新增素材');
   const shots = applySplits(w.shots, w.splits);
   return { storyboard: w.actions.length > 0 ? { ...storyboard, shots } : storyboard, actions: w.actions, unfixed: w.unfixed };

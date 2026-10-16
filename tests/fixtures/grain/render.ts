@@ -3,18 +3,19 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundle } from '@remotion/bundler';
 import { renderStill, selectComposition } from '@remotion/renderer';
+import type { PixelRegion } from '../../../render/layers/grain-field.js';
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), 'index.tsx');
 
 /** 打包颗粒层测试入口，逐帧出 PNG（同一帧可出多次，用来验证可复现），返回文件路径；bg 为 publicDir 下的底图 */
-export async function renderGrainStills(outDir: string, frames: number[], bg?: { publicDir: string; file: string }): Promise<string[]> {
+export async function renderGrainStills(outDir: string, frames: number[], bg?: { publicDir: string; file: string }, extra: { strength?: number; region?: PixelRegion | null } = {}): Promise<string[]> {
   const serveUrl = await bundle({
     entryPoint: ENTRY,
     ...(bg ? { publicDir: bg.publicDir } : {}),
     webpackOverride: (c) => ({ ...c, resolve: { ...c.resolve, extensionAlias: { '.js': ['.ts', '.tsx', '.js'] } } }),
   });
   try {
-    const inputProps = bg ? { bg: bg.file } : {};
+    const inputProps = { ...(bg ? { bg: bg.file } : {}), ...extra };
     const composition = await selectComposition({ serveUrl, id: 'GrainTest', inputProps });
     const files: string[] = [];
     for (const [i, frame] of frames.entries()) {
