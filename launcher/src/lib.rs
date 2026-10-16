@@ -1,15 +1,24 @@
-//! 明知AI剪辑 启动器核心：清单、下载（续传/校验/镜像）、解包、安装状态。
-//! 进度页与启动流程在上层（Task 3）。
+//! 明知AI剪辑 启动器：清单、下载（续传/校验/镜像）、解包、安装状态，
+//! 以及进度页（server + ui.html）与启动工作台（app + run）。
 
+pub mod app;
+pub mod browser;
+pub mod catalog;
 pub mod download;
+pub mod errmap;
 pub mod error;
 pub mod fsx;
 pub mod hash;
 pub mod install;
+pub mod instance;
 pub mod manifest;
 pub mod paths;
 pub mod progress;
 pub mod proxy;
+pub mod run;
+pub mod server;
+pub mod settings;
 pub mod single;
 pub mod state;
+pub mod sysinfo;
 pub mod unpack;

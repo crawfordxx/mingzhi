@@ -4,23 +4,27 @@
 //! - 4xx（404/403 等）：该镜像没有这个文件，立刻换下一个镜像；
 //! - 网络错误 / 5xx / 429：保留 .part，稍等后续传重试；
 //! - 下载完成但大小或 sha256 不符：删除 .part，从头重下；
-//! - 服务器无视 Range 直接回 200：从头写，不会把内容接错。
+//! - 服务器无视 Range 直接回 200：从头写，不会把内容接错；
+//! - 连续 45 秒收不到数据（含连上后迟迟不回应）：换下一个地址，已下部分在新地址续传。
+//!
+//! 地址顺序与 GitHub 代理前缀来自共享的 `Settings`，进度页改了设置，下一项/下一次重试即生效。
 
 use crate::error::{Context, Error, Result};
 use crate::hash::sha256_file;
 use crate::manifest::Item;
 use crate::progress::Progress;
 use crate::proxy::{redact, ProxyConfig};
+use crate::settings::Settings;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 const USER_AGENT: &str = concat!("mingzhi-launcher/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// 读超时：连接卡死时尽快失败并续传，而不是让用户干等
-const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// 无数据超时：这么久收不到一个字节就换下一个地址（jsDelivr 等偶发卡死）
+const STALL_TIMEOUT: Duration = Duration::from_secs(45);
 const DEFAULT_MAX_ATTEMPTS: usize = 3;
 const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(2);
 
@@ -37,6 +41,8 @@ pub struct Downloader {
     progress: Arc<Progress>,
     max_attempts: usize,
     retry_delay: Duration,
+    stall_timeout: Duration,
+    settings: Arc<RwLock<Settings>>,
 }
 
 impl Downloader {
@@ -46,7 +52,21 @@ impl Downloader {
             progress,
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             retry_delay: DEFAULT_RETRY_DELAY,
+            stall_timeout: STALL_TIMEOUT,
+            settings: Arc::default(),
         }
+    }
+
+    /// 调整无数据超时（测试里设得很短）。
+    pub fn with_stall_timeout(mut self, timeout: Duration) -> Self {
+        self.stall_timeout = timeout;
+        self
+    }
+
+    /// 共享的下载设置（镜像顺序、GitHub 代理前缀）。
+    pub fn with_settings(mut self, settings: Arc<RwLock<Settings>>) -> Self {
+        self.settings = settings;
+        self
     }
 
     /// 调整重试间隔（测试里设为 0）。
@@ -66,8 +86,14 @@ impl Downloader {
         }
         let mut counted = 0u64; // 已计入进度的 .part 字节数
         let mut failures: Vec<String> = Vec::new();
+        let urls = self
+            .settings
+            .read()
+            .map(|s| s.urls_for(&item.urls))
+            .unwrap_or_else(|_| item.urls.clone());
+        let id = item.id.as_str();
 
-        for url in &item.urls {
+        for url in &urls {
             for attempt in 1..=self.max_attempts {
                 if attempt > 1 {
                     std::thread::sleep(self.retry_delay * (attempt as u32 - 1));
@@ -75,13 +101,13 @@ impl Downloader {
                 // 与磁盘上的 .part 对齐（上次运行遗留的续传数据也要计入进度）
                 let len = file_len(part);
                 if len > item.size {
-                    self.discard(part, &mut counted)?;
+                    self.discard(id, part, &mut counted)?;
                 } else {
-                    self.reconcile(&mut counted, len);
+                    self.reconcile(id, &mut counted, len);
                 }
 
                 if file_len(part) != item.size {
-                    match self.fetch(url, item.size, part, &mut counted) {
+                    match self.fetch(id, url, item.size, part, &mut counted) {
                         Ok(()) => {}
                         Err(FetchError::NextMirror(msg)) => {
                             failures.push(format!("{url}：{msg}"));
@@ -104,7 +130,7 @@ impl Downloader {
                     return Ok(());
                 }
                 failures.push(format!("{url}：下载完成但校验不符，已删除重下"));
-                self.discard(part, &mut counted)?;
+                self.discard(id, part, &mut counted)?;
             }
         }
 
@@ -128,22 +154,22 @@ impl Downloader {
         Ok(sha256_file(part)?.eq_ignore_ascii_case(&item.sha256))
     }
 
-    fn discard(&self, part: &Path, counted: &mut u64) -> Result<()> {
+    fn discard(&self, id: &str, part: &Path, counted: &mut u64) -> Result<()> {
         match fs::remove_file(part) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(Error::new(format!("删除 {} 失败：{e}", part.display()))),
         }
-        self.reconcile(counted, 0);
+        self.reconcile(id, counted, 0);
         Ok(())
     }
 
     /// 让「已计入进度的字节」与 .part 实际长度一致。
-    fn reconcile(&self, counted: &mut u64, actual: u64) {
+    fn reconcile(&self, id: &str, counted: &mut u64, actual: u64) {
         if actual > *counted {
-            self.progress.add(actual - *counted);
+            self.progress.item_add(id, actual - *counted);
         } else {
-            self.progress.sub(*counted - actual);
+            self.progress.item_sub(id, *counted - actual);
         }
         *counted = actual;
     }
@@ -152,7 +178,7 @@ impl Downloader {
         let mut builder = ureq::AgentBuilder::new()
             .user_agent(USER_AGENT)
             .timeout_connect(CONNECT_TIMEOUT)
-            .timeout_read(READ_TIMEOUT);
+            .timeout_read(self.stall_timeout);
         if let Some(p) = self.proxy.proxy_for(url) {
             builder =
                 builder.proxy(ureq::Proxy::new(p).ctx(format!("代理地址 {} 不可用", redact(p)))?);
@@ -163,6 +189,7 @@ impl Downloader {
     /// 向一个镜像请求一次，从 .part 现有长度处续传。
     fn fetch(
         &self,
+        id: &str,
         url: &str,
         limit: u64,
         part: &Path,
@@ -181,7 +208,7 @@ impl Downloader {
             Ok(r) => r,
             Err(ureq::Error::Status(416, _)) => {
                 // 本地 .part 与服务器对不上，丢弃后重来
-                let _ = self.discard(part, counted);
+                let _ = self.discard(id, part, counted);
                 return Err(FetchError::Retry("服务器拒绝续传范围（416）".into()));
             }
             Err(ureq::Error::Status(code, _)) if code == 408 || code == 429 || code >= 500 => {
@@ -189,6 +216,9 @@ impl Downloader {
             }
             Err(ureq::Error::Status(code, _)) => {
                 return Err(FetchError::NextMirror(format!("服务器返回 {code}")))
+            }
+            Err(ureq::Error::Transport(t)) if is_timeout(&t) => {
+                return Err(FetchError::NextMirror(self.stall_message()))
             }
             Err(ureq::Error::Transport(t)) => {
                 return Err(FetchError::Retry(format!("网络错误：{t}")))
@@ -199,11 +229,11 @@ impl Downloader {
             206 => {
                 let range = resp.header("Content-Range").and_then(parse_content_range);
                 if range.map(|r| r.0) != Some(offset) {
-                    let _ = self.discard(part, counted);
+                    let _ = self.discard(id, part, counted);
                     return Err(FetchError::Retry("续传位置与服务器不一致".into()));
                 }
                 if range.and_then(|r| r.1).is_some_and(|total| total != limit) {
-                    let _ = self.discard(part, counted);
+                    let _ = self.discard(id, part, counted);
                     return Err(FetchError::NextMirror("文件总长度与清单不符".into()));
                 }
                 true
@@ -221,7 +251,7 @@ impl Downloader {
             return Err(FetchError::NextMirror("文件长度超出清单声明".into()));
         }
         if !resume && offset > 0 {
-            self.discard(part, counted)
+            self.discard(id, part, counted)
                 .map_err(|e| FetchError::Retry(e.to_string()))?;
         }
 
@@ -235,25 +265,59 @@ impl Downloader {
         let mut reader = resp.into_reader();
         let mut buf = vec![0u8; 64 * 1024];
         loop {
-            let n = reader
-                .read(&mut buf)
-                .map_err(|e| FetchError::Retry(format!("连接中断：{e}")))?;
+            let n = reader.read(&mut buf).map_err(|e| {
+                if is_io_timeout(&e) {
+                    FetchError::NextMirror(self.stall_message())
+                } else {
+                    FetchError::Retry(format!("连接中断：{e}"))
+                }
+            })?;
             if n == 0 {
                 return Ok(());
             }
             file.write_all(&buf[..n]).map_err(|e| {
                 FetchError::NextMirror(format!("写入 {} 失败：{e}", part.display()))
             })?;
-            self.progress.add(n as u64);
+            self.progress.item_add(id, n as u64);
             *counted += n as u64;
             // 没声明长度的响应（chunked）也要拦住：超过清单大小立即中止并删除
             if *counted > limit {
                 drop(file);
-                let _ = self.discard(part, counted);
+                let _ = self.discard(id, part, counted);
                 return Err(FetchError::NextMirror("返回内容超出清单声明的大小".into()));
             }
         }
     }
+}
+
+impl Downloader {
+    fn stall_message(&self) -> String {
+        format!(
+            "{} 秒没有收到数据，已换下一个地址",
+            self.stall_timeout.as_secs().max(1)
+        )
+    }
+}
+
+fn is_io_timeout(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+    )
+}
+
+/// ureq 的传输错误是否为超时（连接或读响应头时卡住）。
+fn is_timeout(t: &ureq::Transport) -> bool {
+    let mut source = std::error::Error::source(t);
+    while let Some(e) = source {
+        if let Some(io) = e.downcast_ref::<std::io::Error>() {
+            if is_io_timeout(io) {
+                return true;
+            }
+        }
+        source = e.source();
+    }
+    t.to_string().contains("timed out")
 }
 
 fn file_len(path: &Path) -> u64 {

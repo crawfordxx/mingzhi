@@ -380,3 +380,80 @@ fn 不支持的socks代理有明确提示() {
         .unwrap_err();
     assert!(err.to_string().contains("不支持"), "{err}");
 }
+
+#[test]
+fn 无数据超时后换下一个地址并续传() {
+    let data = sample_bytes(300_000, 21);
+    let slow = TestServer::start();
+    let fast = TestServer::start();
+    slow.route("/f", vec![Behavior::Stall(data.clone(), 100_000, 3_000)]);
+    fast.route("/f", vec![Behavior::Serve(data.clone())]);
+    let it = item(
+        "stall",
+        &data,
+        "data/f",
+        vec![slow.url("/f"), fast.url("/f")],
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let part = dir.path().join("f.part");
+
+    let dl = downloader().with_stall_timeout(Duration::from_millis(500));
+    let started = std::time::Instant::now();
+    dl.download(&it, &part).unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(2_500),
+        "应在卡住后很快换地址"
+    );
+    assert_eq!(std::fs::read(&part).unwrap(), data);
+    assert_eq!(slow.requests("/f").len(), 1, "卡住的地址不再重试");
+    let resumed = fast.requests("/f");
+    assert_eq!(resumed.len(), 1);
+    // 卡住前收到的部分（受服务端缓冲影响，不一定正好 100000）在新地址续传
+    let offset: usize = resumed[0]
+        .range
+        .as_deref()
+        .and_then(|r| r.strip_prefix("bytes="))
+        .and_then(|r| r.strip_suffix('-'))
+        .and_then(|n| n.parse().ok())
+        .expect("应带 Range 续传");
+    assert!(offset > 0 && offset <= 100_000, "{offset}");
+}
+
+#[test]
+fn 代理前缀与镜像顺序按设置生效() {
+    use mingzhi_launcher::settings::{Mirror, Settings};
+    use std::sync::{Arc, RwLock};
+
+    let data = sample_bytes(5_000, 22);
+    let proxy = TestServer::start();
+    let gh = "https://github.com/o/r/releases/download/v1/f.bin";
+    proxy.route(&format!("/p/{gh}"), vec![Behavior::Serve(data.clone())]);
+    let it = item("gh", &data, "data/f", vec![gh.to_string()]);
+    let dir = tempfile::tempdir().unwrap();
+
+    let settings = Arc::new(RwLock::new(Settings::default()));
+    let dl = downloader().with_settings(settings.clone());
+    // 设置在下载器建好之后才改，也要生效
+    *settings.write().unwrap() = Settings::new(Mirror::Cn, &proxy.url("/p/")).unwrap();
+    dl.download(&it, &dir.path().join("f.part")).unwrap();
+    assert_eq!(proxy.requests(&format!("/p/{gh}")).len(), 1);
+}
+
+#[test]
+fn 单项进度按项计数() {
+    let data = sample_bytes(50_000, 23);
+    let server = TestServer::start();
+    server.route(
+        "/f",
+        vec![
+            Behavior::CutAfter(data.clone(), 20_000),
+            Behavior::Serve(data.clone()),
+        ],
+    );
+    let it = item("one", &data, "data/f", vec![server.url("/f")]);
+    let dir = tempfile::tempdir().unwrap();
+    let dl = downloader();
+    dl.progress().register(&[&it]);
+    dl.download(&it, &dir.path().join("f.part")).unwrap();
+    assert_eq!(dl.progress().items()[0].downloaded, data.len() as u64);
+}

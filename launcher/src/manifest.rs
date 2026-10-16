@@ -63,6 +63,12 @@ pub struct Item {
     pub exec: Option<String>,
     /// 按优先级排列的镜像地址
     pub urls: Vec<String>,
+    /// 可选项（配乐、字体）：下载失败不阻塞启动，服务起来后在后台补齐
+    #[serde(default)]
+    pub optional: bool,
+    /// 许可说明，进度页「关于」里列出
+    #[serde(default)]
+    pub license: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

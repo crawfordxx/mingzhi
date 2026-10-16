@@ -4,6 +4,9 @@
 //! - 目录嵌套：dest 落在另一项「整体替换型」dest 之内的项（chrome 在 app 目录里），
 //!   必须等外层装完再装；外层被重装时，已装好的内层项会被强制重装（否则会被外层替换掉）。
 //! - 配乐转码需要 data/bin/ffmpeg，所以排在 ffmpeg 之后。
+//!
+//! 失败处理：一项失败不影响其它项继续装；可选项（optional）失败只记入 `deferred`，
+//! 不让整体失败；必需项失败在全部结束后返回第一条错误。逐项阶段写进 `Progress`。
 
 use crate::download::Downloader;
 use crate::error::{Context, Error, Result};
@@ -11,6 +14,7 @@ use crate::fsx;
 use crate::hash::sha256_file;
 use crate::manifest::{Item, Manifest, UnpackKind};
 use crate::paths::AppRoot;
+use crate::progress::Phase;
 use crate::single::{extract_entry, set_executable, unpack_gz};
 use crate::state::{Check, State};
 use crate::unpack::{cleanup_stale, unpack};
@@ -33,6 +37,8 @@ pub struct SyncReport {
     pub installed: Vec<String>,
     /// 已装且一致、被跳过的项 id
     pub skipped: Vec<String>,
+    /// 可选项下载/安装失败，已跳过（稍后在后台补齐）
+    pub deferred: Vec<String>,
 }
 
 struct Job<'a> {
@@ -83,20 +89,37 @@ fn unpack_budget(item: &Item) -> u64 {
         .max(MIN_UNPACK_BUDGET)
 }
 
-/// 同步指定平台的全部清单项。任何一项失败则返回错误（其余已完成的项仍已记入 state）。
+/// 同步指定平台的全部清单项。必需项失败则返回错误（其余已完成的项仍已记入 state）。
 pub fn sync(
     root: &AppRoot,
     manifest: &Manifest,
     platform: &str,
     downloader: &Downloader,
 ) -> Result<SyncReport> {
+    sync_with(root, manifest, platform, downloader, |_| true)
+}
+
+/// 只同步满足 `filter` 的项（启动器先装必需项，服务起来后再补可选项）。
+pub fn sync_with(
+    root: &AppRoot,
+    manifest: &Manifest,
+    platform: &str,
+    downloader: &Downloader,
+    filter: impl Fn(&Item) -> bool,
+) -> Result<SyncReport> {
     root.ensure_dirs()?;
     let state_path = root.state_file();
-    let mut state = State::load(&state_path)?;
+    let state = State::load(&state_path)?;
     let progress = downloader.progress();
+    let items: Vec<&Item> = manifest
+        .for_platform(platform)
+        .into_iter()
+        .filter(|i| filter(i))
+        .collect();
+    progress.register(&items);
 
     let mut jobs: Vec<Job> = Vec::new();
-    for item in manifest.for_platform(platform) {
+    for item in items {
         jobs.push(Job {
             item,
             dest: item.resolve_dest(root, &manifest.version)?,
@@ -113,6 +136,7 @@ pub fn sync(
 
     // 1. 判定哪些要装；需要算 sha 的大文件只在这里算一次
     let mut todo: Vec<bool> = Vec::with_capacity(jobs.len());
+    let mut verified = Vec::new();
     for job in &jobs {
         let item = job.item;
         let up_to_date = match state.check(item, &job.dest) {
@@ -123,7 +147,7 @@ pub fn sync(
                 let same = sha256_file(&job.dest)?.eq_ignore_ascii_case(&item.sha256);
                 progress.clear_active(&item.id);
                 if same {
-                    state = state.with_installed(&item.id, State::record_for(item, &job.dest));
+                    verified.push((item.id.clone(), State::record_for(item, &job.dest)));
                 }
                 same
             }
@@ -148,15 +172,21 @@ pub fn sync(
             break;
         }
     }
-    state.save(&state_path)?;
+    State::update(&state_path, |disk| {
+        verified.iter().fold(disk.clone(), |s, (id, rec)| {
+            s.with_installed(id, rec.clone())
+        })
+    })?;
 
     let mut report = SyncReport::default();
     let mut pending = Vec::new();
     for (i, job) in jobs.iter().enumerate() {
         if todo[i] {
             pending.push(i);
+            progress.set_phase(&job.item.id, Phase::Waiting);
         } else {
             report.skipped.push(job.item.id.clone());
+            progress.set_phase(&job.item.id, Phase::Ready);
         }
     }
     progress.set_total(pending.iter().map(|&i| jobs[i].item.size).sum());
@@ -182,11 +212,10 @@ pub fn sync(
         pending,
         done: HashSet::new(),
         running: 0,
-        failed: false,
     });
     let cv = Condvar::new();
-    let shared = Mutex::new(state);
     let installed = Mutex::new(Vec::new());
+    let deferred = Mutex::new(Vec::new());
     let errors = Mutex::new(Vec::new());
 
     std::thread::scope(|scope| {
@@ -194,28 +223,21 @@ pub fn sync(
             scope.spawn(|| {
                 while let Some(idx) = next_job(&sched, &cv, &deps) {
                     let job = &jobs[idx];
+                    let id = &job.item.id;
                     let outcome = install_one(root, &manifest.version, &ffmpeg, job, downloader)
                         .and_then(|()| {
-                            // 每装完一项立即落盘，中途退出也不会丢进度
-                            let mut guard =
-                                shared.lock().map_err(|_| Error::new("state 锁已损坏"))?;
-                            *guard = guard.with_installed(
-                                &job.item.id,
-                                State::record_for(job.item, &job.dest),
-                            );
-                            guard.save(&state_path)
+                            // 每装完一项立即落盘（读-改-写，不覆盖别处写入的设置）
+                            let record = State::record_for(job.item, &job.dest);
+                            State::update(&state_path, |s| s.with_installed(id, record)).map(|_| ())
                         });
                     let ok = outcome.is_ok();
                     match outcome {
                         Ok(()) => {
-                            if let Ok(mut v) = installed.lock() {
-                                v.push(job.item.id.clone());
-                            }
+                            progress.set_phase(id, Phase::Done);
+                            push(&installed, id.clone());
                         }
                         Err(e) => {
-                            if let Ok(mut v) = errors.lock() {
-                                v.push(e.to_string());
-                            }
+                            record_failure(job.item, &e.to_string(), progress, &deferred, &errors)
                         }
                     }
                     finish_job(&sched, &cv, idx, ok);
@@ -224,7 +246,15 @@ pub fn sync(
         }
     });
 
+    // 依赖项失败而没能开始的项
+    let left = sched.into_inner().map(|g| g.pending).unwrap_or_default();
+    for idx in left {
+        let msg = format!("{} 需要等前面的组件装好，本次没有安装", jobs[idx].item.id);
+        record_failure(jobs[idx].item, &msg, progress, &deferred, &errors);
+    }
+
     report.installed = installed.into_inner().unwrap_or_default();
+    report.deferred = deferred.into_inner().unwrap_or_default();
     let errors = errors.into_inner().unwrap_or_default();
     match errors.first() {
         Some(first) => Err(Error::new(first.clone())),
@@ -232,18 +262,41 @@ pub fn sync(
     }
 }
 
+fn push(list: &Mutex<Vec<String>>, value: String) {
+    if let Ok(mut v) = list.lock() {
+        v.push(value);
+    }
+}
+
+/// 可选项失败记为「稍后补齐」，必需项失败记为错误。
+fn record_failure(
+    item: &Item,
+    msg: &str,
+    progress: &crate::progress::Progress,
+    deferred: &Mutex<Vec<String>>,
+    errors: &Mutex<Vec<String>>,
+) {
+    if item.optional {
+        progress.fail(&item.id, Phase::Deferred, msg);
+        push(deferred, item.id.clone());
+    } else {
+        progress.fail(&item.id, Phase::Failed, msg);
+        push(errors, msg.to_string());
+    }
+}
+
 struct Sched {
     pending: Vec<usize>,
     done: HashSet<usize>,
     running: usize,
-    failed: bool,
 }
 
-/// 取下一个依赖已满足的任务；没有可做的但还有任务在跑就等待；全部做完或失败返回 None。
+/// 取下一个依赖已满足的任务；没有可做的但还有任务在跑就等待；
+/// 全部做完、或剩下的都依赖失败项时返回 None。
 fn next_job(sched: &Mutex<Sched>, cv: &Condvar, deps: &[Vec<usize>]) -> Option<usize> {
     let mut g = sched.lock().ok()?;
     loop {
-        if g.failed || g.pending.is_empty() {
+        if g.pending.is_empty() {
             return None;
         }
         let ready = g
@@ -255,7 +308,7 @@ fn next_job(sched: &Mutex<Sched>, cv: &Condvar, deps: &[Vec<usize>]) -> Option<u
             return Some(g.pending.remove(pos));
         }
         if g.running == 0 {
-            return None; // 依赖永远满足不了（不应发生），避免死等
+            return None; // 剩下的都依赖失败项，满足不了
         }
         g = cv.wait(g).ok()?;
     }
@@ -266,8 +319,6 @@ fn finish_job(sched: &Mutex<Sched>, cv: &Condvar, idx: usize, ok: bool) {
         g.running -= 1;
         if ok {
             g.done.insert(idx);
-        } else {
-            g.failed = true;
         }
     }
     cv.notify_all();
@@ -293,11 +344,13 @@ fn install_one(
     let progress = downloader.progress();
     let part = root.downloads().join(item.part_name());
 
+    progress.set_phase(&item.id, Phase::Downloading);
     progress.set_active(&item.id, &format!("下载 {}", item.id));
     let downloaded = downloader.download(item, &part);
     progress.clear_active(&item.id);
     downloaded?;
 
+    progress.set_phase(&item.id, Phase::Installing);
     progress.set_active(&item.id, &format!("安装 {}", item.id));
     let placed = place(root, version, ffmpeg, job, &part);
     progress.clear_active(&item.id);

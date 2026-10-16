@@ -9,12 +9,20 @@
 
 use crate::error::{Context, Error, Result};
 use crate::manifest::{Item, UnpackKind};
+use crate::settings::Settings;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
+
+/// 进程内所有 state.json 的「读-改-写」串行执行（安装线程与进度页设置会同时写）。
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+/// 用户设置在 state.json 里的键名
+const SETTINGS_KEY: &str = "settings";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstalledItem {
@@ -69,6 +77,31 @@ impl State {
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, json).ctx(format!("写入 {} 失败", tmp.display()))?;
         crate::fsx::rename(&tmp, path).ctx(format!("保存 {} 失败", path.display()))
+    }
+
+    /// 在进程锁内读取磁盘上的最新内容、应用 `f` 后写回，返回写入后的状态。
+    /// 不同线程各改各的字段，互不覆盖。
+    pub fn update(path: &Path, f: impl FnOnce(&State) -> State) -> Result<State> {
+        let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let next = f(&Self::load(path)?);
+        next.save(path)?;
+        Ok(next)
+    }
+
+    /// 用户设置；缺失或格式不对时用默认值。
+    pub fn settings(&self) -> Settings {
+        self.extra
+            .get(SETTINGS_KEY)
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn with_settings(&self, settings: &Settings) -> Self {
+        let mut next = self.clone();
+        if let Ok(v) = serde_json::to_value(settings) {
+            next.extra.insert(SETTINGS_KEY.to_string(), v);
+        }
+        next
     }
 
     /// 返回登记了该项的新状态。

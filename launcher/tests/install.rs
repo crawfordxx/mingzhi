@@ -616,3 +616,123 @@ fn zip里丢了权限位时exec仍被设为可执行() {
         .mode();
     assert_eq!(mode & 0o111, 0o111);
 }
+
+// ---- Task 3：可选项、过滤、逐项阶段 ----
+
+use mingzhi_launcher::install::sync_with;
+use mingzhi_launcher::progress::Phase;
+
+#[test]
+fn 可选项失败记入已跳过且不让sync失败() {
+    let fx = fixture();
+    let mut manifest = fx.manifest.clone();
+    let mut music = item(
+        "music",
+        b"never",
+        "data/assets/m.zip",
+        vec![fx.server.url("/missing.bin")],
+    );
+    music.optional = true;
+    manifest.items.push(music);
+
+    let dl = downloader();
+    let report = sync(&fx.root, &manifest, PLATFORM, &dl).unwrap();
+    assert_eq!(report.deferred, vec!["music"]);
+    assert!(report.installed.contains(&"model".to_string()));
+    let music_row = dl
+        .progress()
+        .items()
+        .into_iter()
+        .find(|i| i.id == "music")
+        .unwrap();
+    assert_eq!(music_row.phase, Phase::Deferred);
+    assert!(music_row.error.unwrap().contains("music"));
+    assert!(!State::load(&fx.root.state_file())
+        .unwrap()
+        .installed
+        .contains_key("music"));
+}
+
+#[test]
+fn 必需项失败时其余项照常装完() {
+    let fx = fixture();
+    let mut manifest = fx.manifest.clone();
+    // 失败项排在最前，其它项仍应全部装好
+    manifest.items.insert(
+        0,
+        item(
+            "broken",
+            b"never",
+            "data/broken.bin",
+            vec![fx.server.url("/missing.bin")],
+        ),
+    );
+    let dl = downloader();
+    let err = sync(&fx.root, &manifest, PLATFORM, &dl).unwrap_err();
+    assert!(err.to_string().contains("broken"));
+    let state = State::load(&fx.root.state_file()).unwrap();
+    assert!(state.installed.contains_key("model") && state.installed.contains_key("app"));
+    let rows = dl.progress().items();
+    let phase = |id: &str| rows.iter().find(|r| r.id == id).unwrap().phase;
+    assert_eq!(phase("broken"), Phase::Failed);
+    assert_eq!(phase("model"), Phase::Done);
+}
+
+#[test]
+fn 按过滤条件只装部分项() {
+    let fx = fixture();
+    let dl = downloader();
+    let report = sync_with(&fx.root, &fx.manifest, PLATFORM, &dl, |i| i.id == "model").unwrap();
+    assert_eq!(report.installed, vec!["model"]);
+    assert!(!fx.root.app().join("1.2.3").exists());
+    let ids: Vec<_> = dl.progress().items().into_iter().map(|i| i.id).collect();
+    assert_eq!(ids, vec!["model"], "过滤掉的项不登记");
+}
+
+#[test]
+fn 二次运行逐项标为已就绪() {
+    let fx = fixture();
+    sync(&fx.root, &fx.manifest, PLATFORM, &downloader()).unwrap();
+    let dl = downloader();
+    sync(&fx.root, &fx.manifest, PLATFORM, &dl).unwrap();
+    for row in dl.progress().items() {
+        assert_eq!(row.phase, Phase::Ready, "{}", row.id);
+        assert!(!row.needed);
+    }
+}
+
+#[test]
+fn 安装途中写入的设置不会被覆盖() {
+    use mingzhi_launcher::settings::{Mirror, Settings};
+    let fx = fixture();
+    // 用一个慢项拖住安装，期间由「进度页」写设置
+    let slow = sample_bytes(400_000, 30);
+    fx.server.route(
+        "/slow.bin",
+        vec![
+            Behavior::CutAfter(slow.clone(), 1),
+            Behavior::Serve(slow.clone()),
+        ],
+    );
+    let mut manifest = fx.manifest.clone();
+    manifest.items.push(item(
+        "slow",
+        &slow,
+        "data/slow.bin",
+        vec![fx.server.url("/slow.bin")],
+    ));
+    let state_path = fx.root.state_file();
+    let s = Settings::new(Mirror::Global, "").unwrap();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let dl = Downloader::new(ProxyConfig::none(), Progress::new())
+                .with_retry_delay(Duration::from_millis(300));
+            sync(&fx.root, &manifest, PLATFORM, &dl).unwrap();
+        });
+        std::thread::sleep(Duration::from_millis(150));
+        State::update(&state_path, |st| st.with_settings(&s)).unwrap();
+    });
+    let state = State::load(&state_path).unwrap();
+    assert_eq!(state.settings(), s);
+    assert!(state.installed.contains_key("slow"));
+}

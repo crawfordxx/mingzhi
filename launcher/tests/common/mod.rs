@@ -24,6 +24,8 @@ pub enum Behavior {
     ServeChunked(Vec<u8>),
     /// 206 但 Content-Range 起点与请求不符
     BadContentRange(Vec<u8>),
+    /// 发出前 N 字节后卡住（不发数据也不断开）指定毫秒
+    Stall(Vec<u8>, usize, u64),
 }
 
 /// 一条请求记录。
@@ -53,6 +55,28 @@ impl Read for CutReader {
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, "模拟断线"));
         }
         let end = (self.pos + buf.len()).min(self.cut).min(self.data.len());
+        let n = end - self.pos;
+        buf[..n].copy_from_slice(&self.data[self.pos..end]);
+        self.pos = end;
+        Ok(n)
+    }
+}
+
+/// 发完前 `cut` 字节后卡住 `stall_ms` 毫秒再报错断开。
+struct StallReader {
+    data: Vec<u8>,
+    pos: usize,
+    cut: usize,
+    stall_ms: u64,
+}
+
+impl Read for StallReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.pos >= self.cut {
+            std::thread::sleep(std::time::Duration::from_millis(self.stall_ms));
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "模拟卡死"));
+        }
+        let end = (self.pos + buf.len()).min(self.cut);
         let n = end - self.pos;
         buf[..n].copy_from_slice(&self.data[self.pos..end]);
         self.pos = end;
@@ -199,6 +223,22 @@ fn respond(request: tiny_http::Request, behavior: Behavior, range: Option<String
                 None,
             );
             let _ = request.respond(resp);
+        }
+        Behavior::Stall(data, cut, stall_ms) => {
+            let len = data.len();
+            let reader = StallReader {
+                data,
+                pos: 0,
+                cut,
+                stall_ms,
+            };
+            let _ = request.respond(Response::new(
+                StatusCode(200),
+                vec![],
+                reader,
+                Some(len),
+                None,
+            ));
         }
         Behavior::CutAfter(data, cut) => {
             let len = data.len();
