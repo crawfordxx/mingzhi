@@ -10,7 +10,7 @@ import { validateBroll } from '../pipeline/broll-step.js';
 import { validateStyles } from '../pipeline/finish-step.js';
 import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
-import { brollStage, composeStage, filmQaStage, finalQaStage, placeEnding, qaCardsStage, whiteBalanceOf, type BrollStageExtra } from '../pipeline/stages.js';
+import { brollStage, composeStage, filmQaStage, finalQaStage, paletteOf, placeEnding, qaCardsStage, whiteBalanceOf, type BrollStageExtra } from '../pipeline/stages.js';
 import type { BrollMark } from '../pipeline/broll-redo.js';
 import type { BeatRecord } from '../pipeline/broll-beats.js';
 import { writeStoryboardCredits } from '../broll/credit-store.js';
@@ -86,6 +86,19 @@ async function nextPerson(env: VersionEnv, args: PipelineArgs, p: Parent, c: Cha
   return compositePerson(env, args, plan.keep, bgPath);
 }
 
+/**
+ * 片色跟随背景（与 CLI 同口径：人物背景图，没背景时用人像第一帧）：背景换了（含去掉背景）就重新取样，写进分镜随版本落盘；
+ * 取样失败时去掉片色（按默认配色），不沿用和新背景不配的旧片色。背景没变原样返回
+ */
+async function repaint(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change, person: Person, storyboard: Storyboard): Promise<Storyboard> {
+  if (sameBackground(c.next.settings.background, p.state.settings.background)) return storyboard;
+  // 去掉背景时工程文件里还留着父版本的背景记录，只认本版的设置
+  const bg = c.next.settings.background ? env.record({}).background?.path : undefined;
+  const palette = await paletteOf(args, bg ?? person.person);
+  const { palette: _old, ...rest } = storyboard;
+  return palette ? { ...rest, palette } : rest;
+}
+
 /** 剪切 → 人像 → 字幕与分镜（剪辑类修改时平移）→ 素材；不需要重跑的从父版本引用 */
 async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change): Promise<Made> {
   const a = readJson<BaseAnalysis>(join(env.base, ANALYSIS_FILE), '分析结果');
@@ -95,8 +108,8 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
   const person = await nextPerson(env, args, p, c, plan);
   const timed = recutting ? retime(env, a, p.state, c.next, plan) : { captions: c.next.captions, storyboard: c.next.storyboard };
   if (!recutting) env.record({ artifacts: { ass: writeAss(env, a, timed.captions) } });
-  // CTA 提前（幂等：剪辑改了时间线或片尾设置变了会重新放置；已提前的 CTA 先还原再放）
-  const placed = placeEnding(args, timed.storyboard, timed.captions, plan.outputDurationSec);
+  // CTA 提前（幂等：剪辑改了时间线或片尾设置变了会重新放置；已提前的 CTA 先还原再放）；换了背景就按新背景重算片色
+  const placed = await repaint(env, args, p, c, person, placeEnding(args, timed.storyboard, timed.captions, plan.outputDurationSec));
   // 素材名额先让给没改动的卡片（它们的视频已经付过费），改动过的卡片排在后面
   const storyboard = c.stages.has('broll') ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, {
     captions: timed.captions, deferShots: changedShots(p.state, placed), edit: brollEdit(p, c),
