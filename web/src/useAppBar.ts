@@ -6,8 +6,9 @@ import { errText } from './useWorkbench';
 
 /** 页面开着就每分钟 ping 一次：服务在没有浏览器、没有任务满 2 小时后才会自动退出 */
 const PING_MS = 60_000;
-/** 首屏时服务可能还没查完更新：过一会儿再看一次（只一次） */
-const RECHECK_MS = 20_000;
+/** 首屏时服务可能还没查完更新：20 秒后再看一次；之后页面一直开着就每 6 小时看一次（服务端每天最多真查一次） */
+const FIRST_RECHECK_MS = 20_000;
+const RECHECK_MS = 6 * 3600_000;
 
 function usePing(active: boolean) {
   useEffect(() => {
@@ -17,13 +18,15 @@ function usePing(active: boolean) {
   }, [active]);
 }
 
-/** 服务端给的新版本：首屏的 status 没有时，过 20 秒再取一次 status */
+/** 服务端给的新版本：首屏之后定时重取 status（开着页面好几天也能看到新版本） */
 function useLatest(status: Status | undefined) {
   const [late, setLate] = useState<UpdateInfo>();
   useEffect(() => {
-    if (!status || status.update) return undefined;
-    const id = window.setTimeout(() => { api.status().then((s) => setLate(s.update), () => undefined); }, RECHECK_MS);
-    return () => window.clearTimeout(id);
+    if (!status) return undefined;
+    const fetchLatest = () => { api.status().then((s) => { if (s.update) setLate(s.update); }, () => undefined); };
+    let every = 0;
+    const first = window.setTimeout(() => { fetchLatest(); every = window.setInterval(fetchLatest, RECHECK_MS); }, FIRST_RECHECK_MS);
+    return () => { window.clearTimeout(first); window.clearInterval(every); };
   }, [status]);
   return status && late ? { ...status, update: late } : status;
 }

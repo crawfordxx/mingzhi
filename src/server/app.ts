@@ -83,7 +83,7 @@ function buildApp(opts: AppOptions, portOf: () => number, requestShutdown: () =>
   const app: AppCtx = {
     cfg: opts.cfg, store, bus, spacesRoot, runs, keyStore, keys, scrub,
     deps: buildDeps(opts.cfg, opts.deps), webDir: opts.webDir ?? DEFAULT_WEB_DIR, exportDir: opts.exportDir ?? defaultExportDir(), devPort, port: portOf,
-    activity: new Activity(opts.now), updates: opts.updates, requestShutdown,
+    activity: new Activity(), updates: opts.updates, requestShutdown,
   };
   runs.attach(app);
   failInterrupted(app);

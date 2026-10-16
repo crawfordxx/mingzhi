@@ -43,13 +43,27 @@ export interface IdleWatchOptions {
   idleMs: number;
   checkMs: number;
   onIdle: () => void;
+  /** 墙上时钟（测试注入），默认 Date.now */
+  now?: () => number;
 }
 
-/** 开始检查空闲；返回停止函数。定时器不拖住进程退出 */
+/** 两次检查的实际间隔超过 checkMs 的这么多倍，就当作电脑刚从睡眠中醒来 */
+const WAKE_GAP_FACTOR = 3;
+
+/**
+ * 开始检查空闲；返回停止函数。定时器不拖住进程退出。
+ * 睡眠时定时器停走而墙上时钟照走：唤醒后的第一轮会看到「空闲了好几个小时」，而开着的页面还没来得及 ping。
+ * 所以两次检查间隔远大于 checkMs 时记一次活动并跳过本轮，从唤醒时重新计时。
+ */
 export function watchIdle(o: IdleWatchOptions): () => void {
+  const now = o.now ?? (() => Date.now());
+  let last = now();
   const timer = setInterval(() => {
+    const at = now();
+    const woke = at - last > WAKE_GAP_FACTOR * o.checkMs;
+    last = at;
     // 任务在跑就算活动：任务结束后从那一刻重新计时
-    if (o.busy()) { o.activity.touch(); return; }
+    if (woke || o.busy()) { o.activity.touch(); return; }
     if (o.activity.idleFor() < o.idleMs) return;
     clearInterval(timer);
     o.onIdle();

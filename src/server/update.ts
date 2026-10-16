@@ -1,6 +1,6 @@
 /**
  * 检查更新：查 GitHub Releases 的最新正式版，比当前版本新就在 /api/status 里带上 update。
- * - 只发一个匿名 GET（不带 key、设备、版本号等任何标识），用户在设置里可以关掉；
+ * - 只发一个匿名 GET（不带 key、设备、版本号等任何标识），用户在设置里可以关掉；有代理时经代理发（proxy.ts）；
  * - 每天最多查 1 次，无论成败都记下时间（结果缓存在数据目录），失败一律静默、不重试；
  * - 只提示，不下载：用户点「去下载」才打开 Release 页面。
  */
@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { proxyAwareFetch, type FetchLike } from './proxy.js';
 
 export const REPO = 'crawfordxx/mingzhi';
 export const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -65,7 +66,8 @@ export interface UpdateCheckerOptions {
   current: string;
   /** 用户是否开着「检查更新」（每次现读） */
   enabled: () => boolean;
-  fetch?: typeof fetch;
+  /** 默认按环境变量 / macOS 系统代理走代理（见 proxy.ts） */
+  fetch?: FetchLike;
   now?: () => number;
 }
 
@@ -73,12 +75,12 @@ export class UpdateChecker {
   private cache: CacheData | null;
   private inflight: Promise<void> | null = null;
   private readonly file: string;
-  private readonly fetchFn: typeof fetch;
+  private readonly fetchFn: FetchLike;
   private readonly now: () => number;
 
   constructor(private readonly opts: UpdateCheckerOptions) {
     this.file = join(opts.dataDir, UPDATE_CACHE_FILE);
-    this.fetchFn = opts.fetch ?? fetch;
+    this.fetchFn = opts.fetch ?? proxyAwareFetch();
     this.now = opts.now ?? Date.now;
     this.cache = this.readCache();
   }

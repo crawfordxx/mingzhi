@@ -22,71 +22,82 @@ function holdRuns(app: TestApp): () => void {
   return () => { release(); app.control.gate = undefined; };
 }
 
-describe('Activity 与 watchIdle（假时钟）', () => {
-  it('无连接、无任务满 2 小时才触发，且只触发一次', () => {
+describe('Activity 与 watchIdle（假时钟：定时器与系统时间一起走）', () => {
+  const MIN = 60_000;
+  /** 起一个 2 小时空闲、每分钟检查的监视器；Activity 与 watchIdle 都读被 vitest 接管的 Date.now */
+  function setup(busy: () => boolean = () => false) {
     vi.useFakeTimers();
-    let now = 0;
-    const activity = new Activity(() => now);
+    const activity = new Activity(() => Date.now());
     const onIdle = vi.fn();
-    watchIdle({ activity, busy: () => false, idleMs: 2 * HOUR, checkMs: 60_000, onIdle });
-    now = 2 * HOUR - 1;
-    vi.advanceTimersByTime(60_000);
+    const stop = watchIdle({ activity, busy, idleMs: 2 * HOUR, checkMs: MIN, onIdle });
+    return { activity, onIdle, stop };
+  }
+
+  it('无连接、无任务满 2 小时才触发，且只触发一次', () => {
+    const { onIdle } = setup();
+    vi.advanceTimersByTime(2 * HOUR - MIN);
     expect(onIdle).not.toHaveBeenCalled();
-    now = 2 * HOUR;
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(MIN);
     expect(onIdle).toHaveBeenCalledTimes(1);
-    now = 5 * HOUR;
-    vi.advanceTimersByTime(600_000);
+    vi.advanceTimersByTime(5 * HOUR);
     expect(onIdle).toHaveBeenCalledTimes(1);
   });
 
   it('有连接开着（SSE、长上传）不算空闲；连接关掉后从那一刻重新计时', () => {
-    vi.useFakeTimers();
-    let now = 0;
-    const activity = new Activity(() => now);
-    const onIdle = vi.fn();
-    watchIdle({ activity, busy: () => false, idleMs: 2 * HOUR, checkMs: 60_000, onIdle });
+    const { activity, onIdle } = setup();
     const end = activity.begin();
-    now = 10 * HOUR;
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(10 * HOUR);
     expect(onIdle).not.toHaveBeenCalled();
     end();
     end(); // 重复调用不会把计数减成负数
-    now = 12 * HOUR - 1;
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(2 * HOUR - MIN);
     expect(onIdle).not.toHaveBeenCalled();
-    now = 12 * HOUR;
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(MIN);
     expect(onIdle).toHaveBeenCalledTimes(1);
   });
 
   it('有任务在跑不算空闲；任务结束后从结束时重新计时', () => {
-    vi.useFakeTimers();
-    let now = 0;
     let busy = true;
-    const activity = new Activity(() => now);
-    const onIdle = vi.fn();
-    watchIdle({ activity, busy: () => busy, idleMs: 2 * HOUR, checkMs: 60_000, onIdle });
-    now = 3 * HOUR;
-    vi.advanceTimersByTime(60_000);
+    const { onIdle } = setup(() => busy);
+    vi.advanceTimersByTime(3 * HOUR);
     expect(onIdle).not.toHaveBeenCalled();
     busy = false;
-    now = 3 * HOUR + 60_000;
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(2 * HOUR - MIN);
     expect(onIdle).not.toHaveBeenCalled();
-    now = 5 * HOUR;
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(MIN);
+    expect(onIdle).toHaveBeenCalledTimes(1);
+  });
+
+  it('电脑睡眠后唤醒：系统时间跳了 8 小时但定时器只推进一次，这一轮不退出，给页面时间 ping', () => {
+    const { activity, onIdle } = setup();
+    vi.advanceTimersByTime(10 * MIN);
+    vi.setSystemTime(Date.now() + 8 * HOUR); // 睡眠期间墙上时钟前进，定时器不走
+    vi.advanceTimersByTime(MIN); // 唤醒后的第一轮检查
+    expect(onIdle).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(MIN); // 下一轮：唤醒才 1 分钟，仍不退出
+    expect(onIdle).not.toHaveBeenCalled();
+    activity.begin()(); // 页面恢复后的 ping
+    vi.advanceTimersByTime(2 * HOUR - MIN);
+    expect(onIdle).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(MIN);
+    expect(onIdle).toHaveBeenCalledTimes(1);
+  });
+
+  it('唤醒后页面没回来：从唤醒时起满 2 小时再退出', () => {
+    const { onIdle } = setup();
+    vi.setSystemTime(Date.now() + 8 * HOUR);
+    vi.advanceTimersByTime(MIN);
+    expect(onIdle).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2 * HOUR - MIN);
+    expect(onIdle).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(MIN);
     expect(onIdle).toHaveBeenCalledTimes(1);
   });
 
   it('停止后不再检查', () => {
-    vi.useFakeTimers();
-    let now = 0;
-    const onIdle = vi.fn();
-    const stop = watchIdle({ activity: new Activity(() => now), busy: () => false, idleMs: HOUR, checkMs: 1000, onIdle });
+    const { onIdle, stop } = setup();
     stop();
-    now = 10 * HOUR;
-    vi.advanceTimersByTime(10_000);
+    vi.advanceTimersByTime(10 * HOUR);
     expect(onIdle).not.toHaveBeenCalled();
   });
 });
@@ -160,53 +171,45 @@ describe('POST /api/shutdown', () => {
   });
 });
 
-describe('空闲自动退出（服务内，假时钟）', () => {
-  it('无请求满 2 小时以 0 退出；期间有 ping 就顺延', async () => {
-    let now = 1_000_000;
+describe('空闲自动退出（服务内，真实时间缩短：空闲 1 秒、每 25ms 检查；计时逻辑见上面的假时钟单测）', () => {
+  const IDLE = { idleExitMs: 1000, idleCheckMs: 25 };
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it('有 ping 就顺延；不再 ping 后以 0 退出', async () => {
     const onExit = vi.fn();
-    t = await startTestApp({ app: { onExit, now: () => now, idleExitMs: 2 * HOUR, idleCheckMs: 10 } });
-    now += HOUR;
-    expect((await t.call('GET', '/api/ping')).status).toBe(204);
-    now += 2 * HOUR - 1;
-    await new Promise((r) => setTimeout(r, 60));
+    t = await startTestApp({ app: { onExit, ...IDLE } });
+    for (let i = 0; i < 6; i += 1) {
+      await sleep(250);
+      expect((await t.call('GET', '/api/ping')).status).toBe(204);
+    }
     expect(onExit).not.toHaveBeenCalled();
-    now += 1;
-    await waitFor(() => onExit.mock.calls.length > 0);
+    await waitFor(() => onExit.mock.calls.length > 0, 5000);
     expect(onExit).toHaveBeenCalledWith(0);
   });
 
-  it('有任务在跑或事件流开着时不退出', async () => {
-    let now = 1_000_000;
+  it('有任务在跑或事件流开着时不退出；都结束后才退出', async () => {
     const onExit = vi.fn();
-    t = await startTestApp({ key: GOOD_KEY, app: { onExit, now: () => now, idleExitMs: 2 * HOUR, idleCheckMs: 10 } });
+    t = await startTestApp({ key: GOOD_KEY, app: { onExit, ...IDLE } });
     const release = holdRuns(t);
     const id = await spaceWithInput(t);
     await t.call('POST', `/api/spaces/${id}/start`);
     const tab = new AbortController();
     const stream = await fetch(`${t.url}/api/spaces/${id}/events?version=1`, { signal: tab.signal });
-    const reader = stream.body!.getReader();
-    await reader.read();
-    now += 10 * HOUR;
-    await new Promise((r) => setTimeout(r, 60));
+    await stream.body!.getReader().read();
+    await sleep(1500);
     expect(onExit).not.toHaveBeenCalled();
     release();
     await waitFor(async () => (await t!.call('GET', `/api/spaces/${id}`)).json.versions[0]?.status === 'done');
+    await sleep(1200);
+    expect(onExit).not.toHaveBeenCalled(); // 事件流还开着
     tab.abort(); // 相当于关掉标签页
-    // 等服务端看到事件流关闭：关闭时会记一次活动；之后时钟每走一步 idleFor 才大于 0
-    await waitFor(() => { now += 1; return t!.app.activity.idleFor() > 0; });
-    now += HOUR;
-    await new Promise((r) => setTimeout(r, 60));
-    expect(onExit).not.toHaveBeenCalled();
-    now += HOUR;
-    await waitFor(() => onExit.mock.calls.length > 0);
+    await waitFor(() => onExit.mock.calls.length > 0, 5000);
   });
 
   it('没配置空闲退出时（测试、开发）不会退出', async () => {
-    let now = 0;
     const onExit = vi.fn();
-    t = await startTestApp({ app: { onExit, now: () => now } });
-    now += 100 * HOUR;
-    await new Promise((r) => setTimeout(r, 60));
+    t = await startTestApp({ app: { onExit } });
+    await sleep(1200);
     expect(onExit).not.toHaveBeenCalled();
   });
 });
