@@ -321,6 +321,15 @@ async function facePerson(args: PipelineArgs, input: ComposeInput): Promise<Face
   return info ? { file: input.person, width: info.width, height: info.height, subject: input.subject } : undefined;
 }
 
+/** 重做失败时成片路径回指原成片；取消时 complete 落盘后会再抛一次取消，吞掉它让原错误照常外抛 */
+function restoreArtifacts(complete: Complete, artifacts: { output: string; final: string }): void {
+  try {
+    complete('compose', '局部重做没有完成，成片保留原版本', { artifacts });
+  } catch {
+    // 已落盘；原错误由调用方外抛
+  }
+}
+
 /** 局部重做的临时成片：与成片同目录（改名是原子的），扩展名不变（ffmpeg 按扩展名选封装） */
 const redoPathOf = (output: string): string => join(dirname(output), `${basename(output, extname(output))}.redo${extname(output)}`);
 
@@ -334,14 +343,19 @@ export async function filmQaStage(args: PipelineArgs, input: ComposeInput, compo
   // 重做渲染到成片旁的临时文件，成功后原子改名覆盖；渲染、响度统一失败或取消时已交付的成片原样保留
   const rerender = async (storyboard: Storyboard): Promise<FilmCut> => {
     const redoOutput = redoPathOf(input.output);
+    const artifacts = { output: input.output, final: input.output };
     try {
       const next = await composeStage(args, { ...input, storyboard, output: redoOutput }, complete);
       renameSync(redoOutput, input.output);
       last = next;
+    } catch (err) {
+      // 响度统一已把临时文件记成成片：改名失败或中途取消时把工程文件里的成片路径指回原成片
+      restoreArtifacts(complete, artifacts);
+      throw err;
     } finally {
       rmSync(redoOutput, { force: true });
     }
-    complete('compose', `局部重做：重渲 ${last.rendered.length} 段 · 复用缓存 ${last.reused.length} 段`, { artifacts: { output: input.output, final: input.output } });
+    complete('compose', `局部重做：重渲 ${last.rendered.length} 段 · 复用缓存 ${last.reused.length} 段`, { artifacts });
     return { video: input.output, storyboard, ...(last.outroStartSec === undefined ? {} : { outroStartSec: last.outroStartSec }) };
   };
   const face = await facePerson(args, input);

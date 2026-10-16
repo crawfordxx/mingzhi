@@ -3,7 +3,7 @@ import { basename, extname, join } from 'node:path';
 import { z } from 'zod';
 import { isPresetId } from '../background/presets.js';
 import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
-import { OUTRO_TEXT_MAX } from '../compose/ending.js';
+import { DEFAULT_OUTRO, OUTRO_TEXT_MAX } from '../compose/ending.js';
 import { COVER_STYLES } from '../cover/styles.js';
 import { isInside } from '../workspace/runner-files.js';
 import { projectSpentYuan, type Space, type SpaceSettings, type VersionMeta } from '../workspace/store.js';
@@ -13,7 +13,8 @@ import type { RunState } from './runs.js';
 import { IMAGE_EXTS, looksLikeImage } from './upload.js';
 
 export const DEFAULT_BUDGET_YUAN = 10;
-export const DEFAULT_SETTINGS: SpaceSettings = { captionStyle: DEFAULT_CAPTION_STYLE, budgetYuan: DEFAULT_BUDGET_YUAN, broll: true, maxVideos: 1, grain: true };
+// 新项目带上片尾设置（默认开启）；设置里没有这个字段的是 P7 之前的旧项目，修改版本保持原行为（见 runner-next 的 legacyEnding）
+export const DEFAULT_SETTINGS: SpaceSettings = { captionStyle: DEFAULT_CAPTION_STYLE, budgetYuan: DEFAULT_BUDGET_YUAN, broll: true, maxVideos: 1, grain: true, outro: { ...DEFAULT_OUTRO } };
 export const DEFAULT_TITLE = '未命名项目';
 
 const ids = <T extends object>(o: T): [keyof T & string, ...(keyof T & string)[]] => Object.keys(o) as [keyof T & string, ...(keyof T & string)[]];

@@ -1,5 +1,5 @@
 // 整片自检局部重做：重渲到临时文件，成功后才覆盖已交付的成片；失败或取消时成片原样保留
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CancelledError } from '../src/cancel.js';
@@ -57,6 +57,40 @@ describe('局部重做不删已交付的成片', () => {
     const { f, final } = redoFixture(() => { throw new CancelledError(); });
     await runFirstVersion(f.ctx, f.spaceId).catch(() => undefined);
     expect(existsSync(final())).toBe(true);
+    expect(leftovers(f.store.versionDir(f.spaceId, 1))).toEqual([]);
+  });
+
+  const artifactsOf = (f: Fixture) => (JSON.parse(readFileSync(join(f.store.versionDir(f.spaceId, 1), 'project.json'), 'utf8')) as ProjectFile).artifacts;
+
+  it('重做时片尾校正阶段取消（响度统一已把临时文件记成成片）：project.json 的成片路径指回原成片', async () => {
+    const { f, final } = redoFixture();
+    const media = f.ctx.media as Partial<MediaDeps>;
+    let tails = 0;
+    f.ctx.media = { ...media, tail: async () => { tails += 1; if (tails === 2) throw new CancelledError(); return { before: -20, after: -20, attenuatedDb: 0 }; } };
+    await runFirstVersion(f.ctx, f.spaceId).catch(() => undefined);
+    expect(tails).toBe(2);
+    expect(artifactsOf(f)).toMatchObject({ output: final(), final: final() });
+    expect(existsSync(final())).toBe(true);
+    expect(leftovers(f.store.versionDir(f.spaceId, 1))).toEqual([]);
+  });
+
+  it('重做时改名覆盖失败：撤回重做，project.json 的成片路径指回原成片', async () => {
+    const { f, final } = redoFixture();
+    const media = f.ctx.media as Partial<MediaDeps>;
+    const loudness = media.loudness!;
+    let calls = 0;
+    // 第二次（重做）响度统一完成后把成片位置换成非空目录，让改名失败
+    f.ctx.media = { ...media, loudness: async (input, output, cfg) => {
+      calls += 1;
+      const r = await loudness(input, output, cfg);
+      if (calls === 2) { rmSync(final(), { force: true }); mkdirSync(final()); writeFileSync(join(final(), 'x'), 'x'); }
+      return r;
+    } };
+    const meta = await runFirstVersion(f.ctx, f.spaceId);
+    expect(meta.status).toBe('done');
+    const project = JSON.parse(readFileSync(join(f.store.versionDir(f.spaceId, 1), 'project.json'), 'utf8')) as ProjectFile;
+    expect(project.film?.unfixed.join('\n')).toMatch(/局部重做渲染失败，已撤回/);
+    expect(project.artifacts).toMatchObject({ output: final(), final: final() });
     expect(leftovers(f.store.versionDir(f.spaceId, 1))).toEqual([]);
   });
 });

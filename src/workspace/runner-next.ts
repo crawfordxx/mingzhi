@@ -14,6 +14,7 @@ import { brollStage, composeStage, filmQaStage, finalQaStage, paletteOf, placeEn
 import type { BrollMark } from '../pipeline/broll-redo.js';
 import type { BeatRecord } from '../pipeline/broll-beats.js';
 import { writeStoryboardCredits } from '../broll/credit-store.js';
+import { DEFAULT_OUTRO } from '../compose/ending.js';
 import type { SegmentedResult } from '../compose/segments.js';
 import type { CardQaEntry } from '../qa/visual.js';
 import type { CardSpec, Storyboard } from '../storyboard/schema.js';
@@ -24,7 +25,8 @@ import type { CoverResult } from '../pipeline/finish-step.js';
 import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, resolveBg, reusePerson, sameBackground, type Person } from './runner-media.js';
 import { recut, retime, writeAss } from './runner-retime.js';
 
-interface Change { next: VersionState; ops: EditOp[]; dropped: string[]; stages: Set<Stage>; newCover: boolean }
+/** legacyEnding：P7 之前的旧项目（项目设置与父版本都没有片尾字段），修改版本不加品牌片尾、CTA 不按新规则挪位 */
+interface Change { next: VersionState; ops: EditOp[]; dropped: string[]; stages: Set<Stage>; newCover: boolean; legacyEnding: boolean }
 interface Parent { n: number; dir: string; state: VersionState; project: ProjectFile | null; hashes?: string[]; contents?: string[] }
 interface Made extends Person { plan: CutPlan; captions: TimedCaption[]; storyboard: Storyboard; brollBeats?: BeatRecord[] }
 
@@ -47,7 +49,8 @@ function planChange(env: VersionEnv, parent: VersionState, raw: EditOp[]): Chang
   const applied = applyOps(parent, ops);
   const { budgetYuan, broll, maxVideos, grain, outro } = env.space.settings;
   const next = { ...applied, settings: { ...applied.settings, budgetYuan, broll, maxVideos, ...(grain === undefined ? {} : { grain }), ...(outro === undefined ? {} : { outro }) } };
-  return { next, ops, dropped, stages: stagesFor(ops), newCover: next.coverStyle !== parent.coverStyle };
+  const legacyEnding = outro === undefined && parent.settings.outro === undefined;
+  return { next, ops, dropped, stages: stagesFor(ops), newCover: next.coverStyle !== parent.coverStyle, legacyEnding };
 }
 
 function editMessage(summary: string, c: Change): string {
@@ -108,8 +111,9 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
   const person = await nextPerson(env, args, p, c, plan);
   const timed = recutting ? retime(env, a, p.state, c.next, plan) : { captions: c.next.captions, storyboard: c.next.storyboard };
   if (!recutting) env.record({ artifacts: { ass: writeAss(env, a, timed.captions) } });
-  // CTA 提前（幂等：剪辑改了时间线或片尾设置变了会重新放置；已提前的 CTA 先还原再放）；换了背景就按新背景重算片色
-  const placed = await repaint(env, args, p, c, person, placeEnding(args, timed.storyboard, timed.captions, plan.outputDurationSec));
+  // CTA 提前（幂等：剪辑改了时间线或片尾设置变了会重新放置；已提前的 CTA 先还原再放；旧项目不挪）；换了背景就按新背景重算片色
+  const ended = c.legacyEnding ? timed.storyboard : placeEnding(args, timed.storyboard, timed.captions, plan.outputDurationSec);
+  const placed = await repaint(env, args, p, c, person, ended);
   // 素材名额先让给没改动的卡片（它们的视频已经付过费），改动过的卡片排在后面
   const storyboard = c.stages.has('broll') ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, {
     captions: timed.captions, deferShots: changedShots(p.state, placed), edit: brollEdit(p, c),
@@ -239,7 +243,9 @@ export async function produceNext(env: VersionEnv, input: string, parentN: numbe
   const c = planChange(env, p.state, raw);
   seedProject(env, p.project);
   env.complete('edit', editMessage(summary, c));
-  const args = pipelineArgs(env, input, c.next, c.newCover ? { style: c.next.coverStyle } : false);
+  const base = pipelineArgs(env, input, c.next, c.newCover ? { style: c.next.coverStyle } : false);
+  // 旧项目保持原行为：不加品牌片尾（CTA 也不挪，见 remake）
+  const args = c.legacyEnding ? { ...base, outro: { ...DEFAULT_OUTRO, enabled: false } } : base;
   validateNext(args, c, p.state);
   const made = await remake(env, args, p, c);
   const { storyboard, cards } = await checkChanged(env, args, p.state, c, made);

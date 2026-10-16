@@ -11,6 +11,7 @@ import { RVM_FILE } from '../../src/matting/rvm.js';
 import type { CoverDeps } from '../../src/pipeline/finish-step.js';
 import type { MediaDeps } from '../../src/pipeline/media-deps.js';
 import type { QaDeps } from '../../src/pipeline/qa-step.js';
+import { DEFAULT_OUTRO } from '../../src/compose/ending.js';
 import { EventBus, type WorkEvent } from '../../src/workspace/events.js';
 import type { RunnerCtx } from '../../src/workspace/runner.js';
 import { SpaceStore, type SpaceSettings } from '../../src/workspace/store.js';
@@ -128,7 +129,8 @@ export interface Hooks { /** 不换背景时假的人物取景结果 */ subject?
 
 export interface Fixture { ctx: RunnerCtx; store: SpaceStore; spaceId: string; calls: Calls; events: WorkEvent[]; hooks: Hooks; reset: () => void; cfg: AppConfig }
 
-export const DEFAULT_SETTINGS: SpaceSettings = { background: { kind: 'preset', id: 'study' }, captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 1 };
+// 和新建项目一样带片尾设置；测旧项目（没有片尾字段）时传 { outro: undefined }
+export const DEFAULT_SETTINGS: SpaceSettings = { background: { kind: 'preset', id: 'study' }, captionStyle: 'blade', budgetYuan: 20, broll: true, maxVideos: 1, outro: { ...DEFAULT_OUTRO } };
 
 const emptyCalls = (): Calls => ({ llm: [], renderCut: [], matte: [], composite: [], segments: [], grain: [], concat: [], cutInputs: [], audio: 0, qaOnly: [], qaKeep: [], hard: [], film: [], filmMetaDir: [], meanColor: [], covers: [], images: [], videos: [] });
 
