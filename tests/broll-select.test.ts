@@ -6,9 +6,11 @@ import { runBuffer, run } from '../src/media/exec.js';
 import type { LlmClient, ChatOptions } from '../src/llm/kexiang.js';
 import type { Candidate } from '../src/broll/sources/types.js';
 import type { Beat } from '../src/broll/plan.js';
-import { dhash, hamming } from '../src/broll/dhash.js';
-import { contactSheet } from '../src/broll/contact-sheet.js';
-import { chooseUnique, EMPTY_PICKED, pickBest, rankPassing, scoreCandidates, SCORE_MODEL, totalOf, type CandidateScore } from '../src/broll/select.js';
+import { dedupHash, dhash, hamming } from '../src/broll/dhash.js';
+import { buildContactSheet, contactSheet } from '../src/broll/contact-sheet.js';
+import { downloadImage, THUMB_MAX_BYTES } from '../src/broll/still-fetch.js';
+import { InsufficientBalanceError } from '../src/llm/errors.js';
+import { chooseUnique, EMPTY_PICKED, locateFocal, MIN_TOTAL, pickBest, rankPassing, scoreCandidates, SCORE_MODEL, totalOf, type CandidateScore } from '../src/broll/select.js';
 
 const FFMPEG = process.env.MINGZHI_FFMPEG ?? 'ffmpeg';
 const dir = mkdtempSync(join(tmpdir(), 'mz-broll-select-'));
@@ -55,6 +57,30 @@ describe('dHash', () => {
 
   it('不同图的汉明距离不小于 10', async () => {
     expect(hamming(await dhash(p('base.png'), FFMPEG), await dhash(p('other.png'), FFMPEG))).toBeGreaterThanOrEqual(10);
+  });
+
+  it('确定图的精确哈希位：左亮右暗得 0x1818…，反过来得 0，渐变方向决定全 1 或全 0', async () => {
+    await run(FFMPEG, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=640x480,format=gray,geq=lum=if(lt(X\\,320)\\,255\\,0)', '-frames:v', '1', p('half-lr.png')]);
+    await run(FFMPEG, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=640x480,format=gray,geq=lum=if(lt(X\\,320)\\,0\\,255)', '-frames:v', '1', p('half-rl.png')]);
+    await run(FFMPEG, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=640x480,format=gray,geq=lum=255*(1-X/W)', '-frames:v', '1', p('grad-dec.png')]);
+    await run(FFMPEG, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=640x480,format=gray,geq=lum=255*X/W', '-frames:v', '1', p('grad-inc.png')]);
+    expect(await dhash(p('half-lr.png'), FFMPEG)).toBe(0x1818181818181818n);
+    expect(await dhash(p('half-rl.png'), FFMPEG)).toBe(0n);
+    expect(await dhash(p('grad-dec.png'), FFMPEG)).toBe((1n << 64n) - 1n);
+    expect(await dhash(p('grad-inc.png'), FFMPEG)).toBe(0n);
+  });
+
+  it('水平翻转后哈希明显不同', async () => {
+    await run(FFMPEG, ['-v', 'error', '-y', '-i', p('base.png'), '-vf', 'hflip', p('base-flip.png')]);
+    expect(hamming(await dhash(p('base.png'), FFMPEG), await dhash(p('base-flip.png'), FFMPEG))).toBeGreaterThan(20);
+  });
+
+  it('纯色与低方差画面的去重哈希为 null，有细节的画面不是', async () => {
+    expect(await dedupHash(p('red.png'), FFMPEG)).toBeNull();
+    await lavfi('black.png', 'color=c=black:s=320x180');
+    expect(await dedupHash(p('black.png'), FFMPEG)).toBeNull();
+    expect(await dedupHash(p('base.png'), FFMPEG)).not.toBeNull();
+    expect(await dedupHash(p('grad-dec.png'), FFMPEG)).toBe((1n << 64n) - 1n);
   });
 
   it('hamming 数 64 位里不同的位', () => {
@@ -105,7 +131,7 @@ describe('contactSheet', () => {
     const out = p('sheet-remote.png');
     const bytes = readFileSync(p('red.png'));
     const urls: string[] = [];
-    const fetchImpl = (async (url: string) => { urls.push(String(url)); return new Response(bytes); }) as unknown as typeof fetch;
+    const fetchImpl = (async (url: string) => { urls.push(String(url)); return new Response(bytes, { headers: { 'content-type': 'image/png' } }); }) as unknown as typeof fetch;
     await contactSheet([cand('v1', { kind: 'video', thumb: 'https://cdn.example.com/v1.jpg', url: 'https://cdn.example.com/v1.mp4' })], out, FFMPEG, { fetchImpl, stillsDir: p('stills-remote') });
     expect(urls).toEqual(['https://cdn.example.com/v1.jpg']);
     expect(near(await region(out, 256, 256, 1, 1), [255, 0, 0])).toBe(true);
@@ -118,15 +144,74 @@ describe('contactSheet', () => {
     expect(existsSync(join(p('stills-video')))).toBe(true);
   });
 
-  it('某一格的图取不到时留空白格，整张表照常生成', async () => {
+  it('某一格的图取不到时标成深红底的「空」格，blanks 给出序号与原因，其他格不受影响', async () => {
     const out = p('sheet-fail.png');
     const fetchImpl = (async () => new Response('', { status: 404 })) as unknown as typeof fetch;
-    await contactSheet([cand('red'), cand('bad', { thumb: 'https://cdn.example.com/404.jpg' })], out, FFMPEG, { fetchImpl, stillsDir: p('stills-fail') });
+    const result = await buildContactSheet([cand('red'), cand('bad', { thumb: 'https://cdn.example.com/404.jpg' })], out, FFMPEG, { fetchImpl, stillsDir: p('stills-fail') });
     expect(pngSize(out)).toEqual({ w: 1024, h: 512 });
+    expect(result.count).toBe(2);
+    expect(result.blanks).toHaveLength(1);
+    expect(result.blanks[0]).toMatchObject({ index: 2, id: 'bad' });
+    expect(result.blanks[0].reason).toContain('404');
+    expect(near(await region(out, 512 + 20, 500, 1, 1), [0x5a, 0x1e, 0x1e])).toBe(true); // 空格底色
+    expect(near(await region(out, 512 + 256, 200, 1, 1), [255, 255, 255])).toBe(true); // 「空」字笔画
+    expect(near(await region(out, 256, 256, 1, 1), [255, 0, 0])).toBe(true); // 第 1 格正常
+  });
+
+  it('所有候选都取不到画面时报错', async () => {
+    const fetchImpl = (async () => new Response('', { status: 500 })) as unknown as typeof fetch;
+    await expect(contactSheet([cand('b1', { thumb: 'https://cdn.example.com/1.jpg' })], p('all-bad.png'), FFMPEG, { fetchImpl, stillsDir: p('stills-all-bad') })).rejects.toThrow('取不到');
   });
 
   it('没有候选时报错', async () => {
     await expect(contactSheet([], p('empty.png'), FFMPEG)).rejects.toThrow('没有候选');
+  });
+});
+
+describe('downloadImage', () => {
+  const png = (): Buffer => readFileSync(p('red.png'));
+  const reply = (body: BodyInit | null, headers: Record<string, string>): typeof fetch => (async () => new Response(body, { headers })) as unknown as typeof fetch;
+
+  it('图片类型且不超限时落盘', async () => {
+    const dest = p('dl-ok.jpg');
+    await downloadImage('https://x/ok.png', dest, reply(png(), { 'content-type': 'image/png' }), THUMB_MAX_BYTES);
+    expect(readFileSync(dest).equals(png())).toBe(true);
+  });
+
+  it('响应体累计超过上限时中止，不落盘', async () => {
+    const dest = p('dl-big.jpg');
+    const big = Buffer.alloc(2048);
+    await expect(downloadImage('https://x/big.png', dest, reply(big, { 'content-type': 'image/jpeg' }), 1024)).rejects.toThrow('上限');
+    expect(existsSync(dest)).toBe(false);
+  });
+
+  it('Content-Length 声明超限时不读响应体就拒绝', async () => {
+    await expect(downloadImage('https://x/big.png', p('dl-big2.jpg'), reply(png(), { 'content-type': 'image/png', 'content-length': String(THUMB_MAX_BYTES + 1) }), THUMB_MAX_BYTES)).rejects.toThrow('上限');
+  });
+
+  it('Content-Type 不是 image/* 的错误页被拒，不留缓存，下次重试能成功', async () => {
+    const dir2 = p('stills-html');
+    const html = reply('<html>blocked</html>', { 'content-type': 'text/html' });
+    const c = cand('html', { thumb: 'https://cdn.example.com/html.jpg' });
+    await expect(contactSheet([c, cand('red')], p('sheet-html.png'), FFMPEG, { fetchImpl: html, stillsDir: dir2 })).resolves.toBeTruthy();
+    const ok = reply(png(), { 'content-type': 'image/jpeg' });
+    const r = await buildContactSheet([c, cand('red')], p('sheet-html2.png'), FFMPEG, { fetchImpl: ok, stillsDir: dir2 });
+    expect(r.blanks).toEqual([]);
+  });
+
+  it('缺 Content-Type 同样拒绝，非 2xx 拒绝', async () => {
+    await expect(downloadImage('https://x/a', p('dl-a.jpg'), reply(png(), {}), THUMB_MAX_BYTES)).rejects.toThrow('不是图片');
+    await expect(downloadImage('https://x/a', p('dl-b.jpg'), (async () => new Response('', { status: 403 })) as unknown as typeof fetch, THUMB_MAX_BYTES)).rejects.toThrow('403');
+  });
+
+  it('Wikimedia 候选的下载带 User-Agent', async () => {
+    const seen: (string | undefined)[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      seen.push((init?.headers as Record<string, string> | undefined)?.['User-Agent']);
+      return new Response(png(), { headers: { 'content-type': 'image/png' } });
+    }) as unknown as typeof fetch;
+    await buildContactSheet([cand('w1', { source: 'wikimedia', thumb: 'https://upload.wikimedia.org/a.jpg' })], p('sheet-ua.png'), FFMPEG, { fetchImpl, stillsDir: p('stills-ua') });
+    expect(seen[0]).toMatch(/^mingzhi\//);
   });
 });
 
@@ -153,18 +238,18 @@ describe('scoreCandidates', () => {
     expect(call.images?.[0]).toMatch(/^data:image\/png;base64,/);
     const prompt = `${call.system}\n${call.user}`;
     for (const text of ['数据中心机房里成排的服务器', '服务器机柜', '走廊', '机器人', '全息']) expect(prompt).toContain(text);
-    for (const text of ['水印', '文字', 'Logo', '可识别人脸', '地域']) expect(call.system).toContain(text);
+    for (const text of ['水印', '文字', 'Logo', '可识别人脸', '地域', '空']) expect(call.system).toContain(text);
+    expect(call.system).not.toContain('"focal"'); // 打分不再询问主体位置
     expect(result).toEqual([
-      { index: 1, relevance: 8, aesthetic: 7, brand: 7, clean: 9, tech: 8, focal: { x: 0.4, y: 0.6 }, note: '不错' },
-      { index: 2, relevance: 8, aesthetic: 7, brand: 7, clean: 9, tech: 8, focal: { x: 0.4, y: 0.6 }, note: '不错' },
+      { index: 1, relevance: 8, aesthetic: 7, brand: 7, clean: 9, tech: 8, focal: { x: 0.5, y: 0.5 }, note: '不错' },
+      { index: 2, relevance: 8, aesthetic: 7, brand: 7, clean: 9, tech: 8, focal: { x: 0.5, y: 0.5 }, note: '不错' },
     ]);
   });
 
-  it('分数夹在 0-10、focal 夹在 0-1，数字字符串转成数字', async () => {
-    const { client } = fakeClient({ scores: [row(1, { relevance: 12, aesthetic: -3, brand: '6.5', focal: { x: 1.8, y: -0.2 } })] });
+  it('分数夹在 0-10，数字字符串转成数字', async () => {
+    const { client } = fakeClient({ scores: [row(1, { relevance: 12, aesthetic: -3, brand: '6.5' })] });
     const [s] = await scoreCandidates(client, beat, p('sheet4.png'), 4);
     expect([s.relevance, s.aesthetic, s.brand]).toEqual([10, 0, 6.5]);
-    expect(s.focal).toEqual({ x: 1, y: 0 });
   });
 
   it('缺字段、不是数字、序号越界或重复的条目丢弃，结果按序号排列', async () => {
@@ -176,11 +261,28 @@ describe('scoreCandidates', () => {
     expect(result[1].relevance).toBe(8);
   });
 
-  it('缺 focal 时取画面中心，缺 note 时为空串', async () => {
-    const { client } = fakeClient({ scores: [row(1, { focal: undefined, note: undefined })] });
+  it('缺 note 时为空串', async () => {
+    const { client } = fakeClient({ scores: [row(1, { note: undefined })] });
     const [s] = await scoreCandidates(client, beat, p('sheet4.png'), 4);
-    expect(s.focal).toEqual({ x: 0.5, y: 0.5 });
     expect(s.note).toBe('');
+  });
+
+  it('整批打分全部无效（缺字段、序号全越界）或为空时抛明确错误，不当成低分', async () => {
+    await expect(scoreCandidates(fakeClient({ scores: [row(7), row(2, { tech: undefined })] }).client, beat, p('sheet4.png'), 4)).rejects.toThrow('全部无效');
+    await expect(scoreCandidates(fakeClient({ scores: [] }).client, beat, p('sheet4.png'), 4)).rejects.toThrow('全部无效');
+  });
+
+  it('联系表上取图失败的空格，模型给的分不采纳', async () => {
+    const { client } = fakeClient({ scores: [row(1), row(2), row(3)] });
+    const result = await scoreCandidates(client, beat, p('sheet4.png'), 4, [2]);
+    expect(result.map((s) => s.index)).toEqual([1, 3]);
+  });
+
+  it('n 超过 9 时按 9 处理，序号 10 以上丢弃', async () => {
+    const { client, calls } = fakeClient({ scores: [row(9), row(10), row(12)] });
+    const result = await scoreCandidates(client, beat, p('sheet4.png'), 12);
+    expect(result.map((s) => s.index)).toEqual([9]);
+    expect(calls[0].user).toContain('共 9 格');
   });
 
   it('返回里没有 scores 数组时抛错', async () => {
@@ -190,10 +292,15 @@ describe('scoreCandidates', () => {
 });
 
 const sc = (index: number, over: Partial<CandidateScore> = {}): CandidateScore => ({
-  index, relevance: 8, aesthetic: 7, brand: 7, clean: 8, tech: 8, focal: { x: 0.5, y: 0.5 }, note: '', ...over,
+  index, relevance: 8, aesthetic: 9, brand: 7, clean: 8, tech: 8, focal: { x: 0.5, y: 0.5 }, note: '', ...over,
 });
 
 describe('pickBest', () => {
+  it('默认阈值：相关度 7、总分 40（五维满分 50 的 80%）', () => {
+    expect(MIN_TOTAL).toBe(40);
+    expect(totalOf(sc(1))).toBe(40);
+  });
+
   it('取总分最高且过线的序号', () => {
     expect(pickBest([sc(1), sc(2, { aesthetic: 10 }), sc(3, { aesthetic: 9 })])).toBe(2);
   });
@@ -202,20 +309,20 @@ describe('pickBest', () => {
     expect(pickBest([sc(1, { relevance: 6, aesthetic: 10, brand: 10, clean: 10, tech: 10 }), sc(2)])).toBe(2);
   });
 
-  it('总分低于 32 的不选，恰好 32 通过', () => {
-    expect(totalOf(sc(1))).toBe(38);
-    expect(pickBest([sc(1, { aesthetic: 2, brand: 2, clean: 8, tech: 8 })])).toBeNull(); // 28
-    expect(pickBest([sc(1, { relevance: 7, aesthetic: 6, brand: 6, clean: 6, tech: 7 })])).toBe(1); // 32
+  it('总分低于 40 的不选，恰好 40 通过', () => {
+    expect(pickBest([sc(1, { aesthetic: 8 })])).toBeNull(); // 39
+    expect(pickBest([sc(1, { relevance: 7, aesthetic: 8, brand: 8, clean: 9, tech: 8 })])).toBe(1); // 40
+    expect(pickBest([sc(1, { relevance: 7, aesthetic: 7, brand: 7, clean: 7, tech: 7 })], 7, 32)).toBe(1); // 35，阈值可调低
   });
 
   it('阈值可传参，全部不过线返回 null', () => {
     expect(pickBest([sc(1)], 9)).toBeNull();
-    expect(pickBest([sc(1)], 7, 40)).toBeNull();
+    expect(pickBest([sc(1)], 7, 41)).toBeNull();
     expect(pickBest([])).toBeNull();
   });
 
   it('总分相同取相关度高的，再相同取序号小的', () => {
-    expect(pickBest([sc(1, { relevance: 7, aesthetic: 8 }), sc(2, { relevance: 8, aesthetic: 7 })])).toBe(2);
+    expect(pickBest([sc(1, { relevance: 7, aesthetic: 10 }), sc(2, { relevance: 8, aesthetic: 9 })])).toBe(2);
     expect(pickBest([sc(2), sc(1)])).toBe(1);
   });
 
@@ -266,11 +373,56 @@ describe('chooseUnique', () => {
   it('取不到哈希的候选跳过并标注原因', async () => {
     const r = await chooseUnique({ candidates, scores, state: EMPTY_PICKED, hashOf: async (c) => { if (c.id === 'a') throw new Error('下载失败'); return hashes[c.id]; } });
     expect(r.pick?.candidate.id).toBe('b');
-    expect(r.skipped).toEqual([{ id: 'a', reason: 'unhashable' }]);
+    expect(r.skipped).toEqual([{ id: 'a', reason: 'unhashable', detail: '下载失败' }]);
+  });
+
+  it('低方差画面（哈希为 null）不判重复，也不记入已选哈希', async () => {
+    const state = { usedIds: ['x'], hashes: [0n] };
+    const r = await chooseUnique({ candidates: [cand('a')], scores: [sc(1)], state, hashOf: async () => null });
+    expect(r.pick?.candidate.id).toBe('a');
+    expect(r.state).toEqual({ usedIds: ['x', 'a'], hashes: [0n] });
   });
 
   it('序号对不上候选的分数忽略', async () => {
     const r = await chooseUnique({ candidates: [cand('a')], scores: [sc(2, { aesthetic: 10 }), sc(1)], state: EMPTY_PICKED, hashOf });
     expect(r.pick?.candidate.id).toBe('a');
+  });
+});
+
+describe('locateFocal', () => {
+  it('对单张图再调一次：返回主体中心与包围框，提示词要求 0-1 坐标', async () => {
+    const { client, calls } = fakeClient({ focal: { x: 0.3, y: 0.6 }, box: { x: 0.1, y: 0.4, w: 0.4, h: 0.5 } });
+    const r = await locateFocal(client, p('red.png'));
+    expect(r).toEqual({ focal: { x: 0.3, y: 0.6 }, box: { x: 0.1, y: 0.4, w: 0.4, h: 0.5 } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].images?.[0]).toMatch(/^data:image\/png;base64,/);
+    expect(calls[0].system).toContain('0-1');
+  });
+
+  it('坐标夹在 0-1，包围框不超出画面', async () => {
+    const { client } = fakeClient({ focal: { x: 1.4, y: -1 }, box: { x: 0.7, y: 0.2, w: 0.9, h: 0.3 } });
+    expect(await locateFocal(client, p('red.png'))).toEqual({ focal: { x: 1, y: 0 }, box: { x: 0.7, y: 0.2, w: expect.closeTo(0.3, 6), h: 0.3 } });
+  });
+
+  it('只给包围框时中心取框中心；框没有面积则丢弃', async () => {
+    const a = await locateFocal(fakeClient({ box: { x: 0.2, y: 0.2, w: 0.4, h: 0.4 } }).client, p('red.png'));
+    expect(a.focal.x).toBeCloseTo(0.4, 6);
+    expect(a.focal.y).toBeCloseTo(0.4, 6);
+    const b = await locateFocal(fakeClient({ focal: { x: 0.2, y: 0.8 }, box: { x: 1, y: 0.2, w: 0.3, h: 0.3 } }).client, p('red.png'));
+    expect(b).toEqual({ focal: { x: 0.2, y: 0.8 } });
+  });
+
+  it('返回格式不对、模型报错、图读不出时回退画面中心', async () => {
+    const center = { focal: { x: 0.5, y: 0.5 } };
+    expect(await locateFocal(fakeClient({ foo: 1 }).client, p('red.png'))).toEqual(center);
+    expect(await locateFocal(fakeClient('乱码').client, p('red.png'))).toEqual(center);
+    const boom: LlmClient = { chatJson: async () => { throw new Error('网络错误'); } };
+    expect(await locateFocal(boom, p('red.png'))).toEqual(center);
+    expect(await locateFocal(fakeClient({}).client, p('missing.png'))).toEqual(center);
+  });
+
+  it('余额不足照常抛出，不当成普通失败吞掉', async () => {
+    const broke: LlmClient = { chatJson: async () => { throw new InsufficientBalanceError(); } };
+    await expect(locateFocal(broke, p('red.png'))).rejects.toBeInstanceOf(InsufficientBalanceError);
   });
 });
