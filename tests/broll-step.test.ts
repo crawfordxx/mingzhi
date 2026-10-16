@@ -151,6 +151,25 @@ describe('节拍落点', () => {
   });
 });
 
+describe('落在人物全屏镜头上的节拍不丢弃（Task 13）', () => {
+  it('分屏节拍落在人物全屏镜头或还没有图的图片卡上：改全屏插入，图片卡由节拍素材替换、不再单独生图；检索词记进节拍记录', async () => {
+    const sb: Storyboard = { shots: [
+      ...STORYBOARD().shots.slice(0, 3),
+      { start: 16, end: 19, layout: 'split', card: { template: 'photo', props: { label: '手机放到另一个房间', visual: { source: 'generate', prompt: 'PHOTO a phone lying on a coffee table' } } } },
+      { start: 19, end: 28, layout: 'full' },
+      ...STORYBOARD().shots.slice(4),
+    ] };
+    const { deps, calls } = fakeDeps([wiki(POOL)]);
+    const r = await go({ brollDeps: deps, llm: fakeLlm({ beats: { beats: [beat(5, 8, 'split'), beat(16.2, 18.8, 'split')] } }) }, sb);
+    expect(brollShots(r.out).map((s) => [s.start, s.end, s.layout])).toEqual([[5, 8, 'broll'], [16, 19, 'broll']]);
+    expect(r.out.shots.some((s) => s.card?.template === 'photo')).toBe(false);
+    expect(calls.image.filter((p) => p.includes('PHOTO'))).toEqual([]);
+    const recs = r.patches.at(-1)?.broll?.beats ?? [];
+    expect(recs.map((b) => [b.status, b.present, b.placement])).toEqual([['placed', 'broll-full', 'free'], ['placed', 'broll-full', 'free']]);
+    expect(recs[0].queries).toEqual([['query 5']]);
+  });
+});
+
 describe('修改版本：换一张 B-roll', () => {
   it('生图素材连续换两次：三张不同的图（同一节拍第 n 次生成换变体与缓存键），用原节拍的完整字段', async () => {
     const low = (o: ChatOptions) => ({ scores: Array.from({ length: Number(/共 (\d+) 格/.exec(o.user)?.[1]) }, (_, i) => ({ index: i + 1, relevance: 2, aesthetic: 5, brand: 5, clean: 5, tech: 5 })) });

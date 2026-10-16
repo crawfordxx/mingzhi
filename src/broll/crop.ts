@@ -8,6 +8,9 @@ export interface CropPlan { crop: Rect; output: Size; downgrade?: Downgrade }
 
 /** 裁框放大到目标尺寸的倍数不超过 1/0.8（=1.25×）；再大就降级，不硬放大 */
 export const MIN_COVER = 0.8;
+/** 裁框宽度至少是目标宽度的多少：full 铺满目标、split 退到上半屏时各自的下限 */
+export interface Cover { full: number; split: number }
+export const DEFAULT_COVER: Cover = { full: MIN_COVER, split: MIN_COVER };
 /** 主体离中心这么近时直接居中（对称构图），不硬推到三分线 */
 const CENTER_DEADZONE = 0.04;
 
@@ -29,7 +32,7 @@ export function thirdsCrop(src: Size, focal: Point, aspect: number): Rect {
   return { x: placeAxis(focal.x, src.width, width), y: placeAxis(focal.y, src.height, height), width, height };
 }
 
-const covers = (crop: Rect, out: Size): boolean => crop.width >= out.width * MIN_COVER;
+const covers = (crop: Rect, out: Size, minCover: number): boolean => crop.width >= out.width * minCover;
 
 /** 小窗：不裁、保持原比例，只缩不放 */
 function pipPlan(src: Size, target: Size): CropPlan {
@@ -42,17 +45,17 @@ function pipPlan(src: Size, target: Size): CropPlan {
 }
 
 /**
- * 目标裁框：能盖住目标尺寸（允许 ≤1.25× 放大）就直接裁；竖屏目标盖不住时试上半屏 split；
+ * 目标裁框：能盖住目标尺寸（缺省允许 ≤1.25× 放大，cover 可放宽）就直接裁；竖屏目标盖不住时试上半屏 split；
  * 再不行降级为 pip。返回源画面里的裁框与输出尺寸。
  */
-export function planCrop(src: Size, focal: Point, target: Size): CropPlan {
+export function planCrop(src: Size, focal: Point, target: Size, cover: Cover = DEFAULT_COVER): CropPlan {
   if (!Number.isFinite(focal.x) || !Number.isFinite(focal.y)) throw new Error(`主体位置 focal 不是有效数字：${JSON.stringify(focal)}`);
   const full = thirdsCrop(src, focal, target.width / target.height);
-  if (covers(full, target)) return { crop: full, output: target };
+  if (covers(full, target, cover.full)) return { crop: full, output: target };
   if (target.height > target.width) {
     const split = { width: target.width, height: even(target.height / 2) };
     const crop = thirdsCrop(src, focal, split.width / split.height);
-    if (covers(crop, split)) return { crop, output: split, downgrade: 'split' };
+    if (covers(crop, split, cover.split)) return { crop, output: split, downgrade: 'split' };
   }
   return pipPlan(src, target);
 }

@@ -1,7 +1,7 @@
 import { rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
-import { placeAsset, type Placement } from '../broll/assign.js';
-import { EST_YUAN } from '../broll/budget.js';
+import { placeAsset, presentFor, type Placement } from '../broll/assign.js';
+import { EST_YUAN, MIN_IMAGES } from '../broll/budget.js';
 import { usedOf } from '../broll/credit-store.js';
 import { fillRealGaps } from '../broll/gaps.js';
 import { planBeats, type Beat } from '../broll/plan.js';
@@ -19,8 +19,8 @@ const SEARCH_KINDS: readonly Beat['kind'][] = ['footage', 'photo', 'screenshot',
 const CONCURRENCY = 3;
 /** 兜底生图每 2 分钟最多发起几次 */
 const GENERATED_PER_2MIN = 5;
-/** 短片也至少允许 2 次（还受 B-roll 花费上限约束） */
-const MIN_GENERATED = 2;
+/** 短片也至少允许 3 次（与 B-roll 上限的张数下限一致，仍受花费上限约束） */
+const MIN_GENERATED = MIN_IMAGES;
 
 /**
  * 一个节拍的结果（含完整的节拍字段，存进版本状态，「换一张」时按原节拍重做）：
@@ -31,6 +31,8 @@ export type BeatRecord = Beat & {
   status: 'placed' | 'skipped'; source?: string; file?: string; layout?: Layout; placement?: Placement; reason?: string;
   /** 这个节拍用过的全部候选 id（含「换一张」换掉的），重做时都排除，不会换回旧图 */
   history?: string[];
+  /** 每轮实际发出的英文检索词（第二轮是同义/上位词） */
+  queries?: string[][];
 };
 
 export interface BeatsResult {
@@ -90,6 +92,9 @@ export function hostable(storyboard: Storyboard, beat: Beat): boolean {
 }
 
 const countText = (counts: Record<string, number>): string => Object.entries(counts).map(([k, v]) => `${k} ${v}`).join('、');
+/** 检索词进度文案：第一轮、第二轮（同义/上位词） */
+const queryText = (rounds: string[][]): string =>
+  rounds.filter((q) => q.length > 0).map((q, i) => `${i === 0 ? ' · 检索词' : '；第二轮'}：${q.join(' / ')}`).join('');
 const skip = (b: Beat, why: string, candidates = 0): BeatRecord => ({ ...b, candidates, status: 'skipped', reason: why });
 
 /**
@@ -103,16 +108,18 @@ export async function runBeats(ctx: BeatsCtx, storyboard: Storyboard): Promise<B
     ctx.emit(`B-roll：${planned.error}`, brollDetail({ phase: 'plan', beats: 0, spentYuan: env.budget.spent(), error: planned.error }));
     return { storyboard, records: [], imageUrls: {}, note: planned.error };
   }
-  const beats = planned.beats.filter((b) => hostable(storyboard, b));
-  const skipped = planned.beats.filter((b) => !beats.includes(b)).map((b) => skip(b, `${NO_HOST}，未检索`));
+  // 落在人物全屏镜头（或还没有图的图片卡）上的分屏节拍改全屏插入或画中画，不丢弃
+  const presented = planned.beats.map((b) => ({ ...b, present: presentFor(storyboard.shots, b) }));
+  const beats = presented.filter((b) => hostable(storyboard, b));
+  const skipped = presented.filter((b) => !beats.includes(b)).map((b) => skip(b, `${NO_HOST}，未检索`));
   const used = usedOf(storyboard, env.workDir);
   ctx.emit(`B-roll 规划：${planned.note}${skipped.length > 0 ? ` · ${skipped.length} 个节拍没有可放的镜头，不检索` : ''}`,
-    brollDetail({ phase: 'plan', beats: beats.length, spentYuan: env.budget.spent(), items: planned.beats }));
+    brollDetail({ phase: 'plan', beats: beats.length, spentYuan: env.budget.spent(), items: presented }));
   const pools = await mapLimit(beats, CONCURRENCY, async (beat, i) => {
     throwIfCancelled(env.signal);
     const pool = await collect(ctx, beat, `beat-${i + 1}`, used.ids);
-    ctx.emit(`节拍 ${i + 1}/${beats.length}（${label(beat)}）：候选 ${pool.reviewed.candidates.length} 个${countText(pool.counts) ? `（${countText(pool.counts)}）` : ''}`,
-      brollDetail({ phase: 'beat', index: i, candidates: pool.reviewed.candidates.length, counts: pool.counts, spentYuan: env.budget.spent() }));
+    ctx.emit(`节拍 ${i + 1}/${beats.length}（${label(beat)}）：候选 ${pool.reviewed.candidates.length} 个${countText(pool.counts) ? `（${countText(pool.counts)}）` : ''}${queryText(pool.queries)}`,
+      brollDetail({ phase: 'beat', index: i, candidates: pool.reviewed.candidates.length, counts: pool.counts, queries: pool.queries, spentYuan: env.budget.spent() }));
     return pool;
   });
   const placed = await placeAll(ctx, storyboard, beats, pools, { usedIds: used.ids, hashes: used.hashes });
@@ -121,7 +128,7 @@ export async function runBeats(ctx: BeatsCtx, storyboard: Storyboard): Promise<B
 
 /** 一个节拍：先确认当前分镜里还放得下（前面的节拍可能占了宿主镜头）再挑选、付费，然后放进镜头 */
 async function placeOne(ctx: BeatsCtx, shots: Storyboard['shots'], beat: Beat, pool: Pool, state: PickedState, mayGenerate: boolean): Promise<{ shots: Storyboard['shots']; record: BeatRecord; state: PickedState; url?: string; generated: boolean }> {
-  const base = { candidates: pool.reviewed.candidates.length, counts: pool.counts };
+  const base = { candidates: pool.reviewed.candidates.length, counts: pool.counts, queries: pool.queries };
   if (!hostable({ shots }, beat)) return { shots, record: { ...skip(beat, `${NO_HOST}（前面的节拍已占用）`), ...base }, state, generated: false };
   const got = await pick(ctx, beat, pool, state, mayGenerate);
   const r = got.asset ? placeAsset(shots, beat, got.asset) : undefined;

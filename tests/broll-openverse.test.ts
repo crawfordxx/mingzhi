@@ -30,7 +30,7 @@ describe('openverseSource', () => {
     expect(url.searchParams.get('q')).toBe('contract signing');
     expect(url.searchParams.get('license')).toBe('cc0,pdm,by');
     expect(url.searchParams.get('mature')).toBe('false');
-    expect(url.searchParams.get('aspect_ratio')).toBe('tall');
+    expect(url.searchParams.has('aspect_ratio')).toBe(false); // 不按方向过滤，见下一条
     expect(url.searchParams.get('page_size')).toBe('8');
     expect(url.searchParams.get('size')).toBe('medium,large');
     expect(url.searchParams.get('excluded_source')).toBe('wikimedia');
@@ -39,12 +39,12 @@ describe('openverseSource', () => {
     expect(Object.keys(headers).map((k) => k.toLowerCase())).not.toContain('authorization');
   });
 
-  it('方向映射：landscape→wide，square→square；page_size 不超过匿名上限 20', async () => {
+  it('不按方向过滤（竖图多是 1024 长边、铺不满竖屏，过滤后几乎为 0；横图、方图、StockSnap/rawpixel 大图交给裁切判断）；page_size 不超过匿名上限 20', async () => {
     const calls: Call[] = [];
     const f = jsonFetch({ results: [] }, calls);
     await openverseSource({ fetchImpl: f })(q({ orientation: 'landscape', perPage: 50 }));
     await openverseSource({ fetchImpl: f })(q({ orientation: 'square' }));
-    expect(calls.map((c) => c.url.searchParams.get('aspect_ratio'))).toEqual(['wide', 'square']);
+    expect(calls.map((c) => c.url.searchParams.has('aspect_ratio'))).toEqual([false, false]);
     expect(calls[0].url.searchParams.get('page_size')).toBe('20');
   });
 

@@ -10,23 +10,25 @@ import { downloadImage, ORIGINAL_MAX_BYTES } from './still-fetch.js';
 
 /** 原文件下载超时（视频可能几十 MB） */
 const VIDEO_TIMEOUT_MS = 180_000;
-/** 照片长边超过它时，Wikimedia 改取这个宽度的缩略图（够 4K 裁切，省下几十 MB 的原图） */
+/** 照片长边超过它时，Wikimedia 改取缩略图（够 4K 裁切，省下几十 MB 的原图） */
 export const WIKI_PHOTO_EDGE = 2560;
+/** Wikimedia 只按这些标准宽度出缩略图，其它宽度（如 2048、2560）返回 400（2026-10 实测） */
+const WIKI_THUMB_WIDTHS = [1280, 1920, 3840] as const;
 const VIDEO_TYPE = /^(video\/|application\/octet-stream)/i;
 
 const fetchFor = (c: Candidate, fetchImpl: typeof fetch): typeof fetch => (c.source === 'wikimedia' || c.source === 'openverse' ? wikimediaFetch(fetchImpl) : fetchImpl);
 
 /**
- * Wikimedia 大图取指定宽度的缩略图：缩略图地址形如 …/thumb/a/ab/Name.jpg/640px-Name.jpg，把宽度段换成需要的宽度；
- * 原图本身不大、或缩略图地址不是这个形状时用原图
+ * Wikimedia 大图取缩略图：缩略图地址形如 …/thumb/a/ab/Name.jpg/640px-Name.jpg，把宽度段换成长边约 edge 所需宽度往上取的标准宽度；
+ * 原图本身不大、标准宽度比原图还宽、或缩略图地址不是这个形状时用原图
  */
 export function sizedUrl(c: Candidate, edge = WIKI_PHOTO_EDGE): { url: string; width: number; height: number } {
+  const original = { url: c.url, width: c.width, height: c.height };
   const long = Math.max(c.width, c.height);
-  const m = /\/(\d+)px-[^/]+$/.exec(c.thumb);
-  if (c.source !== 'wikimedia' || c.kind !== 'photo' || long <= edge || !m || !c.thumb.includes('/thumb/')) return { url: c.url, width: c.width, height: c.height };
-  const scale = edge / long;
-  const width = Math.round(c.width * scale);
-  return { url: c.thumb.replace(/\/\d+px-([^/]+)$/, `/${width}px-$1`), width, height: Math.round(c.height * scale) };
+  if (c.source !== 'wikimedia' || c.kind !== 'photo' || long <= edge || !/\/\d+px-[^/]+$/.test(c.thumb) || !c.thumb.includes('/thumb/')) return original;
+  const width = WIKI_THUMB_WIDTHS.find((w) => w >= Math.round((c.width * edge) / long));
+  if (!width || width >= c.width) return original;
+  return { url: c.thumb.replace(/\/\d+px-([^/]+)$/, `/${width}px-$1`), width, height: Math.round((c.height * width) / c.width) };
 }
 
 /** 流式下载并在超过上限时中止；先写临时文件，完整后改名 */

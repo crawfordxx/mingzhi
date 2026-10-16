@@ -131,10 +131,10 @@ describe('placeAsset 分配到镜头', () => {
 });
 
 describe('预算', () => {
-  it('每 2 分钟 ¥4，最少 ¥1', () => {
+  it('每 2 分钟 ¥4，短片最少够 3 张图（¥1.45）', () => {
     expect(brollCapYuan(120)).toBe(4);
     expect(brollCapYuan(60)).toBe(2);
-    expect(brollCapYuan(10)).toBe(1);
+    expect(brollCapYuan(10)).toBe(1.45);
   });
 
   it('项目预算（含预留）与 B-roll 上限都要满足；B-roll 花费按 meter 增量算', () => {
@@ -199,8 +199,9 @@ describe('免费来源检索', () => {
 });
 
 describe('搜索词', () => {
-  it('长词组补一个前两个词的短词（字面检索零结果时兜底），去重', () => {
-    expect(queriesOf(beat({ queryEn: ['tired video editor', 'man rubbing eyes computer', 'desk'] }))).toEqual(['tired video editor', 'man rubbing eyes computer', 'desk', 'tired video', 'man rubbing']);
+  it('第一轮只用模型的英文词（不再截前两个词），去重；第二轮取末尾实词兜底', () => {
+    expect(queriesOf(beat({ queryEn: ['tired video editor', 'man rubbing eyes computer', 'desk', 'desk'] }))).toEqual(['tired video editor', 'man rubbing eyes computer', 'desk']);
+    expect(queriesOf(beat({ queryEn: ['tired video editor', 'man rubbing eyes computer', 'desk'] }), 2)).toEqual(['video editor', 'eyes computer']);
   });
 });
 
@@ -214,9 +215,12 @@ describe('Wikimedia 遗留项', () => {
     expect(restricted('')).toBe(false);
   });
 
-  it('大图按宽度参数取缩略图（省下原图），小图与非 Wikimedia 用原图', () => {
-    const big = cand('wikimedia:9', { width: 6000, height: 4000, thumb: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/X.jpg/640px-X.jpg', url: 'https://upload.wikimedia.org/wikipedia/commons/a/ab/X.jpg' });
-    expect(sizedUrl(big)).toEqual({ url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/X.jpg/2560px-X.jpg', width: 2560, height: 1707 });
+  it('大图按宽度参数取缩略图（省下原图），只用 Wikimedia 认的标准宽度（2560px 等非标准宽度返回 400）；小图与非 Wikimedia 用原图', () => {
+    const thumb = 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/X.jpg/640px-X.jpg';
+    const big = cand('wikimedia:9', { width: 6000, height: 4000, thumb, url: 'https://upload.wikimedia.org/wikipedia/commons/a/ab/X.jpg' });
+    expect(sizedUrl(big)).toEqual({ url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/X.jpg/3840px-X.jpg', width: 3840, height: 2560 });
+    expect(sizedUrl(cand('wikimedia:t', { width: 4000, height: 6000, thumb }))).toEqual({ url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/X.jpg/1920px-X.jpg', width: 1920, height: 2880 });
+    expect(sizedUrl(cand('wikimedia:m', { width: 3000, height: 2155, thumb })).url).toBe('https://u/wikimedia:m.jpg'); // 标准宽度 3840 比原图还宽：用原图
     expect(sizedUrl(cand('wikimedia:s', { width: 2000, height: 1000 })).url).toBe('https://u/wikimedia:s.jpg');
     expect(sizedUrl(cand('pexels:1', { source: 'pexels', width: 6000, height: 4000 })).url).toBe('https://u/pexels:1.jpg');
   });

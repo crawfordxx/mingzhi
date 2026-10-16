@@ -10,7 +10,7 @@ import { dedupHash, dhash, hamming } from '../src/broll/dhash.js';
 import { buildContactSheet, contactSheet } from '../src/broll/contact-sheet.js';
 import { downloadImage, THUMB_MAX_BYTES } from '../src/broll/still-fetch.js';
 import { InsufficientBalanceError } from '../src/llm/errors.js';
-import { chooseUnique, EMPTY_PICKED, locateFocal, MIN_TOTAL, pickBest, rankPassing, scoreCandidates, SCORE_MODEL, totalOf, type CandidateScore } from '../src/broll/select.js';
+import { chooseUnique, EMPTY_PICKED, locateFocal, MIN_QUALITY, MIN_RELEVANCE, pickBest, rankPassing, scoreCandidates, SCORE_MODEL, totalOf, type CandidateScore } from '../src/broll/select.js';
 
 const FFMPEG = process.env.MINGZHI_FFMPEG ?? 'ffmpeg';
 const dir = mkdtempSync(join(tmpdir(), 'mz-broll-select-'));
@@ -296,8 +296,9 @@ const sc = (index: number, over: Partial<CandidateScore> = {}): CandidateScore =
 });
 
 describe('pickBest', () => {
-  it('默认阈值：相关度 7、总分 40（五维满分 50 的 80%）', () => {
-    expect(MIN_TOTAL).toBe(40);
+  it('默认阈值：相关度 7（生成图视为 9 分，差 ≤ 2 分优先真实），美感、干净、技术不低于 5；不再按总分一刀切', () => {
+    expect(MIN_RELEVANCE).toBe(7);
+    expect(MIN_QUALITY).toBe(5);
     expect(totalOf(sc(1))).toBe(40);
   });
 
@@ -309,15 +310,13 @@ describe('pickBest', () => {
     expect(pickBest([sc(1, { relevance: 6, aesthetic: 10, brand: 10, clean: 10, tech: 10 }), sc(2)])).toBe(2);
   });
 
-  it('总分低于 40 的不选，恰好 40 通过', () => {
-    expect(pickBest([sc(1, { aesthetic: 8 })])).toBeNull(); // 39
-    expect(pickBest([sc(1, { relevance: 7, aesthetic: 8, brand: 8, clean: 9, tech: 8 })])).toBe(1); // 40
-    expect(pickBest([sc(1, { relevance: 7, aesthetic: 7, brand: 7, clean: 7, tech: 7 })], 7, 32)).toBe(1); // 35，阈值可调低
+  it('总分不设下限，硬伤（美感、干净、技术 < 5）才不选；影调不设下限', () => {
+    expect(pickBest([sc(1, { relevance: 7, aesthetic: 5, brand: 0, clean: 5, tech: 5 })])).toBe(1); // 总分 22
+    expect(pickBest([sc(1, { clean: 4.9 })])).toBeNull();
   });
 
   it('阈值可传参，全部不过线返回 null', () => {
     expect(pickBest([sc(1)], 9)).toBeNull();
-    expect(pickBest([sc(1)], 7, 41)).toBeNull();
     expect(pickBest([])).toBeNull();
   });
 

@@ -19,6 +19,14 @@ export interface PlaceResult { shots: Shot[]; layout?: Layout; placement?: Place
 
 /** 人物全屏、没有卡片也没有素材的镜头：可以切出一段放 B-roll */
 export const isFree = (s: Shot): boolean => !s.card && !s.broll && s.layout === 'full';
+/** 还没取到图的图片卡（取不到就会退成人物全屏）：节拍素材可以替换它，省下为它单独生图 */
+export function isPendingPhoto(s: Shot): boolean {
+  if (s.card?.template !== 'photo' || s.broll) return false;
+  const p = s.card.props;
+  return !p.image && !p.video;
+}
+/** 能切一段放素材的镜头：人物全屏，或还没有图的图片卡 */
+const isOpen = (s: Shot): boolean => isFree(s) || isPendingPhoto(s);
 /** 卡片自己有没有画面：图片卡、网页卡、已取到图或视频的钩子 */
 function ownMedia(s: Shot): boolean {
   if (!s.card) return false;
@@ -88,10 +96,10 @@ function carve(shots: Shot[], i: number, [a, b]: [number, number], inserted: Sho
 const byOverlap = (shots: Shot[], beat: Beat, pred: (s: Shot) => boolean): number[] =>
   shots.map((s, i) => [i, overlap(s, beat.start, beat.end)] as const).filter(([i, len]) => len > EPS && pred(shots[i])).sort((x, y) => y[1] - x[1]).map(([i]) => i);
 
-/** 在人物全屏镜头里切一段，按 layout 放素材 */
+/** 在人物全屏镜头（或还没有图的图片卡，切剩的部分回到人物全屏）里切一段，按 layout 放素材 */
 function placeOnFree(shots: Shot[], beat: Beat, asset: PlaceAsset, layout: Layout): Shot[] | null {
   const maxLen = layout === 'broll' ? MAX_FULL_SEC : MAX_SHOT_SEC;
-  for (const i of byOverlap(shots, beat, isFree)) {
+  for (const i of byOverlap(shots, beat, isOpen)) {
     const r = regionIn(shots[i], beat.start, beat.end, maxLen);
     if (r) return carve(shots, i, r, { start: r[0], end: r[1], layout, broll: brollOf(asset) });
   }
@@ -131,15 +139,30 @@ function placeOnCardEdge(shots: Shot[], beat: Beat, asset: PlaceAsset, layout: L
   return null;
 }
 
-/** 铺在分屏卡片镜头的上半屏做底：beat 至少盖住该镜头 1.5 秒（或一半） */
+/** 能铺底的分屏卡片镜头：beat 至少盖住该镜头 1.5 秒（或一半） */
+const cardHostOf = (shots: Shot[], beat: Beat): number | undefined =>
+  byOverlap(shots, beat, isCardHost).find((k) => overlap(shots[k], beat.start, beat.end) >= Math.min(MIN_BEAT_SEC, (shots[k].end - shots[k].start) / 2) - EPS);
+
+/** 铺在分屏卡片镜头的上半屏做底 */
 function placeOnCard(shots: Shot[], beat: Beat, asset: PlaceAsset): Shot[] | null {
-  const i = byOverlap(shots, beat, isCardHost).find((k) => overlap(shots[k], beat.start, beat.end) >= Math.min(MIN_BEAT_SEC, (shots[k].end - shots[k].start) / 2) - EPS);
+  const i = cardHostOf(shots, beat);
   return i === undefined ? null : shots.map((s, k) => (k === i ? { ...s, broll: brollOf(asset) } : s));
 }
 
 /**
+ * 节拍的呈现方式按落点修正：分屏节拍没有能铺底的卡片、只落在人物全屏镜头（或还没有图的图片卡）上时，
+ * ≤ 3.5 秒改全屏插入、更长改画中画（检索按竖屏找；素材只够铺上半屏时放置阶段再退回上半屏）。截图只铺上半屏，不改
+ */
+export function presentFor(shots: Shot[], beat: Beat): Beat['present'] {
+  if (beat.present !== 'split' || beat.kind === 'screenshot' || cardHostOf(shots, beat) !== undefined) return beat.present;
+  const onPerson = byOverlap(shots, beat, isOpen).some((i) => regionIn(shots[i], beat.start, beat.end, MAX_SHOT_SEC) !== null);
+  if (!onPerson) return beat.present;
+  return beat.end - beat.start <= MAX_FULL_SEC + EPS ? 'broll-full' : 'pip';
+}
+
+/**
  * 把一个加工好的素材放进分镜（不改入参），按顺序试：
- * 1. 全屏插入、画中画、浮层：人物全屏镜头里切一段（free）；
+ * 1. 全屏插入、画中画、浮层：人物全屏镜头（或还没有图的图片卡，素材替换它）里切一段（free）；
  * 2. 全屏插入、画中画：从普通卡片镜头头尾切一段，卡片留 2.5 秒（carve）；
  * 3. 时间上覆盖到的卡片镜头（含还没有图的钩子）：素材铺满上半屏做底，卡片排在图上（card，分屏升级）；
  * 4. 人物镜头里切一段上半屏铺素材（half）。都不行返回原分镜与原因

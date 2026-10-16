@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { meanRgb, type Rgb } from '../matting/composite.js';
 import { run, runBuffer } from '../media/exec.js';
 import { parseProbe } from '../media/probe.js';
-import { planCrop, type CropPlan, type Downgrade, type Point, type Size } from './crop.js';
+import { planCrop, type Cover, type CropPlan, type Downgrade, type Point, type Size } from './crop.js';
 import { needsWb, wbFilter, wbGains } from './grade.js';
 import { CUT_SCORE, parseFrameStats, pickSegment, type FrameStat, type Segment } from './segment.js';
 import { verifyOutput } from './verify.js';
@@ -28,6 +28,8 @@ export interface ProcessInput {
   durationSec?: number;
   /** 期望输出时长（秒），夹在 2–4，默认 3 */
   wantSec?: number;
+  /** 裁框至少要有目标宽度的多少（缺省最多放大 1.25×；分屏、浮层等可放宽，见 gather 的 coverFor） */
+  cover?: Cover;
 }
 export interface ProcessContext {
   ffmpeg: string;
@@ -188,7 +190,7 @@ async function processOnce(input: ProcessInput, out: string, ctx: ProcessContext
   const cwd = dirname(resolve(ctx.lut));
   const ffprobe = ffprobeOf(ctx);
   const src = await probeSource(file, input, ffprobe);
-  const plan = planCrop(src, input.focal, input.target);
+  const plan = planCrop(src, input.focal, input.target, input.cover);
   const geo = geometryFilters(src, plan);
   const video = input.kind === 'video' ? await chooseSegment(ctx, file, src, input.wantSec) : undefined;
   const graded = [...geo.filters, lutFilter(ctx.lut)];

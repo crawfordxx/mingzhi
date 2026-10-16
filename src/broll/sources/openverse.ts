@@ -1,7 +1,7 @@
 import { getJson } from './http.js';
 import { classifyLicense } from './license.js';
 import { WIKIMEDIA_USER_AGENT } from './wikimedia.js';
-import type { Candidate, Source, SourceOptions, SourceQuery } from './types.js';
+import type { Candidate, Source, SourceOptions } from './types.js';
 
 const NAME = 'Openverse';
 const API = 'https://api.openverse.org/v1/images/';
@@ -9,7 +9,6 @@ const API = 'https://api.openverse.org/v1/images/';
 const MAX_PAGE_SIZE = 20;
 /** 服务端许可过滤只放这三种；NC、ND、SA 本就不在列表里。license_type=commercial 会放进 BY-SA，所以不用它 */
 const LICENSES = 'cc0,pdm,by';
-const ASPECT: Record<SourceQuery['orientation'], string> = { portrait: 'tall', landscape: 'wide', square: 'square' };
 
 interface OpenverseImage {
   id?: string; url?: string | null; thumbnail?: string | null; foreign_landing_url?: string | null;
@@ -50,7 +49,9 @@ export function openverseSource(opts: SourceOptions = {}): Source {
   return async (q, signal) => {
     if (q.kind === 'video') return [];
     const params = new URLSearchParams({
-      q: q.text, license: LICENSES, mature: 'false', aspect_ratio: ASPECT[q.orientation], size: 'medium,large',
+      // 不按方向过滤：Openverse 的竖图多是 Flickr 1024 长边、铺不满竖屏，过滤后几乎为 0；横图、方图能进分屏，
+      // StockSnap、rawpixel 的大图能铺满全屏，交给检索后的裁切判断（gather 的 coverFor）
+      q: q.text, license: LICENSES, mature: 'false', size: 'medium,large',
       extension: 'jpg,jpeg,png,webp', excluded_source: 'wikimedia', page_size: String(Math.min(q.perPage, MAX_PAGE_SIZE)),
     });
     const json = await getJson<{ results?: OpenverseImage[] }>(NAME, `${API}?${params}`, { headers: { 'User-Agent': WIKIMEDIA_USER_AGENT } }, opts, signal);

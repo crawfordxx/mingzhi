@@ -2,8 +2,6 @@ import type { CostMeter } from '../cost/meter.js';
 
 /** B-roll 全流程（规划、审片、主体定位、联网搜索、兜底生图、图生视频）每 2 分钟片的目标花费 */
 export const BROLL_YUAN_PER_2MIN = 4;
-/** 很短的片子也给够一次规划 + 几次审片 */
-const MIN_CAP_YUAN = 1;
 
 /** 单次调用的预估花费（元），用于发起前的预算检查 */
 export const EST_YUAN = {
@@ -18,7 +16,14 @@ export const EST_YUAN = {
   video: 2.4,
 } as const;
 
-/** 按片长算 B-roll 的花费上限：每 2 分钟 ¥4，最少 ¥1 */
+/** 短片下限按张数：30 秒以内的片子也至少付得起这么多张图 */
+export const MIN_IMAGES = 3;
+/** 一张图的最坏花费：两轮审片、主体定位、兜底生图（竖屏、横屏 2k） */
+const PER_IMAGE_YUAN = EST_YUAN.score * 2 + EST_YUAN.focal + EST_YUAN.imageWide;
+/** B-roll 上限的下限：一次节拍规划与补缺口，加 3 张图（约 ¥1.45） */
+export const MIN_CAP_YUAN = Math.round((EST_YUAN.plan + EST_YUAN.gaps + MIN_IMAGES * PER_IMAGE_YUAN) * 100) / 100;
+
+/** 按片长算 B-roll 的花费上限：每 2 分钟 ¥4，最少够 3 张图（仍受项目总上限约束，见 makeBudget） */
 export function brollCapYuan(durationSec: number): number {
   return Math.max(MIN_CAP_YUAN, Math.round(BROLL_YUAN_PER_2MIN * (durationSec / 120) * 100) / 100);
 }

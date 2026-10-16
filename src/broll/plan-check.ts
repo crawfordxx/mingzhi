@@ -61,6 +61,7 @@ function cleanFields(b: Beat): Beat {
     avoid: [...new Set([...b.avoid, ...DEFAULT_AVOID])],
     queryEn: b.queryEn.filter((q) => !FORBIDDEN_QUERY.test(q)),
     queryZh: b.queryZh.filter((q) => !FORBIDDEN_QUERY.test(q)),
+    ...(b.queryAlt ? { queryAlt: b.queryAlt.filter((q) => !FORBIDDEN_QUERY.test(q)) } : {}),
     ...(urlHint ? { urlHint, urlHintUnverified: true as const } : {}),
   };
 }

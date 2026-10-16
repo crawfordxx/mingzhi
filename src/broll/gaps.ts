@@ -7,7 +7,7 @@ import { BeatSchema, PLAN_MODEL, type Beat } from './plan.js';
 const REAL_KINDS: readonly Beat['kind'][] = ['footage', 'photo', 'screenshot'];
 
 const SYSTEM = `你是短视频口播的视觉导演。下面这些时间段超过 15 秒没有真实世界画面（实拍、实物照片、真实网页截图）。请为每个时间段补 1 个真实画面节拍：画面必须对应这段口播里的具体名词或动作（产品、机构、地点、物件、动作），不要主题氛围图。
-输出严格 JSON：{"beats":[{"start":秒,"end":秒,"role":"illustrate|prove|locate|emote|define","kind":"footage|photo|screenshot","subject":"一句话画面","mustShow":[],"avoid":[],"queryEn":["3-6 个英文词"],"queryZh":["中文名词"],"present":"broll-full|split|pip|overlay","shotSize":"ECU|CU|MS|WS","motion":"push-in|static"}]}
+输出严格 JSON：{"beats":[{"start":秒,"end":秒,"role":"illustrate|prove|locate|emote|define","kind":"footage|photo|screenshot","subject":"一句话画面","mustShow":[],"avoid":[],"queryEn":["2-5 个英文词，以实物名词开头"],"queryZh":["中文名词"],"mustShowEn":["mustShow 的英文名词"],"queryAlt":["同义或上位词"],"present":"broll-full|split|pip|overlay","shotSize":"ECU|CU|MS|WS","motion":"push-in|static"}]}
 每个 beat 1.5-3.5 秒，必须落在对应时间段内；搜索词不要出现 hologram、robot、neon、glowing、全息、机器人、霓虹；不要编造口播里没有的机构或网址，不写 urlHint。`;
 
 const captionsIn = (captions: TimedCaption[], g: { start: number; end: number }): string =>

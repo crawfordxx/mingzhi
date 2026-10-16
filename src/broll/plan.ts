@@ -24,6 +24,10 @@ export const BeatSchema = z.object({
   avoid: list(8, 80),
   queryEn: list(3, 80),
   queryZh: list(3, 80),
+  /** mustShow 对应的英文实物名词（1-2 个词），拼成更具体的检索词；可缺省（老记录、补缺口的节拍） */
+  mustShowEn: list(6, 40).optional(),
+  /** 第一轮没有合格候选时第二轮用的同义词或上位词（更宽泛的叫法）；可缺省 */
+  queryAlt: list(3, 80).optional(),
   /** 模型凭记忆给出的网址（空串、null、非法网址都当作没写），未经核实：编排层必须先联网核实（web_search 或请求确认）才能截图、写入 credits */
   urlHint: z.string().trim().url().regex(/^https?:\/\//).optional().catch(undefined),
   /** 有 urlHint 时程序一律标为 true（模型无法联网，网址只是记忆），下游看到它就要先核实 */
@@ -39,7 +43,7 @@ export interface BeatPlan { beats: Beat[]; dropped: number; coverage: CoverageRe
 const SYSTEM_PROMPT = `你是短视频口播的视觉导演。输入是成片时间轴上的字幕、分镜概要和总时长。请规划「视觉节拍表」：哪几段需要插入什么真实世界画面（B-roll）、去网上搜什么、怎么呈现。节拍表是后续联网找可商用素材（Pexels、Pixabay、Wikimedia Commons、官网截图）的依据。
 
 输出严格的 JSON，不要任何多余文字：
-{"beats":[{"start":秒,"end":秒,"role":"illustrate|prove|locate|emote|define","kind":"footage|photo|screenshot|chart|ui|generated","subject":"一句话描述画面里是什么","mustShow":["必须出现的元素"],"avoid":["不要出现的元素"],"queryEn":["英文搜索词"],"queryZh":["中文搜索词"],"urlHint":"可选，口播明确提到的官网网址","present":"broll-full|split|pip|overlay","shotSize":"ECU|CU|MS|WS","motion":"push-in|pan-left|pan-right|parallax|slowmo|static"}]}
+{"beats":[{"start":秒,"end":秒,"role":"illustrate|prove|locate|emote|define","kind":"footage|photo|screenshot|chart|ui|generated","subject":"一句话描述画面里是什么","mustShow":["必须出现的元素"],"avoid":["不要出现的元素"],"queryEn":["英文搜索词"],"queryZh":["中文搜索词"],"mustShowEn":["mustShow 的英文名词"],"queryAlt":["同义或上位词"],"urlHint":"可选，口播明确提到的官网网址","present":"broll-full|split|pip|overlay","shotSize":"ECU|CU|MS|WS","motion":"push-in|pan-left|pan-right|parallax|slowmo|static"}]}
 
 字段含义：
 - role：illustrate 说明口播讲的东西，prove 给证据，locate 交代地点或机构，emote 制造情绪与呼吸，define 解释定义。
@@ -57,11 +61,11 @@ const SYSTEM_PROMPT = `你是短视频口播的视觉导演。输入是成片时
 3. 景别交替：不要连续两个 beat 用同一个 shotSize；role 也尽量交替。
 4. present 的分布：每 30 秒至少 1 个 broll-full（2 分钟的片至少 4 个），pip 与 overlay 合计每 60 秒至少 1 个（2 分钟至少 2 个），split 不超过全部 beat 的 ${MAX_SPLIT_RATIO * 100}%。按上面「present 怎么选」的内容类型分配，不要全写 split。
 5. 每个 beat 至少 ${MIN_BEAT_SEC} 秒；节奏上大约每 5-6 秒一个 beat（2 分钟的片约 20 个）；broll-full 只能 ${MIN_BEAT_SEC}-${MAX_FULL_SEC} 秒，其他呈现最长 ${MAX_BEAT_SEC} 秒；所有 beat 加起来要达到全片的 ${Math.round(MIN_COVERAGE * 100)}% 以上，开头 3 秒也要有画面。beats 按时间顺序、互不重叠、都在 0 到总时长之内；开始与结束尽量对齐字幕边界。
-6. queryEn 和 queryZh 各 1-3 个（chart、ui 可以留空数组）：queryEn 用于 Pexels、Pixabay、Wikimedia，写成图库里真有人拍的画面（主体 + 动作/场景，3-6 个英文词）；queryZh 用于中文检索，写具体名词。不要在搜索词里写口播抽象词，也不要出现 hologram、robot、neon、glowing、全息、机器人、霓虹。
+6. queryEn 和 queryZh 各 1-3 个（chart、ui 可以留空数组）：queryEn 用于 Pexels、Pixabay、Openverse、Wikimedia，写成图库里真有人拍的画面，以 mustShow 里的实物名词开头（实物 + 动作/场景，2-5 个英文词，如 "notebook checklist pen" 而不是 "crossing out task"）；queryZh 用于中文检索，写具体名词。mustShowEn 把 mustShow 逐个译成英文实物名词（1-2 个词，如 "curtains"、"coffee table"）。queryAlt 1-3 个，给第一轮搜不到时用的同义词或上位词（"smartphone" → "mobile phone"、"phone"；"to-do list" → "checklist"、"notebook"）。不要在搜索词里写口播抽象词，也不要出现 hologram、robot、neon、glowing、全息、机器人、霓虹。
 7. avoid 写这个画面不要出现的东西，默认包含：${DEFAULT_AVOID.join('、')}，再按具体画面补充（如不可识别的人脸特写、带品牌 Logo 的画面）。
 8. 口播里的机构、社区、产品、岗位名，想要真实页面就用 screenshot，把名字写进 queryZh，由程序联网去找页面。urlHint 只有口播里明确提到该机构或产品、且你确定它的官网时才写，否则一律留空；你没有联网能力，不要凭记忆补口播里没出现的机构网址。口播里的数字或对比用 chart，不要用实拍硬凑。
 9. 不要编造口播里没有的数字、机构或网址。
-10. 放在哪：broll-full、pip、overlay 放在分镜概要里标「人物」的时间段（人物全屏、没有卡片）；与 hook、cta、photo、browser 卡片重叠的时间段不要放 beat（它们自带画面）；与其他卡片重叠的 beat 只会作为该卡片上半屏的背景图，present 写 split。`;
+10. 放在哪：broll-full、pip、overlay 放在分镜概要里标「人物」的时间段（人物全屏、没有卡片）；落在「人物」或还没有图的 photo 卡上的 split 节拍，程序会按素材方向与时长改成全屏插入或画中画（图片卡由节拍素材替换）；与 hook、cta、browser 卡片重叠的时间段不要放 beat（它们自带画面）；与其他卡片重叠的 beat 只会作为该卡片上半屏的背景图，present 写 split。`;
 
 const formatCaptions = (captions: TimedCaption[]): string =>
   captions.map((c) => `[${c.start.toFixed(2)}-${c.end.toFixed(2)}] ${c.text}`).join('\n');

@@ -7,9 +7,9 @@ import type { LlmClient } from '../llm/kexiang.js';
 import type { BrollBudget } from './budget.js';
 import { EST_YUAN } from './budget.js';
 import { readAssetMeta, writeAssetMeta, type AssetMeta } from './credit-store.js';
-import { planCrop, type Point, type Size } from './crop.js';
+import { planCrop, type Cover, type Point, type Size } from './crop.js';
 import { fetchOriginal } from './fetch-original.js';
-import { TARGETS } from './gather.js';
+import { coverFor, TARGETS } from './gather.js';
 import type { Beat } from './plan.js';
 import { processAsset, UnusableAssetError, type ProcessContext, type ProcessInput, type ProcessResult } from './process.js';
 import { chooseUnique, locateFocal, stillHasher, type CandidateScore, type PickedState } from './select.js';
@@ -74,8 +74,8 @@ async function focalOf(env: BeatEnv, c: Candidate, file: string): Promise<Point>
 }
 
 /** 源画面里的主体位置换算到加工后画面里（裁切后主体不一定在原比例位置） */
-export function mapFocal(src: Size, focal: Point, target: Size): Point {
-  const { crop } = planCrop(src, focal, target);
+export function mapFocal(src: Size, focal: Point, target: Size, cover?: Cover): Point {
+  const { crop } = planCrop(src, focal, target, cover);
   const clamp = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 1000) / 1000;
   return { x: clamp((focal.x * src.width - crop.x) / crop.width), y: clamp((focal.y * src.height - crop.y) / crop.height) };
 }
@@ -99,13 +99,14 @@ export async function realizeCandidate(env: BeatEnv, beat: Beat, c: Candidate, h
   const focal = await focalOf(env, c, raw.file);
   const target = TARGETS[beat.present];
   const wantSec = Math.min(4, Math.max(2, beat.end - beat.start));
-  const input: ProcessInput = { file: raw.file, kind: c.kind, focal, target, wantSec, ...(c.fps ? { fps: c.fps } : {}), ...(c.durationSec ? { durationSec: c.durationSec } : {}) };
+  const cover = coverFor(beat.present, raw.size);
+  const input: ProcessInput = { file: raw.file, kind: c.kind, focal, target, wantSec, cover, ...(c.fps ? { fps: c.fps } : {}), ...(c.durationSec ? { durationSec: c.durationSec } : {}) };
   const ctx: ProcessContext = { ffmpeg: env.ffmpeg, lut: env.lut, ...(env.whiteBalance ? { whiteBalance: env.whiteBalance } : {}) };
   const done = await (env.process ?? processAsset)(input, join(env.workDir, file), ctx);
   const outTarget = done.downgrade === 'split' ? { width: target.width, height: target.height / 2 } : target;
   const meta: AssetMeta = {
     credit: creditOf(c, beat, file, done.modified), candidateId: c.id, kind: c.kind,
-    focal: done.downgrade === 'pip' ? focal : mapFocal(raw.size, focal, outTarget),
+    focal: done.downgrade === 'pip' ? focal : mapFocal(raw.size, focal, outTarget, done.downgrade === 'split' ? { full: cover.split, split: cover.split } : cover),
     ...(done.durationSec ? { durationSec: done.durationSec } : {}), ...(done.downgrade ? { downgrade: done.downgrade } : {}), ...hex(hash),
   };
   writeAssetMeta(env.workDir, file, meta);
