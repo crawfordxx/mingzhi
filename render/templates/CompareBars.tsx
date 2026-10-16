@@ -84,14 +84,18 @@ const Verdict: React.FC<{ text: string; p: number }> = ({ text, p }) => (
   </Reveal>
 );
 
+/** 估算内容高度（不含纸面白卡的上下内边距 80）：面包屑 + 各条目 + 结论 */
+export const estimateCompareHeight = (props: PropsOf<'compareBars'>): number =>
+  (props.crumb ? 76 : 0) + props.items.length * ITEM_H + (props.items.length - 1) * ITEM_GAP + (props.verdict ? 128 : 0);
+
 /** 对比条卡：每项一张卡（小瓶 + 名称 + 注释 + 进度条），可选结论按钮；纸面上整组放进撑满卡片区的白卡，条目拉高均分。
  * 有 reveal 时各项卡片先全部就位，柱条随口播逐条长出，正在讲的那项亮、其余略淡，最后出结论 */
-export const CompareBars: React.FC<TemplateProps<'compareBars'>> = ({ props, local }) => {
+export const CompareBars: React.FC<TemplateProps<'compareBars'>> = ({ props, local, dur }) => {
   const { fps } = useVideoConfig();
   const paper = React.useContext(SurfaceContext) === 'paper';
   const n = props.items.length;
-  const est = (props.crumb ? 76 : 0) + n * ITEM_H + (n - 1) * ITEM_GAP + (props.verdict ? 128 : 0) + (paper ? 80 : 0);
-  const times = itemTimes(props.reveal, n, (i) => 0.2 + i * 0.25);
+  const est = estimateCompareHeight(props) + (paper ? 80 : 0);
+  const times = itemTimes(props.reveal, n, (i) => 0.2 + i * 0.25, dur);
   const evolving = props.reveal?.length === n;
   const lit = evolving ? litIndex(times, local) : -1;
   const body = (

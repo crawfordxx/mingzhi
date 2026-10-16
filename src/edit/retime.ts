@@ -3,6 +3,7 @@ import { fallbackLines, type TimedCaption, timeCaptions } from '../captions/line
 import { mapToOutput, type EditPlan as CutPlan, type TimeRange } from '../cut/plan.js';
 import type { Storyboard } from '../storyboard/schema.js';
 import { canonicalize } from './layout-rules.js';
+import { scaleReveal } from '../storyboard/reveal.js';
 import { outputToSource } from './spans.js';
 
 const round = (n: number): number => Math.round(n * 1000) / 1000;
@@ -91,13 +92,13 @@ export function remapStoryboard(oldPlan: CutPlan, newPlan: CutPlan, storyboard: 
   if (!(newPlan.outputDurationSec > 0)) throw new Error('剪辑后成片长度为 0，无法平移分镜');
   const moved = storyboard.shots.flatMap((s) => {
     const r = remapRange(oldPlan.keep, newPlan.keep, s.start, s.end);
-    return r ? [{ ...s, start: r.start, end: r.end }] : [];
+    return r ? [{ ...s, start: r.start, end: r.end, oldDur: s.end - s.start }] : [];
   }).sort((a, b) => a.start - b.start);
   if (moved.length === 0) return canonicalize({ ...storyboard, shots: [{ start: 0, end: newPlan.outputDurationSec, layout: 'full' }] }).storyboard;
-  const joined = moved.map((s, i) => ({
-    ...s,
-    start: i === 0 ? 0 : s.start,
-    end: i === moved.length - 1 ? newPlan.outputDurationSec : moved[i + 1].start,
-  }));
+  // 镜头伸缩后 reveal（镜头内秒数）同比缩放，再由归一化按新时长校验
+  const joined = moved.map(({ oldDur, ...s }, i) => {
+    const next = { ...s, start: i === 0 ? 0 : s.start, end: i === moved.length - 1 ? newPlan.outputDurationSec : moved[i + 1].start };
+    return scaleReveal(next, oldDur > 0 ? (next.end - next.start) / oldDur : 1);
+  });
   return canonicalize({ ...storyboard, shots: joined }).storyboard;
 }

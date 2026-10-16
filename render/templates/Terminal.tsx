@@ -13,7 +13,9 @@ const SLACK = 0.02;
 /** 时间再紧也至少留这么久给打字（秒） */
 const MIN_TYPE_SEC = 0.3;
 
-const WIN_H = 660;
+/** 终端窗口高度（空白率估算也用到） */
+export const TERMINAL_WIN_H = 660;
+const WIN_H = TERMINAL_WIN_H;
 const PAD_X = 40;
 const BODY_W = CONTENT_W - PAD_X * 2;
 const HEADER_H = 92;

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Easing, interpolate, spring } from 'remotion';
 import type { CardSpec, TemplateId } from '../../src/storyboard/schema.js';
+import { REVEAL_TAIL_SEC } from '../../src/storyboard/reveal.js';
 import { THEME } from '../theme.js';
 
 /** 某个模板的 props 类型 */
@@ -157,9 +158,15 @@ export const clampLines = (lines: number): React.CSSProperties => ({ display: '-
 
 // ---------- 持续演进 ----------
 
-/** 条目出现的时刻（镜头内秒数）：reveal 条数对得上就按它（随字幕逐条出现），否则按模板默认节奏 */
-export function itemTimes(reveal: readonly number[] | undefined, n: number, fallback: (i: number) => number): number[] {
-  return reveal && reveal.length === n ? [...reveal] : Array.from({ length: n }, (_, i) => fallback(i));
+/**
+ * 条目出现的时刻（镜头内秒数）：reveal 条数对得上且都在 [0, dur − REVEAL_TAIL_SEC] 里就按它（随字幕逐条出现）；
+ * 条数对但越界（如镜头被截短）时在镜头内均匀重排；条数不对按模板默认节奏
+ */
+export function itemTimes(reveal: readonly number[] | undefined, n: number, fallback: (i: number) => number, dur: number): number[] {
+  if (!reveal || reveal.length !== n) return Array.from({ length: n }, (_, i) => fallback(i));
+  const hi = Math.max(0, dur - REVEAL_TAIL_SEC);
+  if (reveal.every((t) => t >= 0 && t <= hi + 1e-6)) return [...reveal];
+  return Array.from({ length: n }, (_, i) => (n > 1 ? (i * hi) / (n - 1) : 0));
 }
 
 /** 当前点亮的条目：已出现的最后一条（都没出现时为 -1） */

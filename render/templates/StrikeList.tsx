@@ -56,17 +56,17 @@ const Item: React.FC<{ text: string; p: number; strike: number; pending: boolean
   );
 };
 
-/** 估算卡片高度：面包屑 + 各项胶囊 + 卡片上下内边距 */
-const estimate = (n: number, title: boolean): number => 96 + (title ? 70 : 0) + n * PILL_H + (n - 1) * GAP;
+/** 估算卡片高度：面包屑 + 各项胶囊 + 卡片上下内边距 96 */
+export const estimateStrikeHeight = (n: number, title: boolean): number => 96 + (title ? 70 : 0) + n * PILL_H + (n - 1) * GAP;
 
 /** 划掉清单：白卡里竖排胶囊依次出现并被红线划掉；title 作面包屑；有 reveal 时随口播逐项出现、划掉 */
 export const StrikeList: React.FC<TemplateProps<'strikeList'>> = ({ props, local, dur }) => {
   const { fps } = useVideoConfig();
   const fallback = strikeStarts(props.items.length, dur);
-  const starts = itemTimes(props.reveal, props.items.length, (i) => fallback[i]);
+  const starts = itemTimes(props.reveal, props.items.length, (i) => fallback[i], dur);
   const evolving = props.reveal?.length === props.items.length;
   return (
-    <SafeArea scale={fitScale(estimate(props.items.length, Boolean(props.title)))}>
+    <SafeArea scale={fitScale(estimateStrikeHeight(props.items.length, Boolean(props.title)))}>
       <CardFrame fill padding={`48px ${FRAME_PAD_X}px`}>
         {props.title ? <Reveal p={springAt(local, 0, fps)} dy={12} style={{ marginBottom: 30, marginLeft: 8 }}><Crumb text={props.title} size={30} /></Reveal> : null}
         <div style={{ display: 'flex', flexDirection: 'column', gap: GAP }}>

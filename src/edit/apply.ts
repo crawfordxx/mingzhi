@@ -8,6 +8,7 @@ import { CardSpecSchema, MOODS, type CardSpec, type Layout, type Shot, type Stor
 import type { SpaceSettings } from '../workspace/store.js';
 import { captionTooLong, cardHiddenIn, checkCard, layoutBlocker } from './check.js';
 import { canonicalize, layoutProblem } from './layout-rules.js';
+import { revealToLocal } from '../storyboard/reveal.js';
 import { VISUAL_SOURCES, type EditOp } from './ops.js';
 import { addRange, outputToSource, subtractRange } from './spans.js';
 
@@ -103,13 +104,15 @@ function cardLayout(layout: Layout, template: CardSpec['template'], i: number): 
   return layout === 'full' ? 'split' : layout;
 }
 
-function replaceCard(state: VersionState, i: number, card: CardSpec): VersionState {
+/** 换卡片；fromModel 时（对话里模型给的新卡）reveal 按目标镜头从成片秒数换算成镜头内秒数，沿用原卡片时不换算 */
+function replaceCard(state: VersionState, i: number, card: CardSpec, fromModel = true): VersionState {
   const parsed = CardSpecSchema.safeParse(card);
   if (!parsed.success) throw new Error(`新卡片不符合模板要求：${parsed.error.issues[0].path.join('.') || card.template}`);
   const bad = checkCard(parsed.data);
   if (bad) throw new Error(bad);
   const shot = shotAt(state, i);
-  return guardLayout(state, withShot(state, i, { ...shot, card: parsed.data, layout: cardLayout(shot.layout, parsed.data.template, i) }));
+  const placed: Shot = { ...shot, card: parsed.data, layout: cardLayout(shot.layout, parsed.data.template, i) };
+  return guardLayout(state, withShot(state, i, fromModel ? revealToLocal([placed])[0] : placed));
 }
 
 /** 改版式（约束见 layoutBlocker）：分屏、浮层保留卡片；全屏只保留 cta；全屏插入与画中画看不见卡片，一并去掉；素材字段始终保留 */
@@ -127,7 +130,7 @@ function regenerateVisual(state: VersionState, i: number, visual: Visual): Versi
   if (!card) throw new Error(`第 ${i} 个镜头没有卡片，无法换素材`);
   if (!VISUAL_SOURCES[card.template]?.includes(visual.source)) throw new Error(`「${card.template}」卡片不支持这种素材（${visual.source}）`);
   const props = Object.fromEntries(Object.entries(card.props).filter(([k]) => k !== 'image' && k !== 'video'));
-  return replaceCard(state, i, { template: card.template, props: { ...props, visual } } as CardSpec);
+  return replaceCard(state, i, { template: card.template, props: { ...props, visual } } as CardSpec, false);
 }
 
 function editCaption(state: VersionState, index: number, text: string): VersionState {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, Easing, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { shotAt, visualLayout } from '../../src/compose/layout.js';
-import { cardCarry, drawsCard } from '../../src/compose/card-carry.js';
+import { cardCarry, cardLead, drawsCard } from '../../src/compose/card-carry.js';
 import type { Broll, CardSpec, Shot } from '../../src/storyboard/schema.js';
 import { CANVAS } from '../../src/storyboard/schema.js';
 import { THEME } from '../theme.js';
@@ -24,7 +24,7 @@ export const exitEase = (t: number): number => interpolate(t, [0, 1], [0, 1], { 
 type Motion = { enter: 'spring' | 'settle'; exit: number };
 
 /** 卡片进出场：exit 为退场进度（0 未退场 → 1 完全退出） */
-const CardMotion: React.FC<{ card: CardSpec; local: number; dur: number; motion: Motion }> = ({ card, local, dur, motion }) => {
+const CardMotion: React.FC<{ card: CardSpec; local: number; dur: number; motion: Motion; lead?: number }> = ({ card, local, dur, motion, lead = 0 }) => {
   const { fps } = useVideoConfig();
   const s = spring({ frame: Math.round(local * fps), fps, config: { damping: 16, mass: 0.7 } });
   const settle = motion.enter === 'settle';
@@ -37,7 +37,7 @@ const CardMotion: React.FC<{ card: CardSpec; local: number; dur: number; motion:
       : `translateY(${interpolate(s, [0, 1], [ENTER_DY, 0]) - e * EXIT_DY}px) scale(${interpolate(s, [0, 1], [ENTER_SCALE, 1]) - e * EXIT_SCALE})`,
     filter: e > 0 ? `blur(${(e * EXIT_BLUR).toFixed(2)}px)` : undefined,
   };
-  return <div style={style}>{renderCard(card, local, dur)}</div>;
+  return <div style={style}>{renderCard(card, local + lead, dur + lead)}</div>;
 };
 
 /** 分屏上半屏素材图的压暗：顶部轻压给状态栏，下部渐暗托住贴底排的卡片信息与压在分界线上的字幕 */
@@ -55,8 +55,8 @@ const FADE_IN_SEC = 0.1;
 const FLOAT_MEDIA = { w: 720, h: 405, bottom: 1290, radius: 32 } as const;
 const SEAM_BOX: React.CSSProperties = { position: 'absolute', left: 0, top: 0, width: CANVAS.width, height: CANVAS.seam, overflow: 'hidden' };
 
-/** 一个镜头在卡片层上的画法参数：local/dur 为镜头内时间，motion 为进出场 */
-type Part = { shot: Shot; local: number; dur: number; motion: Motion };
+/** 一个镜头在卡片层上的画法参数：local/dur 为镜头内时间，motion 为进出场，lead 为卡片内部时钟的提前量（见 cardLead） */
+type Part = { shot: Shot; local: number; dur: number; motion: Motion; lead?: number };
 
 /** 分屏的底：有素材时素材铺满 + 渐变压暗，否则米色底 + 模板固定底（钩子黑底、图片） */
 const SplitBase: React.FC<Part> = ({ shot, local, dur }) => (
@@ -66,10 +66,10 @@ const SplitBase: React.FC<Part> = ({ shot, local, dur }) => (
 );
 
 /** 分屏的卡片：有素材时贴底排在图上（白卡变玻璃） */
-const SplitContent: React.FC<Part> = ({ shot, local, dur, motion }) => (
+const SplitContent: React.FC<Part> = ({ shot, local, dur, motion, lead }) => (
   <div style={SEAM_BOX}>
     <SurfaceContext.Provider value={shot.broll ? 'image' : 'paper'}>
-      {shot.card ? <CardMotion card={shot.card} local={local} dur={dur} motion={motion} /> : null}
+      {shot.card ? <CardMotion card={shot.card} local={local} dur={dur} motion={motion} lead={lead} /> : null}
     </SurfaceContext.Provider>
   </div>
 );
@@ -115,7 +115,7 @@ const WholeShot: React.FC<Part> = (p) => {
   return layout === 'full' && p.shot.card?.template === 'cta' ? <FullCta {...p} /> : null;
 };
 
-const partOf = (shots: Shot[], index: number, sec: number, motion: Motion): Part => ({ shot: shots[index], local: sec - shots[index].start, dur: shots[index].end - shots[index].start, motion });
+const partOf = (shots: Shot[], index: number, sec: number, motion: Motion): Part => ({ shot: shots[index], local: sec - shots[index].start, dur: shots[index].end - shots[index].start, motion, lead: cardLead(shots, index) });
 
 /**
  * 卡片层（shots 为画面时间轴）：分屏画上半屏；浮层画顶部浮卡；全屏只叠加 cta；全屏插入与画中画不画卡片（素材层负责）。
@@ -128,8 +128,7 @@ export const CardLayer: React.FC<{ shots: Shot[]; sec: number }> = ({ shots, sec
   const cur = partOf(shots, hit.index, sec, { enter: hit.index === 0 ? 'settle' : 'spring', exit: 0 });
   if (!carry) {
     if (!drawsCard(hit.shot)) return null;
-    const fresh = hit.index > 0 && visualLayout(hit.shot) === 'split' && !drawsCard(shots[hit.index - 1]);
-    if (!fresh) return <WholeShot {...cur} />;
+    if (!cur.lead) return <WholeShot {...cur} />;
     return <div style={{ position: 'absolute', inset: 0, opacity: exitEase(cur.local / FADE_IN_SEC) }}><WholeShot {...cur} motion={{ enter: 'settle', exit: 0 }} /></div>;
   }
   const e = exitEase(carry.t);

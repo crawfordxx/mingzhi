@@ -1,7 +1,9 @@
 // 分镜规则：模板不连用超过 2 个、evidenceList ≤ 20% 时长、2 分钟内 ≥ 4 种呈现模式、徽章语义；持续演进 reveal 的换算与按字幕补齐
 import { describe, expect, it } from 'vitest';
 import { applyStoryboardRules, evidenceRatio, fixBadges, hasEvidence, longestRun, modeWindows, shotMode, storyboardIssues } from '../src/storyboard/rules.js';
-import { fillReveal, revealToLocal } from '../src/storyboard/reveal.js';
+import { fillReveal, fitRevealToShots, revealToLocal, scaleReveal } from '../src/storyboard/reveal.js';
+import { applyOps } from '../src/edit/apply.js';
+import { makeState } from './helpers/edit-state.js';
 import { normalizeStoryboard } from '../src/storyboard/normalize.js';
 import type { CardSpec, Shot } from '../src/storyboard/schema.js';
 
@@ -41,8 +43,9 @@ const TRY2: Shot[] = [
 
 describe('徽章语义', () => {
   it('有数字、比例或明确出处才算证据', () => {
-    for (const t of ['仅允许改动 3-5 次', 'Neal B 等 (2021) · NEJM', '死亡概率高约两成', '出自《高性价比人生指南》', '随机试验，近 30 万人']) expect(hasEvidence(t)).toBe(true);
-    for (const t of ['都是乙方身份', 'AI技术仍在快速变化', '企业流程、数据和人才跟不上', '每个环节严格依赖前序环节']) expect(hasEvidence(t)).toBe(false);
+    for (const t of ['仅允许改动 3-5 次', 'Neal B 等 (2021) · NEJM', '死亡概率高约两成', '出自《高性价比人生指南》', '随机试验，近 30 万人', '效率提升 35%', '据统计局数据显示']) expect(hasEvidence(t)).toBe(true);
+    // 普通词与不带单位的计数不算证据
+    for (const t of ['都是乙方身份', 'AI技术仍在快速变化', '企业流程、数据和人才跟不上', '每个环节严格依赖前序环节', '我们研究了一下', 'FDE 3 个特征', '官方说法很模糊', '这份报告很长']) expect(hasEvidence(t)).toBe(false);
   });
   it('「证据」「来源」用在普通观点上改成「要点」；成本、收益与带数据的行不动；其他模板原样返回', () => {
     const fixed = fixBadges(ev('t', [{ badge: '证据', text: '都是乙方身份' }, { badge: '来源', text: 'AI技术仍在快速变化' }, { badge: '证据', text: '随机试验 20995 人' }, { badge: '成本', text: '贵几元' }]));
@@ -135,10 +138,27 @@ describe('normalizeStoryboard 接入规则', () => {
 
 describe('reveal', () => {
   const rows: Row[] = [{ badge: '成本', text: '一' }, { badge: '收益', text: '二' }, { badge: '成本', text: '三' }];
-  it('revealToLocal：夹进 [0, 镜头时长 − 0.5]、单调不减；全挤在开头的去掉', () => {
-    const [a, b] = revealToLocal([split(10, 14, ev('a', rows, { reveal: [9, 12, 20] })), split(14, 18, ev('b', rows, { reveal: [14, 14.1, 14.2] }))]);
-    expect(a.card?.props).toMatchObject({ reveal: [0, 2, 3.5] });
-    expect(b.card?.props).not.toHaveProperty('reveal');
+  it('revealToLocal：成片秒数减去镜头起点；已是镜头内秒数的原样；越界的在镜头内均匀重排；挤在一起的错开 0.25 秒；镜头太短放不下的去掉', () => {
+    const out = revealToLocal([
+      split(10, 14, ev('a', rows, { reveal: [10.5, 12, 13] })),
+      split(10, 14, ev('b', rows, { reveal: [0, 1.5, 3] })),
+      split(10, 14, ev('c', rows, { reveal: [9, 12, 20] })),
+      split(14, 18, ev('d', rows, { reveal: [14, 14.1, 14.2] })),
+      split(14, 14.8, ev('e', rows, { reveal: [14, 14.2, 14.4] })),
+    ]);
+    expect(out.map((s) => (s.card?.props as { reveal?: number[] }).reveal)).toEqual([[0.5, 2, 3], [0, 1.5, 3], [0, 1.75, 3.5], [0, 0.25, 0.5], undefined]);
+  });
+  it('fitRevealToShots / scaleReveal：剪辑平移后同比缩放；越界的按新时长均匀重排；合格的不动（同一对象）', () => {
+    const ok = split(0, 6, ev('a', rows, { reveal: [0, 2, 4] }));
+    const [same, over] = fitRevealToShots([ok, split(0, 3, ev('b', rows, { reveal: [0, 2, 5] }))]);
+    expect(same).toBe(ok);
+    expect(over.card?.props).toMatchObject({ reveal: [0, 1.25, 2.5] });
+    expect(scaleReveal(ok, 0.5).card?.props).toMatchObject({ reveal: [0, 1, 2] });
+  });
+  it('对话换卡（replaceCard）：模型按字幕给的成片秒数换算成镜头内秒数；换素材沿用原卡不换算', () => {
+    const card = ev('换上的清单', rows, { reveal: [7.2, 8, 9] });
+    const next = applyOps(makeState(), [{ type: 'replaceCard', shotIndex: 2, card }]);
+    expect(next.storyboard.shots[2].card?.props).toMatchObject({ reveal: [0.2, 1, 2] });
   });
   it('fillReveal：没写 reveal 的列表/对比/流程卡按镜头内字幕起点逐条出现；只有 1 句字幕或已写的不动', () => {
     const caps = [{ start: 10, end: 12, text: 'x' }, { start: 12, end: 14, text: 'y' }, { start: 14, end: 16, text: 'z' }, { start: 16, end: 20, text: 'w' }];

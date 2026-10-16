@@ -1,7 +1,8 @@
 /**
  * 分镜多样性规则（审片报告第 6 节第 4 条）：同一模板连续 ≤ 2 个镜头（钩子除外）；evidenceList 合计 ≤ 20% 时长；
  * 任意 2 分钟内 ≥ 4 种呈现模式；「证据」「来源」徽章只给带数据或出处的行。
- * storyboardIssues 只检查不修改（供重试提示与整片自检）；applyStoryboardRules 按规则修正并列出修了什么（不改时间轴）
+ * storyboardIssues 只检查不修改（供重试提示与整片自检）；applyStoryboardRules 按规则修正并列出修了什么（不改时间轴）。
+ * 只在模型生成分镜时套用（normalize 的 fromModel）；对话编辑（canonicalize）有意不套，用户点名要的卡片不被规则改掉
  */
 import { HOOK_WINDOW_SEC, type CardSpec, type Shot, type TemplateId } from './schema.js';
 import { visualLayout } from '../compose/layout.js';
@@ -20,12 +21,15 @@ const GRAPHIC: readonly TemplateId[] = ['bigNumber', 'compareBars', 'flow'];
 /** 能改成浮层的紧凑卡（浮层卡压在人物头顶，内容长的卡会遮脸） */
 const FLOATABLE: readonly TemplateId[] = ['title', 'bigNumber', 'chips'];
 
-const DIGIT = /[0-9０-９]|[一二两三四五六七八九十百千万亿几半]+\s*(成|倍|%|％|个百分点)/;
-const SOURCE = /《[^》]+》|来源|出自|报告|论文|研究|调查|统计|期刊|官网|官方|白皮书|DOI|https?:|www\.|\.com|\.org|大学|研究院|年报|财报|试验|实验|GitHub/i;
+/** 带单位的数据：数字后跟单位、量词或百分号（「3 个特征」这种计数不算）；数字本身能在口播里核对（生成时卡片数字已经过 facts.ts 核对，找不到的已删） */
+const DATA = /[0-9０-９][0-9０-９.,]*\s*(%|％|倍|成|万|亿|千|百|元|块|美元|次|人|位|名|家|年|个月|月|周|天|小时|分钟|秒|项|篇|条|星|分|度|公里|米|克|GB|MB|TB|[kK]\b)/;
+const RATIO = /[一二两三四五六七八九十几半]+\s*(成|倍|个百分点)/;
+/** 明确出处：书名号、网址、DOI、年份、「据…显示/统计」「出自/来自…」、机构与期刊名（「研究」「报告」「官方」这类普通词不算） */
+const SOURCE = /《[^》]+》|https?:\/\/|www\.|\.(com|org|cn|io|net)\b|\bDOI\b|arXiv|(19|20)\d{2}|据[^，。]{1,12}(显示|统计|报道|发布)|(出自|来自)[^，。]{2,}|大学|研究院|研究所|协会|委员会|统计局|白皮书|年报|财报|期刊|NEJM|Nature|Science|Lancet|GitHub/i;
 
-/** 文字里有数据（数字、成数、倍数、百分比）或明确出处 */
+/** 文字里有带单位的数据（数字、成数、倍数、百分比）或明确出处 */
 export function hasEvidence(text: string): boolean {
-  return DIGIT.test(text) || SOURCE.test(text);
+  return DATA.test(text) || RATIO.test(text) || SOURCE.test(text);
 }
 
 const needsEvidence = (badge: string): boolean => badge === '证据' || badge === '来源';

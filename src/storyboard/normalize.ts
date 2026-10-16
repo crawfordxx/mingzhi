@@ -2,7 +2,7 @@ import type { Mood } from '../assets/catalog.js';
 import { unifyListNumbering } from './numbering.js';
 import { visualLayout } from '../compose/layout.js';
 import { applyStoryboardRules } from './rules.js';
-import { revealToLocal } from './reveal.js';
+import { fitRevealToShots, revealToLocal } from './reveal.js';
 import { CANVAS, CoverTitleSchema, DEFAULT_MOOD, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, MOODS, ShotSchema, type CardSpec, type CoverTitle, type Shot, type Storyboard } from './schema.js';
 
 export interface NormalizeResult {
@@ -241,7 +241,7 @@ function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle'> {
 
 /**
  * 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜；同一组列表卡的编号统一（要么都编号要么都不编号）。
- * fromModel：输入是模型刚给的分镜时，再按多样性规则修正（rules.ts），reveal 从成片秒数换算成镜头内秒数；已归一化的分镜再整理时不要传
+ * fromModel：输入是模型刚给的分镜时，再按多样性规则修正（rules.ts），reveal 从成片秒数换算成镜头内秒数；已归一化的分镜再整理时不要传（reveal 已是镜头内秒数，只按镜头时长再校验）
  */
 export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[], opts: { fromModel?: boolean } = {}): NormalizeResult {
   if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error(`分镜归一化失败：片长无效（${durationSec}）`);
@@ -257,7 +257,7 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
   const placedRules = applyPlacementRules(mergeShort(fillGaps(capped, durationSec)));
   const ruled = opts.fromModel ? applyStoryboardRules(placedRules, durationSec) : { shots: placedRules, fixes: [] };
   const snapped = unifyListNumbering(snapToFrames(ensureCtaRoom(mergePlain(ruled.shots)), durationSec));
-  const shots = opts.fromModel ? revealToLocal(snapped) : snapped;
+  const shots = opts.fromModel ? revealToLocal(snapped) : fitRevealToShots(snapped);
 
   return {
     storyboard: { shots, ...extras },

@@ -31,6 +31,7 @@ const ROW_STAGGER = 0.07;
 /** 还没出现的行：虚线占位（持续演进时提示后面还有内容，版面也不跳） */
 const PENDING = '2.5px dashed #E2DDD4';
 
+const evidenceTitlePx = (title: string): number => fitFontSize(title, INNER_W, TITLE_PX, 38, 3);
 const rowPx = (text: string, rows: number): number => fitFontSize(text, TEXT_W, textPxFor(rows), TEXT_MIN_PX, 2);
 
 /** 一行：左侧彩色标签 + 右侧文字；点亮的行铺一层同色浅底（从左往右刷开）；pending 时先画虚线占位 */
@@ -67,8 +68,8 @@ function rowHeight(text: string, padY: number, rows: number): number {
   return Math.max(BADGE_H, lines * px * TEXT_LINE_H) + padY * 2;
 }
 
-/** 估算卡片高度，超出安全区时整体缩小 */
-function estimateHeight(props: PropsOf<'evidenceList'>, titlePx: number): number {
+/** 估算卡片高度（含卡片上下内边距 88），超出安全区时整体缩小；空白率估算也用它 */
+export function estimateEvidenceHeight(props: PropsOf<'evidenceList'>, titlePx = evidenceTitlePx(props.title)): number {
   const titleLines = Math.min(3, lineCount(props.title, INNER_W * EST_WIDTH, titlePx));
   const padY = rowPadY(props.rows.length);
   const rows = props.rows.reduce((h, r) => h + rowHeight(r.text, padY, props.rows.length), 0);
@@ -82,15 +83,15 @@ function hotRows(props: PropsOf<'evidenceList'>, times: number[], local: number)
 }
 
 /** 证据列表卡：面包屑 + 标题 + 成本/收益/证据/来源/要点 行 + 底部来源标签；有 reveal 时随口播逐行出现并点亮当前行 */
-export const EvidenceList: React.FC<TemplateProps<'evidenceList'>> = ({ props, local }) => {
+export const EvidenceList: React.FC<TemplateProps<'evidenceList'>> = ({ props, local, dur }) => {
   const { fps } = useVideoConfig();
-  const titlePx = fitFontSize(props.title, INNER_W, TITLE_PX, 38, 3);
-  const times = itemTimes(props.reveal, props.rows.length, (i) => ROW_START + i * ROW_STAGGER);
+  const titlePx = evidenceTitlePx(props.title);
+  const times = itemTimes(props.reveal, props.rows.length, (i) => ROW_START + i * ROW_STAGGER, dur);
   const hot = hotRows(props, times, local);
   const evolving = props.reveal?.length === props.rows.length;
   const rowsDone = Math.max(...times) + 0.12;
   return (
-    <SafeArea scale={fitScale(estimateHeight(props, titlePx))}>
+    <SafeArea scale={fitScale(estimateEvidenceHeight(props, titlePx))}>
       <CardFrame fill padding={`44px ${PAD_X}px 48px`}>
         <Reveal p={springAt(local, 0.05, fps)} dy={18}>
           {props.crumb ? <Crumb text={props.crumb} size={28} maxWidth={INNER_W} /> : null}

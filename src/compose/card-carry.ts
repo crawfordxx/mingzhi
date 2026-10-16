@@ -26,3 +26,16 @@ export function cardCarry(shots: Shot[], sec: number): { index: number; t: numbe
   if (t >= 1 - 1e-9 || layout === 'broll' || layout === 'pip' || !drawsCard(prev)) return null;
   return { index: hit.index - 1, t: Math.max(0, t) };
 }
+
+/**
+ * 从没有卡片的镜头（人物全屏等）切进分屏时，卡片内部时钟提前这么多秒：第 0 帧标题与首行已就位，不是先出一张空白卡再长内容。
+ * 卡片内部动作（逐条出现、勾选、计数等）因此比镜头内秒数早 FRESH_LEAD_SEC；音效计划对这些镜头的内部触发点应同样提前（cardLead）
+ */
+export const FRESH_LEAD_SEC = 0.4;
+
+/** 第 index 个镜头卡片内部时钟的提前量（秒）：从无卡镜头切进分屏为 FRESH_LEAD_SEC，其余为 0。shots 为画面时间轴 */
+export function cardLead(shots: Shot[], index: number): number {
+  const shot = shots[index];
+  const prev = shots[index - 1];
+  return shot && prev && visualLayout(shot) === 'split' && !drawsCard(prev) ? FRESH_LEAD_SEC : 0;
+}

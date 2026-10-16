@@ -17,8 +17,10 @@ const FIRST = 0.15;
 const STAGGER = 0.4;
 const DRAW_SEC = 0.35;
 const ACCENT = THEME.crumbDot;
+/** 未点亮的步骤：圆环浅灰，序号与文字用中灰（白底对比 ≥ 4.5，未讲到也看得清），点亮靠实心圆与深色字区分 */
 const IDLE = '#D9D4CB';
-const IDLE_INK = '#A39E94';
+export const FLOW_IDLE_INK = '#6E6962';
+const IDLE_INK = FLOW_IDLE_INK;
 
 /** 步骤标签基准字号：步数少时更大 */
 const labelBase = (n: number): number => (n <= 3 ? 52 : n === 4 ? 44 : 38);
@@ -37,7 +39,7 @@ const StepNode: React.FC<{ step: Step; i: number; n: number; lit: number; curren
         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 50, fontWeight: 800, color: interpolateColors(lit, [0, 1], [IDLE_INK, '#FFFFFF']),
         boxShadow: current ? `0 0 0 ${10 * lit}px rgba(240, 106, 42, 0.16)` : 'none', transform: `scale(${1 + (current ? 0.06 * lit : 0)})` }}>{i + 1}</div>
       <div style={{ marginTop: LABEL_TOP, padding: '0 8px', fontSize: labelPx, fontWeight: 800, lineHeight: 1.2, color: interpolateColors(lit, [0, 1], [IDLE_INK, THEME.ink]), ...clampLines(2) }}>{step.label}</div>
-      {step.note ? <div style={{ marginTop: 10, padding: '0 8px', fontSize: fitFontSize(step.note, col - 16, 32, 20, 2), fontWeight: 500, lineHeight: 1.3, color: THEME.sub, opacity: 0.35 + 0.65 * lit, ...clampLines(2) }}>{step.note}</div> : null}
+      {step.note ? <div style={{ marginTop: 10, padding: '0 8px', fontSize: fitFontSize(step.note, col - 16, 32, 20, 2), fontWeight: 500, lineHeight: 1.3, color: THEME.sub, ...clampLines(2) }}>{step.note}</div> : null}
     </div>
   );
 };
@@ -82,11 +84,17 @@ function labelsHeight(steps: Step[]): number {
   }));
 }
 
+/** 估算内容高度（不含白卡内边距）：面包屑与标题 + 步骤轨道 + 循环弧线 */
+export function estimateFlowHeight(props: PropsOf<'flow'>): number {
+  const head = (props.crumb ? 50 : 0) + (props.title ? fitFontSize(props.title, INNER_W, 62, 36, 2) * 1.2 : 0);
+  return head + (head > 0 ? 56 : 0) + NODE + labelsHeight(props.steps) + (props.loop ? LOOP_H + 24 : 0);
+}
+
 /** 流程图卡：2–5 步横向推进，随口播（reveal）或默认节奏逐步点亮、连线画出；loop 时最后绕回第一步 */
-export const Flow: React.FC<TemplateProps<'flow'>> = ({ props, local }) => {
+export const Flow: React.FC<TemplateProps<'flow'>> = ({ props, local, dur }) => {
   const { fps } = useVideoConfig();
   const n = props.steps.length;
-  const times = itemTimes(props.reveal, n, (i) => FIRST + i * STAGGER);
+  const times = itemTimes(props.reveal, n, (i) => FIRST + i * STAGGER, dur);
   const current = litIndex(times, local);
   const trackH = NODE + labelsHeight(props.steps);
   const height = trackH + (props.loop ? LOOP_H + 24 : 0);

@@ -18,7 +18,7 @@ import { STRIKE_END, strikeStarts } from '../render/templates/StrikeList.js';
 import { clickTimes } from '../render/templates/Toggles.js';
 import { ctaClickTimes, ctaColor } from '../render/templates/Cta.js';
 import { CardLayer } from '../render/layers/CardLayer.js';
-import { CARD_XFADE_SEC, cardCarry } from '../src/compose/card-carry.js';
+import { CARD_XFADE_SEC, FRESH_LEAD_SEC, cardCarry, cardLead } from '../src/compose/card-carry.js';
 import { estimateHookHeight } from '../render/templates/Hook.js';
 import { shotStartFrame } from '../render/templates/ShotVideo.js';
 import { itemTimes, litIndex } from '../render/templates/parts.js';
@@ -204,6 +204,8 @@ describe('终审修复：CTA 节奏、末镜头不淡出、字宽与钩子估高
     expect(CardLayer({ shots, sec: 2.1 })).not.toBeNull();
     expect(CardLayer({ shots, sec: 10.1 })).not.toBeNull();
     expect(CardLayer({ shots, sec: 10.5 })).toBeNull();
+    // 从人物全屏切进分屏：卡片内部时钟提前（第 0 帧内容已就位）；卡到卡、首个镜头不提前
+    expect([0, 1, 4].map((i) => cardLead(shots, i))).toEqual([0, 0, FRESH_LEAD_SEC]);
   });
   it('字宽：W/M 约 0.9em，其他大写 0.7em，数字 0.6em，小写 0.55em', () => {
     expect(textEm('WM')).toBeCloseTo(1.8);
@@ -237,7 +239,18 @@ describe('视频底的镜头起点', () => {
 
 describe('版面：卡片撑满、字号放大、空白率', () => {
   it('纸面上各模板样例的空白率估算 ≤ 35%', () => {
-    for (const card of [...SAMPLES, ...SAMPLES_B]) expect(estimateBlank(card)).toBeLessThanOrEqual(BLANK_MAX);
+    for (const card of [...SAMPLES, ...SAMPLES_B]) expect(estimateBlank(card).stage).toBeLessThanOrEqual(BLANK_MAX);
+  });
+  it('平坦块口径按内容估算：内容越少卡里留白越多；flat = stage + 卡内留白，带固定底的模板为 0', () => {
+    const rows = (n: number): CardSpec => ({ template: 'evidenceList', props: { title: '标题', rows: Array.from({ length: n }, () => ({ badge: '成本' as const, text: '一行二十个字左右的说明文字用来占位' })) } });
+    const [one, five] = [estimateBlank(rows(1)), estimateBlank(rows(5))];
+    expect(one.stage).toBeCloseTo(five.stage);
+    expect(one.flat).toBeGreaterThan(five.flat + 0.15);
+    expect(five.flat).toBeGreaterThanOrEqual(five.stage);
+    const bare = estimateBlank({ template: 'title', props: { title: '短' } });
+    const full = estimateBlank({ template: 'title', props: { crumb: '第 1 节', title: 'FDE 与传统驻场工程师有何区别', subtitle: '从工作方式到业务目标的根本性转变' } });
+    expect(bare.flat).toBeGreaterThan(full.flat);
+    expect(estimateBlank(SAMPLES[0])).toEqual({ stage: 0, flat: 0 });
   });
   it('标题卡：宁可折成两行也用大字号（≥ 80px），均衡断行', () => {
     expect(titlePx('FDE vs 传统驻场工程师')).toBeGreaterThanOrEqual(80);
@@ -247,10 +260,12 @@ describe('版面：卡片撑满、字号放大、空白率', () => {
 });
 
 describe('持续演进与钩子兜底', () => {
-  it('itemTimes：reveal 条数对得上按它，否则按默认节奏；litIndex 取已出现的最后一条', () => {
-    expect(itemTimes([0, 1.5, 3], 3, (i) => i * 0.1)).toEqual([0, 1.5, 3]);
-    expect(itemTimes([0, 1.5], 3, (i) => i * 0.1)).toEqual([0, 0.1, 0.2]);
-    expect(itemTimes(undefined, 2, () => 0.5)).toEqual([0.5, 0.5]);
+  it('itemTimes：reveal 条数对得上且在镜头内按它；越界时按镜头时长均匀重排；条数不对按默认节奏；litIndex 取已出现的最后一条', () => {
+    expect(itemTimes([0, 1.5, 3], 3, (i) => i * 0.1, 6)).toEqual([0, 1.5, 3]);
+    // 成片秒数误存进来（37 秒起的镜头只有 6 秒）：不会永远不出现，改为在镜头内均匀出现
+    expect(itemTimes([37.2, 39, 41.5], 3, (i) => i * 0.1, 6)).toEqual([0, 2.75, 5.5]);
+    expect(itemTimes([0, 1.5], 3, (i) => i * 0.1, 6)).toEqual([0, 0.1, 0.2]);
+    expect(itemTimes(undefined, 2, () => 0.5, 6)).toEqual([0.5, 0.5]);
     expect(litIndex([0, 1.5, 3], 2)).toBe(1);
     expect(litIndex([0.2, 1], 0.1)).toBe(-1);
   });
