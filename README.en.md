@@ -202,6 +202,27 @@ Background presets: `study`, `studio`, `cafe`, `night-window`, `tech-dark`, `jap
 
 </details>
 
+## First launch
+
+The launcher has no code-signing certificate on Windows, and on macOS it is not notarized until the signing pipeline is configured, so **the system will stop you the first time you open it**. This is the generic warning for software the system hasn't seen before. Allow it once and later launches open straight away.
+
+<!-- Screenshots go here: docs/readme/first-open-macos.webp (the "Open Anyway" button in System Settings → Privacy & Security) and docs/readme/first-open-windows.webp (SmartScreen "More info" and "Run anyway"). Keep personal accounts and paths out of the shots. -->
+
+#### macOS
+
+Download the zip and double-click it to get "明知AI剪辑"; drag it into Applications (anywhere works).
+
+- **macOS 15 (Sequoia) and later**: double-click it; the system says it can't verify the app and blocked it. Click Done, open System Settings → Privacy & Security, scroll to Security, find "“明知AI剪辑” was blocked", click **Open Anyway** next to it, enter your login password, then click Open.
+- **macOS 14 and earlier**: **right-click** "明知AI剪辑" → Open, then click Open in the dialog.
+
+A notarized build opens with a plain double-click and shows none of this.
+
+#### Windows
+
+Download `Mingzhi.exe` and double-click it. When the blue "Windows protected your PC" window appears, click **More info**, then **Run anyway**.
+
+If the browser warns that the download isn't commonly downloaded: in Edge, click "…" on the download bar → Keep → Keep anyway; in Chrome, click Keep in the downloads list.
+
 ## Cost
 
 The software is free. Model calls are pay-as-you-go, charged straight to your Kexiang AI balance; we never touch the money. First-version bills for the two 15-second takes:

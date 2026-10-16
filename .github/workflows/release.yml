@@ -2,6 +2,8 @@
 # 最后汇总三平台产物与合并后的清单，创建草稿 Release（需要人工检查后再发布）。
 # 触发：推送 v* 标签（必须与 package.json 的版本一致），或在 Actions 页手动运行（用 package.json 的版本）。
 # 第三方 action 固定到 commit sha（注释里是对应版本）；Node 与 Rust 固定到具体版本，产物可复现。
+# 产物：macOS 为 Mingzhi-macos-<arch>.zip（内含 明知AI剪辑.app，scripts/macos-sign.sh 打包；配了 Apple secrets 才签名公证），
+# Windows 为单个 Mingzhi.exe（本期不签名）；每个产物都带 .sha256。
 # 注意：仓库公开之后，Release 里的应用包与启动器才能被匿名下载（启动器按 github.com/.../releases/download 下载 app 包）。
 name: 发布
 
@@ -119,15 +121,99 @@ jobs:
           CHROME=$(sed -n 's/^MINGZHI_CHROME=//p' "$RUNNER_TEMP/install.log" | tr -d '\r')
           node scripts/smoke-app.mjs "$APP_ROOT/app/${{ steps.ver.outputs.version }}" --chrome "$CHROME"
 
-      - name: 整理产物
+      - name: 整理产物（应用包、清单）
         run: |
-          EXE=""
-          if [[ "$RUNNER_OS" == "Windows" ]]; then EXE=".exe"; fi
           mkdir -p out
           cp "dist/mingzhi-app-$PLATFORM.tar.zst" "dist/mingzhi-app-$PLATFORM.tar.zst.sha256" out/
-          cp "launcher/target/release/mingzhi-launcher$EXE" "out/mingzhi-launcher-$PLATFORM$EXE"
           cp dist/manifest.json "out/manifest-$PLATFORM.json"
-          ls -l out
+
+      # ---- macOS：做成 .app 并打 zip（ditto 保留可执行位）；配了 Developer ID secrets 才签名公证，否则只做 ad-hoc 签名
+      # 需要的 secrets：APPLE_CERTIFICATE_P12（Developer ID Application 证书导出的 .p12，base64）、APPLE_CERTIFICATE_PASSWORD、
+      #   APPLE_SIGN_IDENTITY（如 "Developer ID Application: 名字 (TEAMID)"）、APPLE_ID、APPLE_TEAM_ID、APPLE_APP_PASSWORD（App 专用密码）
+      - name: 检查 macOS 签名 secrets
+        if: runner.os == 'macOS'
+        id: sign
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          NOTARY_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [[ -n "$CERT" && -n "$SIGN_IDENTITY" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            # 公证凭据三项齐全，macos-sign.sh 才会公证；核对步骤据此决定查不查公证票据
+            if [[ -n "$NOTARY_ID" && -n "$NOTARY_TEAM" && -n "$NOTARY_PASSWORD" ]]; then
+              echo "notarize=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "notarize=false" >> "$GITHUB_OUTPUT"
+              echo "::warning::Apple 公证凭据不全：macOS 产物已签名但未公证"
+            fi
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配置 Apple 签名 secrets：macOS 产物只做 ad-hoc 签名，不公证（用户首次打开需右键放行）"
+          fi
+
+      - name: 导入签名证书到临时钥匙串
+        if: steps.sign.outputs.enabled == 'true'
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/mingzhi-signing.keychain-db"
+          KC_PASS="$(uuidgen)"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          printf '%s' "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -T /usr/bin/codesign -f pkcs12 -k "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KEYCHAIN" > /dev/null
+          # 把临时钥匙串加进搜索列表（保留原有的）
+          KEYCHAINS=("$KEYCHAIN")
+          while IFS= read -r k; do KEYCHAINS+=("$k"); done < <(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')
+          security list-keychains -d user -s "${KEYCHAINS[@]}"
+
+      - name: 打 macOS 应用（签名与公证见 scripts/macos-sign.sh）
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGN_IDENTITY: ${{ steps.sign.outputs.enabled == 'true' && secrets.APPLE_SIGN_IDENTITY || '' }}
+          APPLE_ID: ${{ steps.sign.outputs.enabled == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_TEAM_ID: ${{ steps.sign.outputs.enabled == 'true' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_APP_PASSWORD: ${{ steps.sign.outputs.enabled == 'true' && secrets.APPLE_APP_PASSWORD || '' }}
+        run: |
+          bash scripts/macos-sign.sh --bin launcher/target/release/mingzhi-launcher \
+            --version "${{ steps.ver.outputs.version }}" --arch "${PLATFORM#darwin-}" --out out
+
+      - name: 核对 macOS 产物（解开后验签；已公证的再核对 Gatekeeper 与公证票据）
+        if: runner.os == 'macOS'
+        run: |
+          CHECK="$RUNNER_TEMP/check"
+          rm -rf "$CHECK" && mkdir -p "$CHECK"
+          ditto -x -k "out/Mingzhi-macos-${PLATFORM#darwin-}.zip" "$CHECK"
+          APP="$CHECK/明知AI剪辑.app"
+          test -x "$APP/Contents/MacOS/mingzhi-launcher"
+          codesign --verify --strict --verbose=2 "$APP"
+          if [[ "$NOTARIZED" == "true" ]]; then
+            xcrun stapler validate "$APP"
+            spctl --assess --type execute --verbose=2 "$APP"
+          fi
+        env:
+          NOTARIZED: ${{ steps.sign.outputs.notarize }}
+
+      - name: 清理临时钥匙串
+        if: always() && steps.sign.outputs.enabled == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/mingzhi-signing.keychain-db" || true
+
+      # ---- Windows：单个 Mingzhi.exe（GUI 子系统，图标与版本信息已由 build.rs 嵌入）；本期不签名，README 说明 SmartScreen 放行
+      - name: 整理 Windows 产物
+        if: runner.os == 'Windows'
+        run: |
+          cp launcher/target/release/mingzhi-launcher.exe out/Mingzhi.exe
+          (cd out && sha256sum Mingzhi.exe > Mingzhi.exe.sha256)
+
+      - name: 产物清单
+        run: ls -l out
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -167,6 +253,14 @@ jobs:
           pattern: mingzhi-*
           merge-multiple: true
 
+      - name: 校验各产物的 .sha256
+        run: |
+          cd out
+          for f in *.sha256; do sha256sum -c "$f"; done
+          for f in Mingzhi-macos-arm64.zip Mingzhi-macos-x64.zip Mingzhi.exe; do
+            test -f "$f" && test -f "$f.sha256" || { echo "::error::缺少 $f 或它的 .sha256"; exit 1; }
+          done
+
       - name: 合并清单
         run: |
           node scripts/build-manifest.mjs --out out/manifest.json \
@@ -201,9 +295,9 @@ jobs:
               echo "::error::$TAG 已正式发布，不能覆盖"
               exit 1
             fi
-            gh release upload "$TAG" --clobber mingzhi-* manifest.json
+            gh release upload "$TAG" --clobber mingzhi-* Mingzhi* manifest.json
           else
             gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "明知AI剪辑 $TAG" --generate-notes \
-              mingzhi-* manifest.json
+              mingzhi-* Mingzhi* manifest.json
           fi
           rm -f is_draft.txt

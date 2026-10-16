@@ -43,6 +43,10 @@ windows-sys = { version = "=0.59.0", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# Windows 资源（图标、版本信息）：build.rs 里按编译目标决定是否嵌入
+[build-dependencies]
+embed-resource = "=3.0.12"
+
 [dev-dependencies]
 tempfile = "=3.27.0"
 
