@@ -56,11 +56,32 @@ describe('素材来源面板渲染', () => {
     expect(render(ready([item()], ''))).not.toContain('复制署名文本');
   });
 
-  it('已标记的显示标记状态，当前标记对应的按钮禁用', () => {
-    const html = render(ready([item({ mark: 'replace' })]));
+  it('已标记但修改没提交成功：同一动作的按钮变成「重试」且不禁用；提交成功后才禁用', () => {
+    const marked = item({ mark: 'replace' });
+    const html = render(ready([marked]));
     expect(html).toContain('已标记替换');
-    expect(html.match(/disabled=""/g)).toHaveLength(1);
-    expect(render(ready([item()]))).not.toContain('disabled=""');
+    expect(html).toContain('>重试替换<');
+    expect(html).toContain('>删除<');
+    expect(html).not.toContain('disabled=""');
+    const done = render(ready([marked]), { submitted: new Set([marked.file]) });
+    expect(done).toContain('>替换<');
+    expect(done.match(/disabled=""/g)).toHaveLength(1);
+    expect(render(ready([item({ mark: 'remove' })]))).toContain('>重试删除<');
+  });
+
+  it('处理中的那一条两个按钮都禁用', () => {
+    expect(render(ready([item()]), { busy: 'office.mp4' }).match(/disabled=""/g)).toHaveLength(2);
+  });
+
+  it('对话框语义与读屏名字：aria-modal、标题关联；每个按钮的 aria-label 带素材名', () => {
+    const html = render(ready([item({ shotIndex: 3 }), ccBy]));
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('aria-labelledby="cred-title"');
+    expect(html).toContain('id="cred-title"');
+    expect(html).toContain('aria-label="替换：Pexels Ann office.mp4 镜头 4"');
+    expect(html).toContain('aria-label="删除：Wikimedia Commons Eve server.jpg"');
+    expect(html).toContain('aria-label="关闭素材来源"');
   });
 
   it('空列表、加载中、出错', () => {

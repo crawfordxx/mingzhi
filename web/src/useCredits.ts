@@ -16,6 +16,8 @@ const SUMMARY: Record<CreditMark, string> = { replace: '换一张 B-roll', remov
 export function useCredits({ spaceId, version, notify, refresh }: Deps) {
   const [view, setView] = useState<CreditsView>({ kind: 'loading' });
   const [busy, setBusy] = useState<string>();
+  /** 标记后修改已成功提交的素材文件；没在里面的已标记素材，按钮显示「重试」 */
+  const [submitted, setSubmitted] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     let live = true;
@@ -33,6 +35,7 @@ export function useCredits({ spaceId, version, notify, refresh }: Deps) {
 
   const mark = useCallback(async (item: CreditItem, action: CreditMark) => {
     setBusy(item.file);
+    setSubmitted((set) => new Set([...set].filter((f) => f !== item.file)));
     try {
       await api.markCredit(spaceId, version, item.file, action);
       markLocal(item.file, action);
@@ -46,6 +49,7 @@ export function useCredits({ spaceId, version, notify, refresh }: Deps) {
         notify('已标记，下次改片时处理（这条素材没有对应的镜头，暂不能直接出新版本）');
       } else {
         await api.apply(spaceId, [{ type: 'replaceBroll', shotIndex: item.shotIndex }], version, SUMMARY[action]);
+        setSubmitted((set) => new Set([...set, item.file]));
         await refresh(spaceId);
         notify(`已提交「${SUMMARY[action]}」，新版本出片中`);
       }
@@ -61,5 +65,5 @@ export function useCredits({ spaceId, version, notify, refresh }: Deps) {
     void copyText(attribution).then((ok) => notify(ok ? '署名文本已复制，发布时贴在正文末尾' : '复制失败，请手动选中署名文本复制'));
   }, [attribution, notify]);
 
-  return { view, busy, mark, copy };
+  return { view, busy, submitted, mark, copy };
 }

@@ -41,13 +41,17 @@ export function readCredits(versionDir: string): CreditEntry[] {
 
 export interface CreditMark { action: CreditAction; at: number }
 
+const MarksSchema = z.record(z.object({ action: z.enum(CREDIT_ACTIONS), at: z.number() }));
+
+/** 标记文件坏了当作没有（标记丢了可以重标，不为它挡住面板），但留一行告警 */
 export function readMarks(versionDir: string): Record<string, CreditMark> {
   const file = join(versionDir, MARKS_FILE);
   if (!existsSync(file)) return {};
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as Record<string, CreditMark>;
+    return MarksSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
   } catch {
-    return {}; // 标记丢了可以重标，不为它挡住面板
+    console.warn(`素材处理标记文件已损坏，按没有标记处理：${file}`);
+    return {};
   }
 }
 
@@ -73,15 +77,21 @@ export function publicEntry(e: CreditEntry, thumbBase: string, mark?: CreditMark
   } as const;
 }
 
-/** 这条素材用在第几个镜头（对照版本状态里 shots[i].broll.file）；读不到状态或没用在镜头上返回 undefined */
-export function shotIndexOf(app: Pick<AppCtx, 'store'>, spaceId: string, n: number, entry: CreditEntry): number | undefined {
+type ShotMedia = { broll?: { file?: string }; card?: { props?: { image?: unknown; video?: unknown } } };
+
+/** 版本状态里的镜头列表；读不到返回空 */
+export function readShots(app: Pick<AppCtx, 'store'>, spaceId: string, n: number): ShotMedia[] {
   try {
-    const state = readJson<{ storyboard?: { shots?: { broll?: { file?: string } }[] } }>(join(app.store.versionDir(spaceId, n), STATE_FILE), '版本状态');
-    const i = state.storyboard?.shots?.findIndex((s) => s.broll?.file === entry.file) ?? -1;
-    return i >= 0 ? i : undefined;
+    return readJson<{ storyboard?: { shots?: ShotMedia[] } }>(join(app.store.versionDir(spaceId, n), STATE_FILE), '版本状态').storyboard?.shots ?? [];
   } catch {
-    return undefined;
+    return [];
   }
+}
+
+/** 这条素材用在第几个镜头（对照 shots[i].broll.file）；没用在镜头上返回 undefined */
+export function shotIndexOf(shots: readonly ShotMedia[], entry: CreditEntry): number | undefined {
+  const i = shots.findIndex((s) => s.broll?.file === entry.file);
+  return i >= 0 ? i : undefined;
 }
 
 export const findEntry = (entries: readonly CreditEntry[], file: string): CreditEntry | undefined =>
@@ -97,12 +107,26 @@ export function creditFilePath(app: Pick<AppCtx, 'store'>, spaceId: string, n: n
   return undefined;
 }
 
-/** 导出时的署名文本；没有素材记录（或记录损坏）就没有，不挡导出 */
-export function exportAttribution(versionDir: string): string | undefined {
+export const CREDITS_UNREADABLE = '素材来源记录读取失败，请在素材来源面板检查署名';
+
+/** 成片里有没有外部素材：镜头带 B-roll 文件，或卡片引用了图片 / 视频 */
+const usesMedia = (shots: readonly ShotMedia[]): boolean =>
+  shots.some((s) => typeof s.broll?.file === 'string' || typeof s.card?.props?.image === 'string' || typeof s.card?.props?.video === 'string');
+
+export interface ExportCredits { attribution?: string; attributionError?: string }
+
+/**
+ * 导出时的署名文本。没有素材记录且成片也没用外部素材 → 什么都没有；
+ * 记录损坏，或缺失但成片里有外部素材 → attributionError（前端必须显示警告，不能静默发布无署名的成片）
+ */
+export function exportCredits(app: Pick<AppCtx, 'store'>, spaceId: string, n: number): ExportCredits {
+  const dir = app.store.versionDir(spaceId, n);
+  if (!existsSync(join(dir, CREDITS_FILE))) return usesMedia(readShots(app, spaceId, n)) ? { attributionError: CREDITS_UNREADABLE } : {};
   try {
-    const text = attributionText(readCredits(versionDir));
-    return text || undefined;
-  } catch {
-    return undefined;
+    const text = attributionText(readCredits(dir));
+    return text ? { attribution: text } : {};
+  } catch (err) {
+    console.warn(`导出 v${n} 时读取素材来源记录失败：${err instanceof Error ? err.message : String(err)}`);
+    return { attributionError: CREDITS_UNREADABLE };
   }
 }

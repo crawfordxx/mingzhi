@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { startApp } from '../src/server/app.js';
@@ -16,7 +16,8 @@ beforeAll(async () => {
   t = await startTestApp({
     deps: {
       validateStockKey: async (_p, key) => {
-        if (key === 'neterr') throw new Error('无法校验 key：网络错误');
+        if (key === 'neterr') throw new Error('网络错误 请求超时');
+        if (key === 'limited') throw new Error('暂时无法校验 Pexels key：Pexels 返回 HTTP 429，请稍后重试');
         return key === PEXELS || key === PIXABAY;
       },
     },
@@ -39,6 +40,11 @@ describe('图库 key 存取与校验', () => {
     expect(net.status).toBe(503);
     expect(net.json.error).toContain('暂时无法校验');
     expect(net.json.error).not.toContain('无效');
+    expect(net.json.error).toContain('请求超时'); // 保留具体原因
+    const limited = await t.call('POST', '/api/stock-keys', { provider: 'pexels', key: 'limited' });
+    expect(limited.status).toBe(503);
+    expect(limited.json.error).toContain('HTTP 429');
+    expect(limited.json.error.match(/暂时无法校验/g)).toHaveLength(1);
     expect((await t.call('GET', '/api/stock-keys')).json.pexels.configured).toBe(false);
 
     const ok = await t.call('POST', '/api/stock-keys', { provider: 'pexels', key: PEXELS });
@@ -63,14 +69,18 @@ describe('图库 key 存取与校验', () => {
     expect((await t.call('POST', '/api/stock-keys', { provider: 'unsplash', key: 'abc' })).status).toBe(400);
     expect((await t.call('POST', '/api/stock-keys', { provider: 'pexels', key: '  ' })).status).toBe(400);
     expect((await t.call('POST', '/api/stock-keys', { provider: 'pexels', key: 'a b' })).status).toBe(400);
+    const wide = await t.call('POST', '/api/stock-keys', { provider: 'pexels', key: 'ＡＢＣ中文key' });
+    expect(wide.status).toBe(400);
+    expect(wide.json.error).toContain('格式不对');
+    expect((await t.call('POST', '/api/stock-keys', { provider: 'pexels', key: 'abc\u200bdef' })).status).toBe(400);
     expect((await t.call('DELETE', '/api/stock-keys?provider=nope')).status).toBe(400);
   });
 
-  it('保存过的 key 会被错误文案与事件的抹除逻辑覆盖', async () => {
+  it('保存过的 key 已登记到抹除逻辑（redact 会把它换成 sk-***）', async () => {
     expect(t.app.keys.redact(`请求失败 ${PEXELS} 与 ${PIXABAY}`)).not.toMatch(/ABCDEFGH|pixabaykey/);
   });
 
-  it('出片时把图库 key 交给运行器的配置，且不进项目事件', async () => {
+  it('出片时把图库 key 交给运行器的配置（只含已配置的来源）', async () => {
     const k = await startTestApp({
       key: 'sk-goodkey1234567890',
       deps: {
@@ -88,6 +98,13 @@ describe('图库 key 存取与校验', () => {
     } finally {
       await k.close();
     }
+  });
+
+  it('图库接口也受同源保护：跨源写请求被拒，不会改动 key', async () => {
+    const bad = await t.call('POST', '/api/stock-keys', { provider: 'pixabay', key: PIXABAY }, { Origin: 'http://evil.example' });
+    expect(bad.status).toBe(403);
+    expect((await t.call('DELETE', '/api/stock-keys?provider=pexels', undefined, { Origin: 'http://evil.example' })).status).toBe(403);
+    expect((await t.call('GET', '/api/stock-keys')).json.pexels.configured).toBe(true);
   });
 
   it('DELETE 清除一个来源', async () => {
@@ -221,6 +238,10 @@ describe('素材来源 credits', () => {
     expect(ok.headers.get('content-type')).toBe('image/jpeg');
     expect((await t.call('GET', `/api/spaces/${id}/versions/1/credits/secret.png/thumb`)).status).toBe(404);
     expect((await t.call('GET', `/api/spaces/${id}/versions/1/credits/unknown.png/thumb`)).status).toBe(404);
+    for (const evil of ['..%2F..%2Fsecret.png', '..%2Fdata%2Fkey', '%2e%2e%2f%2e%2e%2fsecret.png', 'broll%2Fserver.jpg']) {
+      expect((await t.call('GET', `/api/spaces/${id}/versions/1/credits/${evil}/thumb`)).status, evil).toBe(404);
+      expect((await t.call('POST', `/api/spaces/${id}/versions/1/credits/${evil}/replace`)).status, evil).toBe(404);
+    }
     expect((await t.call('GET', `/api/spaces/${id}/versions/1/credits/ai.png/thumb`)).status).toBe(404); // 文件不存在
   });
 
@@ -239,6 +260,26 @@ describe('素材来源 credits', () => {
     expect(mark('ai.png')).toBeUndefined();
     expect((await t.call('POST', `/api/spaces/${id}/versions/1/credits/nope.png/replace`)).status).toBe(404);
     expect((await t.call('POST', `/api/spaces/${id}/versions/1/credits/office.mp4/explode`)).status).toBe(400);
+    expect(r.json.attribution).toBe((await t.call('GET', `/api/spaces/${id}/versions/1/credits`)).json.attribution); // 标记不改署名文本
+  });
+
+  it('跨源写请求不能标记素材', async () => {
+    const { id, dir } = await versionWithCredits(ENTRIES);
+    const r = await t.call('POST', `/api/spaces/${id}/versions/1/credits/office.mp4/replace`, undefined, { Origin: 'http://evil.example' });
+    expect(r.status).toBe(403);
+    expect(existsSync(join(dir, 'credits-marks.json'))).toBe(false);
+  });
+
+  it('标记文件损坏或内容不对：当作没有标记，列表照常，再次标记不丢新标记', async () => {
+    const { id, dir } = await versionWithCredits(ENTRIES);
+    for (const bad of ['null', '{not json', '{"broll/office.mp4":{"action":"explode","at":1}}']) {
+      writeFileSync(join(dir, 'credits-marks.json'), bad);
+      const r = await t.call('GET', `/api/spaces/${id}/versions/1/credits`);
+      expect(r.status, bad).toBe(200);
+      expect(r.json.entries.every((e: { mark?: string }) => e.mark === undefined), bad).toBe(true);
+    }
+    await t.call('POST', `/api/spaces/${id}/versions/1/credits/office.mp4/replace`);
+    expect((await t.call('GET', `/api/spaces/${id}/versions/1/credits`)).json.entries[0].mark).toBe('replace');
   });
 
   it('条目带镜头序号：对照版本状态里 shots[i].broll.file；没用在镜头上的没有', async () => {
@@ -249,6 +290,27 @@ describe('素材来源 credits', () => {
     const r = await t.call('GET', `/api/spaces/${id}/versions/1/credits`);
     expect(r.json.entries[0].shotIndex).toBe(1);
     expect(r.json.entries[1].shotIndex).toBeUndefined();
+  });
+
+  it('导出：记录损坏 → 明确警告，且仍然导出成功；记录缺失但成片用了外部素材 → 同样警告；都没有 → 无署名也无警告', async () => {
+    const bad = await versionWithCredits('{not json');
+    const out = await t.call('POST', `/api/spaces/${bad.id}/versions/1/export`);
+    expect(out.status).toBe(200);
+    expect(out.json.files.length).toBeGreaterThan(0);
+    expect(out.json.attribution).toBeUndefined();
+    expect(out.json.attributionError).toBe('素材来源记录读取失败，请在素材来源面板检查署名');
+
+    const missing = await versionWithCredits(ENTRIES);
+    rmSync(join(missing.dir, 'credits.json'));
+    const state = JSON.parse(readFileSync(join(missing.dir, 'state.json'), 'utf8'));
+    state.storyboard.shots[0] = { ...state.storyboard.shots[0], broll: { file: 'broll/office.mp4' } };
+    writeFileSync(join(missing.dir, 'state.json'), JSON.stringify(state));
+    expect((await t.call('POST', `/api/spaces/${missing.id}/versions/1/export`)).json.attributionError).toContain('读取失败');
+    rmSync(join(missing.dir, 'state.json'));
+    writeFileSync(join(missing.dir, 'state.json'), JSON.stringify({ ...state, storyboard: { shots: [{ start: 0, end: 1, layout: 'full' }] } }));
+    const none = (await t.call('POST', `/api/spaces/${missing.id}/versions/1/export`)).json;
+    expect(none.attributionError).toBeUndefined();
+    expect(none.attribution).toBeUndefined();
   });
 
   it('导出结果附署名文本（有素材记录才有）', async () => {

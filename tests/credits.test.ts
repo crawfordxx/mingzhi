@@ -23,19 +23,19 @@ describe('attributionText', () => {
   it('Pexels 与 Wikimedia CC BY 署名，附 AI 生成说明', () => {
     const text = attributionText([
       entry(),
-      entry({ file: 'b', source: 'wikimedia', author: 'Eve', license: 'CC BY 4.0', attributionRequired: true, page: 'https://commons.wikimedia.org/wiki/File:B.jpg' }),
+      entry({ file: 'b', source: 'wikimedia', author: 'Eve', license: 'CC BY 4.0', licenseUrl: undefined, attributionRequired: true, page: 'https://commons.wikimedia.org/wiki/File:B.jpg' }),
       entry({ file: 'c', source: 'generated', aiGenerated: true, license: 'AI 生成', author: undefined }),
     ]);
-    expect(text).toBe('素材：Pexels @Ann、Wikimedia Commons（CC BY 4.0）@Eve；部分素材已裁切调色；部分画面为 AI 生成');
+    expect(text).toBe('素材：Pexels @Ann、Wikimedia Commons（CC BY 4.0）@Eve（https://commons.wikimedia.org/wiki/File:B.jpg）；部分素材已裁切调色；部分画面为 AI 生成');
   });
 
   it('同来源多作者合并去重；同一素材来源不同许可分开写', () => {
     const text = attributionText([
       entry({ author: 'Ann' }), entry({ file: 'x', author: 'Bob' }), entry({ file: 'y', author: 'Ann' }),
-      entry({ file: 'w1', source: 'wikimedia', author: 'Eve', license: 'CC BY 4.0', attributionRequired: true }),
-      entry({ file: 'w2', source: 'wikimedia', author: 'Fay', license: 'CC0' }),
+      entry({ file: 'w1', source: 'wikimedia', author: 'Eve', license: 'CC BY 4.0', licenseUrl: undefined, attributionRequired: true }),
+      entry({ file: 'w2', source: 'wikimedia', author: 'Fay', license: 'CC0', licenseUrl: undefined }),
     ]);
-    expect(text).toBe('素材：Pexels @Ann @Bob、Wikimedia Commons（CC BY 4.0）@Eve、Wikimedia Commons（CC0）@Fay；部分素材已裁切调色');
+    expect(text).toBe('素材：Pexels @Ann @Bob、Wikimedia Commons（CC BY 4.0）@Eve（https://www.pexels.com/video/1/）、Wikimedia Commons（CC0）@Fay；部分素材已裁切调色');
   });
 
   it('Pixabay 无作者时只写来源；截图写出处域名', () => {
@@ -49,6 +49,14 @@ describe('attributionText', () => {
   it('带作者主页链接时写在作者后；只做变速的不写已裁切调色', () => {
     const text = attributionText([entry({ authorUrl: 'https://www.pexels.com/@ann', modified: ['speed0.5'] })]);
     expect(text).toBe('素材：Pexels @Ann（https://www.pexels.com/@ann）');
+  });
+
+  it('Wikimedia CC BY：署名带作者主页、来源页与许可链接', () => {
+    const text = attributionText([entry({
+      source: 'wikimedia', author: 'Eve', authorUrl: 'https://commons.wikimedia.org/wiki/User:Eve', page: 'https://commons.wikimedia.org/wiki/File:B.jpg',
+      license: 'CC BY 4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', attributionRequired: true, modified: [],
+    })]);
+    expect(text).toBe('素材：Wikimedia Commons（CC BY 4.0 https://creativecommons.org/licenses/by/4.0/）@Eve（https://commons.wikimedia.org/wiki/User:Eve https://commons.wikimedia.org/wiki/File:B.jpg）');
   });
 
   it('只有 AI 生成；空列表返回空串', () => {

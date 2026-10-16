@@ -72,7 +72,7 @@ export interface VersionState {
   captions: { start: number; end: number; text: string }[];
   plan: { outputDurationSec: number; sourceDurationSec: number };
 }
-export interface ExportResult { dir: string; files: string[]; /** 署名文本（本版用了需要署名的素材才有） */ attribution?: string }
+export interface ExportResult { dir: string; files: string[]; /** 署名文本（本版用了需要署名的素材才有） */ attribution?: string; /** 素材来源记录读不出来时的警告，必须显示给用户 */ attributionError?: string }
 
 export type StockProvider = 'pexels' | 'pixabay';
 export interface StockKeyInfo { configured: boolean; source?: KeySource; masked?: string }

@@ -37,20 +37,26 @@ function hostOf(page: string): string {
   }
 }
 
-interface SourceGroup { label: string; authors: Map<string, string | undefined> }
+interface SourceGroup { label: string; authors: Map<string, string[]> }
 
 function groupLabel(e: CreditEntry): string | undefined {
   const name = SOURCE_NAME[e.source];
   if (!name) return undefined;
-  return e.source === 'wikimedia' ? `${name}（${e.license}）` : name;
+  // CC BY 要求给出许可链接
+  return e.source === 'wikimedia' ? `${name}（${[e.license, e.licenseUrl].filter(Boolean).join(' ')}）` : name;
 }
 
-function authorMention(name: string, url: string | undefined): string {
-  return url ? `@${name}（${url}）` : `@${name}`;
+/** 作者后的链接：作者主页；Wikimedia 要署名的再附来源页（CC BY 要求在合理范围内给出出处） */
+function linksOf(e: CreditEntry): string[] {
+  return [e.authorUrl, e.source === 'wikimedia' && e.attributionRequired ? e.page : undefined].filter((u): u is string => !!u);
+}
+
+function authorMention(name: string, urls: readonly string[]): string {
+  return urls.length > 0 ? `@${name}（${urls.join(' ')}）` : `@${name}`;
 }
 
 function renderGroup(g: SourceGroup): string {
-  const authors = [...g.authors].map(([name, url]) => authorMention(name, url));
+  const authors = [...g.authors].map(([name, urls]) => authorMention(name, urls));
   if (authors.length === 0) return g.label;
   // 括号收尾的标签后不加空格，作者之间用空格分隔，避免和来源间的顿号混淆
   return `${g.label}${g.label.endsWith('）') ? '' : ' '}${authors.join(' ')}`;
@@ -63,7 +69,7 @@ function sourceItems(entries: readonly CreditEntry[]): string[] {
     const label = groupLabel(e);
     if (!label) continue;
     const group = groups.get(label) ?? { label, authors: new Map() };
-    if (e.author && !group.authors.has(e.author)) group.authors.set(e.author, e.authorUrl);
+    if (e.author) group.authors.set(e.author, [...new Set([...(group.authors.get(e.author) ?? []), ...linksOf(e)])]);
     groups.set(label, group);
   }
   return [...groups.values()].map(renderGroup);

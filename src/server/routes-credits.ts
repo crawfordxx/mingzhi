@@ -1,6 +1,6 @@
 import { attributionText } from '../broll/credits.js';
 import type { AppCtx } from './context.js';
-import { creditFilePath, findEntry, isCreditAction, publicEntry, readCredits, readMarks, shotIndexOf, writeMark } from './credits.js';
+import { creditFilePath, findEntry, isCreditAction, publicEntry, readCredits, readMarks, readShots, shotIndexOf, writeMark } from './credits.js';
 import { serveFile } from './files.js';
 import { HttpError, sendJson } from './http.js';
 import { doneVersion, loadSpace, parseVersionNumber } from './lookup.js';
@@ -18,8 +18,9 @@ function list(app: AppCtx, c: RouteCtx): void {
   const entries = readCredits(dir);
   const marks = readMarks(dir);
   const base = `/api/spaces/${id}/versions/${n}/credits`;
+  const shots = readShots(app, id, n);
   sendJson(c.res, 200, {
-    entries: entries.map((e) => publicEntry(e, base, marks[e.file], shotIndexOf(app, id, n, e))),
+    entries: entries.map((e) => publicEntry(e, base, marks[e.file], shotIndexOf(shots, e))),
     attribution: attributionText(entries),
   });
 }

@@ -89,7 +89,7 @@ interface Props {
 }
 
 export function Thread({ space, options, runs, convo, replay, stream, onSeek, liveN, notify }: Props) {
-  const [sources, setSources] = useState<number>();
+  const [sources, setSources] = useState<{ n: number; opener: HTMLElement }>();
   const closeSources = useCallback(() => setSources(undefined), []);
   // 首版排队时还没建版本，直播卡也先出来（显示排队中）
   const tries = space.versions.filter((v) => isFirst(v) && v.status === 'failed' && v.n !== liveN);
@@ -111,7 +111,7 @@ export function Thread({ space, options, runs, convo, replay, stream, onSeek, li
         said={isFirst(meta) ? undefined : saidFor(convo.turns, meta.n) ?? meta.summary}
         parent={meta.parent !== undefined ? done.find((v) => v.n === meta.parent) : undefined} totalShots={runs.stateOf(meta.n)?.storyboard.shots.length}
         events={runs.eventsOf(meta.n)} viewing={runs.view === meta.n} latest={meta.n === latest} exporting={runs.exporting === meta.n} busy={busy}
-        onView={() => runs.setView(meta.n)} onExport={() => void runs.exportVersion(meta.n)} onRevert={() => void runs.revert(meta.n)} onSources={() => setSources(meta.n)} />
+        onView={() => runs.setView(meta.n)} onExport={() => void runs.exportVersion(meta.n)} onRevert={() => void runs.revert(meta.n)} onSources={(opener) => setSources({ n: meta.n, opener })} />
     : <RunCard meta={meta} events={runs.eventsOf(meta.n)} onCancel={runs.active === meta.n ? () => void runs.cancel() : undefined} backdrop={backdrop}
         shots={shotsOf(runs.stateOf(meta.parent ?? meta.n - 1))} hot={hotOf(convo.turns, meta.n)} />);
 
@@ -133,7 +133,7 @@ export function Thread({ space, options, runs, convo, replay, stream, onSeek, li
         </Msg>
       ))}
       <AnimatePresence>
-        {sources !== undefined && <CreditsDrawer key={sources} spaceId={space.id} version={sources} notify={notify} refresh={runs.refresh} onClose={closeSources} />}
+        {sources && <CreditsDrawer key={sources.n} opener={sources.opener} spaceId={space.id} version={sources.n} notify={notify} refresh={runs.refresh} onClose={closeSources} />}
       </AnimatePresence>
     </>
   );

@@ -28,7 +28,7 @@ interface Props {
   onExport: () => void;
   onRevert: () => void;
   /** 打开「素材来源」面板 */
-  onSources: () => void;
+  onSources: (opener: HTMLElement) => void;
 }
 
 /** 自检相对上一版的升降配色 */
@@ -82,7 +82,7 @@ export function VersionCard({ spaceId, said, thumbSec, meta, parent, totalShots,
         <div className="acts">
           <Tap className="btn btn-g sm" onClick={onView} disabled={viewing}>{viewing ? '正在预览' : '预览'}</Tap>
           <Tap className="btn btn-k sm" onClick={onExport} disabled={exporting}>{exporting ? <span className="spin" /> : Ico.down}导出</Tap>
-          <Tap className="btn btn-g sm" onClick={onSources} title="本版用到的每一条外部素材与它的授权">{Ico.image}素材来源</Tap>
+          <Tap className="btn btn-g sm" onClick={(e) => onSources(e.currentTarget)} title="本版用到的每一条外部素材与它的授权">{Ico.image}素材来源</Tap>
           {!latest && (
             <Tap className="btn btn-w sm" onClick={onRevert} disabled={busy} title={busy ? '等当前任务完成' : `以 v${meta.n} 为准出一个新版本`}>
               {Ico.undo}回退到此版本
