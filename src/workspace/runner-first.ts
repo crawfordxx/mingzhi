@@ -12,6 +12,7 @@ import {
 import type { VersionEnv, VersionOutcome } from './runner.js';
 import { ANALYSIS_FILE, FINAL_FILE, LAYER_FILES, MATTE_META, linkBroll, linkFile, writeJsonAtomic, type BaseAnalysis } from './runner-files.js';
 import { makeCover } from './runner-cover.js';
+import { writeStoryboardCredits } from '../broll/credit-store.js';
 import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, type Person } from './runner-media.js';
 
 /** 首个版本的初始状态（剪辑参数用默认值，修改都从这里叠加） */
@@ -66,6 +67,7 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const captions = await captionsStage(args, a, join(env.dir, 'captions.ass'), env.complete);
   const planned = await storyboardStage(args, captions, a.plan.outputDurationSec, env.base, env.complete);
   linkBroll(planned, env.base, env.dir);
+  writeStoryboardCredits(planned, env.base, env.dir);
   const { storyboard, cards } = await qaCardsStage(args, env.meter, planned, captions, env.complete);
   const final = join(env.dir, FINAL_FILE);
   const raw = join(env.dir, 'final.raw.mp4');

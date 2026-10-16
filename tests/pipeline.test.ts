@@ -329,7 +329,7 @@ function fakeBrollDeps(ffmpeg: string): { deps: BrollDeps; calls: { image: strin
     screenshot: async () => { throw new Error('不应截图'); },
     search: async () => [],
     image: async (prompt, out) => { calls.image.push(prompt); await run(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1080x960', '-frames:v', '1', out]); return { cost: 0.2 }; },
-    video: async (prompt, out) => { calls.video.push(prompt); await run(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=720x720:r=30:d=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', out]); return { cost: 2.4 }; },
+    video: async (prompt, _imageUrl, out) => { calls.video.push(prompt); await run(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=720x720:r=30:d=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', out]); return { cost: 2.4 }; },
   };
   return { deps, calls };
 }
@@ -346,22 +346,27 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
       broll: { enabled: true, maxVideos: 1, budgetYuan: 10 }, onProgress: (e) => events.push(e) });
     expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-7)).toEqual(['broll', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
     const brollEvents = events.filter((e) => e.step === 'broll').map((e) => e.message);
-    expect(brollEvents[0]).toBe('素材 1/2：生成视频中…');
-    expect(brollEvents.at(-1)).toBe('素材 2 个（截图 0 / 生图 1 / 视频 1）· 花费 ¥2.60 · 失败 0 个');
-    expect(calls.video).toHaveLength(1);
-    expect(calls.image).toHaveLength(1);
+    expect(brollEvents[0]).toBe('素材 1/2：生图（钩子关键图）中…');
+    // 假模型不会规划节拍：节拍编排整体跳过，不中断出片；钩子先生图，图生视频在 B-roll 上限（短片 ¥1）下放不下
+    expect(brollEvents.some((m) => m.includes('节拍规划失败'))).toBe(true);
+    expect(brollEvents.at(-1)).toMatch(/^素材 2 个（实拍 0 \/ 图片 0 \/ 截图 0 \/ 生成 2） · 花费 ¥0\.40 · 失败 0 个/);
+    expect(calls.video).toHaveLength(0);
+    expect(calls.image).toHaveLength(2);
     expect(res.storyboard).toMatchObject({ bgm: 'upbeat', coverTitle: { title: '钱放哪里', subtitle: '应急金' } });
     const project = JSON.parse(readFileSync(res.projectPath, 'utf8')) as ProjectFile;
-    expect(project.broll?.assets.map((a) => a.source).sort()).toEqual(['generate', 'video']);
+    expect(project.broll?.assets.map((a) => a.source).sort()).toEqual(['generate', 'generate']);
     expect(project.broll?.failures).toEqual([]);
-    expect(project.broll?.costYuan).toBeCloseTo(2.6);
+    expect(project.broll?.costYuan).toBeCloseTo(0.4);
     const cards = project.storyboard?.shots.flatMap((s) => (s.card ? [s.card] : [])) ?? [];
     const photoImage = (cards.find((c) => c.template === 'photo')?.props as { image?: string }).image ?? '';
-    const hookVideo = (cards.find((c) => c.template === 'hook')?.props as { video?: string }).video ?? '';
+    const hookImage = (cards.find((c) => c.template === 'hook')?.props as { image?: string }).image ?? '';
     expect(photoImage).toMatch(/^broll\/[0-9a-f]{12}\.jpg$/);
-    expect(hookVideo).toMatch(/^broll\/[0-9a-f]{12}\.mp4$/);
+    expect(hookImage).toMatch(/^broll\/[0-9a-f]{12}\.jpg$/);
     expect(existsSync(join(workDir, photoImage))).toBe(true);
-    expect(existsSync(join(workDir, hookVideo))).toBe(true);
+    // 授权记录：两张都是 AI 生成
+    const credits = JSON.parse(readFileSync(join(workDir, 'credits.json'), 'utf8')) as { file: string; aiGenerated: boolean }[];
+    expect(credits.map((c) => c.file).sort()).toEqual([hookImage, photoImage].sort());
+    expect(credits.every((c) => c.aiGenerated)).toBe(true);
     expect(existsSync(res.output)).toBe(true);
   }, 240_000);
 
@@ -475,7 +480,7 @@ describe('B-roll 选项', () => {
     expect(patches[0].broll).toBeUndefined();
   });
 
-  it('进度：每个素材开始前有提示，缓存命中标「（缓存）」，视频状态变化才转发', async () => {
+  it('进度：每个素材开始前有提示，缓存命中标「（缓存）」；钩子要视频时先生图', async () => {
     const workDir = mkdtempSync(join(tmpdir(), 'mz-prog-'));
     const visual = { source: 'video' as const, prompt: 'slow push-in on a glass of cola with ice' };
     const cachedVisual = { source: 'generate' as const, prompt: 'a savings jar on a desk, editorial photo' };
@@ -486,15 +491,15 @@ describe('B-roll 选项', () => {
       { start: 4, end: 9, layout: 'split' as const, card: { template: 'photo' as const, props: { visual: cachedVisual } } },
     ] };
     const deps: BrollDeps = {
-      screenshot: async () => undefined, search: async () => [], image: async () => ({}),
-      video: async (_p, out, onStatus) => { for (const st of ['pending', 'pending', 'running']) onStatus?.(st); writeFileSync(out, 'v'); return { cost: 2.4 }; },
+      screenshot: async () => undefined, search: async () => [], image: async (_p, out) => { writeFileSync(out, 'i'); return {}; },
+      video: async () => { throw new Error('不应发起视频'); },
     };
     const events: ProgressEvent[] = [];
     await runBroll({ workDir, cfg: loadConfig({}), broll: { enabled: true, maxVideos: 1, budgetYuan: 10 }, brollDeps: deps, onProgress: (e) => events.push(e) }, storyboard, 9,
       () => ({}) as ProjectFile);
-    expect(events.map((e) => e.message)).toEqual([
-      '素材 1/2：生成视频中…', '素材 1/2：生成视频中（pending）', '素材 1/2：生成视频中（running）',
-      expect.stringMatching(/^素材 1\/2 视频 broll\/[0-9a-f]{12}\.mp4$/),
+    expect(events.map((e) => e.message).slice(0, 3)).toEqual([
+      '素材 1/2：生图（钩子关键图）中…',
+      expect.stringMatching(/^素材 1\/2 生图 broll\/[0-9a-f]{12}\.jpg$/),
       expect.stringMatching(/^素材 2\/2 生图（缓存） broll\/[0-9a-f]{12}\.jpg$/),
     ]);
   });

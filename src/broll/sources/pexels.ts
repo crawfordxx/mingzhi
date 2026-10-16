@@ -21,7 +21,9 @@ function toVideo(v: PexelsVideo): Candidate | undefined {
   const mp4s = (v.video_files ?? []).filter((f): f is Required<Pick<PexelsVideoFile, 'width' | 'height' | 'link'>> & PexelsVideoFile =>
     f.file_type === 'video/mp4' && !!f.width && !!f.height && !!f.link);
   const file = pickClosest(mp4s);
-  const thumb = v.video_pictures?.[0]?.picture ?? v.image;
+  // 预览取中间那张（video_pictures 按时间排列，第一张常是黑场或片头）
+  const pictures = v.video_pictures ?? [];
+  const thumb = pictures[Math.floor(pictures.length / 2)]?.picture ?? v.image;
   if (!file || !thumb) return undefined;
   return {
     id: `pexels:${v.id}`, source: 'pexels', kind: 'video', thumb, url: file.link, width: file.width, height: file.height,

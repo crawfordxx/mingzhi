@@ -115,8 +115,8 @@ const fakeCover = (calls: Calls): CoverDeps => ({
 const fakeBroll = (calls: Calls) => (meter: CostMeter): BrollDeps => ({
   screenshot: async () => { throw new Error('不应截图'); },
   search: async () => [],
-  image: async (prompt, out) => { calls.images.push(prompt); writeFileSync(out, 'jpg'); meter.addTask('img', 0.2, '生图'); return { cost: 0.2 }; },
-  video: async (prompt, out) => { calls.videos.push(prompt); writeFileSync(out, 'mp4'); meter.addTask('video', 2.4, '视频'); return { cost: 2.4 }; },
+  image: async (prompt, out) => { calls.images.push(prompt); writeFileSync(out, 'jpg'); meter.addTask('img', 0.2, '生图'); return { cost: 0.2, url: 'https://img.example/gen.jpg' }; },
+  video: async (prompt, _imageUrl, out) => { calls.videos.push(prompt); writeFileSync(out, 'mp4'); meter.addTask('video', 2.4, '视频'); return { cost: 2.4 }; },
 });
 
 export interface Hooks { onSegment?: () => Promise<void> | void; beforeComposite?: () => Promise<void> | void; /** 多段口播时假模型给出的段落顺序 */ order?: number[] }

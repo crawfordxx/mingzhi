@@ -65,6 +65,8 @@ export function checkOp(op: EditOp, ctx: EditContext): string | null {
     }
     case 'regenerateVisual':
       return checkVisual(op, ctx);
+    case 'replaceBroll':
+      return shotMissing(op.shotIndex, ctx) ?? (ctx.shots[op.shotIndex].broll ? null : '该镜头没有 B-roll 素材，无法换一张');
     case 'editCaption':
       return op.index >= ctx.captions.length ? `没有第 ${op.index} 句字幕` : captionTooLong(op.text);
     case 'removeSpan':

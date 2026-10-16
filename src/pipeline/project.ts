@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import type { CostEntry } from '../cost/meter.js';
 import type { BrollAsset } from '../broll/fulfill.js';
+import type { BeatRecord } from './broll-beats.js';
 import type { Transcript } from '../asr/types.js';
 import type { CaptionLine, TimedCaption } from '../captions/lines.js';
 import type { CaptionsSource } from '../captions/polish.js';
@@ -46,7 +47,7 @@ export interface ProjectFile {
   /** 分镜里因超过 8 秒被截短的带卡片镜头数 */
   storyboardCapped?: number;
   /** B-roll 素材获取结果（P3b）：取到的素材、失败的镜头与花费（元）；未开启时缺省 */
-  broll?: { assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number };
+  broll?: { assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number; /** 视觉节拍与各自结果（P7，重做单个镜头时读它） */ beats?: BeatRecord[]; /** 放好素材后的整片复检问题 */ issues?: string[] };
   /** 配乐与音效（P3c）：所选曲目 id（无配乐为 null）、情绪、触发的音效数 */
   audio?: { track: string | null; mood: Mood; sfxCount: number };
   /** 字幕样式（P3c） */

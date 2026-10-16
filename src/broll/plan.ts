@@ -60,7 +60,8 @@ const SYSTEM_PROMPT = `你是短视频口播的视觉导演。输入是成片时
 6. queryEn 和 queryZh 各 1-3 个（chart、ui 可以留空数组）：queryEn 用于 Pexels、Pixabay、Wikimedia，写成图库里真有人拍的画面（主体 + 动作/场景，3-6 个英文词）；queryZh 用于中文检索，写具体名词。不要在搜索词里写口播抽象词，也不要出现 hologram、robot、neon、glowing、全息、机器人、霓虹。
 7. avoid 写这个画面不要出现的东西，默认包含：${DEFAULT_AVOID.join('、')}，再按具体画面补充（如不可识别的人脸特写、带品牌 Logo 的画面）。
 8. 口播里的机构、社区、产品、岗位名，想要真实页面就用 screenshot，把名字写进 queryZh，由程序联网去找页面。urlHint 只有口播里明确提到该机构或产品、且你确定它的官网时才写，否则一律留空；你没有联网能力，不要凭记忆补口播里没出现的机构网址。口播里的数字或对比用 chart，不要用实拍硬凑。
-9. 不要编造口播里没有的数字、机构或网址。`;
+9. 不要编造口播里没有的数字、机构或网址。
+10. 放在哪：broll-full、pip、overlay 放在分镜概要里标「人物」的时间段（人物全屏、没有卡片）；与 hook、cta、photo、browser 卡片重叠的时间段不要放 beat（它们自带画面）；与其他卡片重叠的 beat 只会作为该卡片上半屏的背景图，present 写 split。`;
 
 const formatCaptions = (captions: TimedCaption[]): string =>
   captions.map((c) => `[${c.start.toFixed(2)}-${c.end.toFixed(2)}] ${c.text}`).join('\n');

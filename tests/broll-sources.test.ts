@@ -37,7 +37,7 @@ describe('pexelsSource', () => {
         { quality: 'uhd', file_type: 'video/mp4', width: 2160, height: 3840, fps: 29.97, link: 'https://v/uhd.mp4' },
         { quality: 'hd', file_type: 'video/webm', width: 1080, height: 1920, fps: 30, link: 'https://v/hd.webm' },
       ],
-      video_pictures: [{ picture: 'https://img/t1.jpg' }, { picture: 'https://img/t2.jpg' }],
+      video_pictures: [{ picture: 'https://img/t1.jpg' }, { picture: 'https://img/t2.jpg' }, { picture: 'https://img/t3.jpg' }],
     }],
   };
 
@@ -51,7 +51,7 @@ describe('pexelsSource', () => {
     expect(calls[0].url.searchParams.get('per_page')).toBe('5');
     expect((calls[0].init?.headers as Record<string, string>).Authorization).toBe('KEY');
     expect(out).toEqual([{
-      id: 'pexels:99', source: 'pexels', kind: 'video', thumb: 'https://img/t1.jpg', url: 'https://v/hd.mp4',
+      id: 'pexels:99', source: 'pexels', kind: 'video', thumb: 'https://img/t2.jpg', url: 'https://v/hd.mp4', // 预览取中间那张
       width: 1080, height: 1920, durationSec: 12, fps: 29.97, page: 'https://www.pexels.com/video/x-99/', author: 'Ann', authorUrl: 'https://www.pexels.com/@ann',
       license: 'Pexels License', licenseUrl: 'https://www.pexels.com/license/', attributionRequired: false, aiGenerated: false,
     }]);
@@ -259,6 +259,18 @@ describe('wikimediaSource', () => {
       extmetadata: { LicenseShortName: { value: license }, Artist: { value: '<a href="//x">Eve <b>Z</b></a>' }, LicenseUrl: { value: 'https://creativecommons.org/licenses/by/4.0' }, ...Object.fromEntries(Object.entries(meta).map(([k, v]) => [k, { value: v }])) },
       ...extra,
     }],
+  });
+
+  it('Restrictions 元数据带商标、人格权的排除（请求里要取这个字段）', async () => {
+    const calls: Call[] = [];
+    const body = { query: { pages: {
+      1: page(1, 'File:Logo.jpg', 'CC0', {}, { Restrictions: 'trademarked' }),
+      2: page(2, 'File:Person.jpg', 'CC BY 4.0', {}, { Restrictions: 'personality' }),
+      3: page(3, 'File:Ok.jpg', 'CC0', {}, { Restrictions: '' }),
+    } } };
+    const out = await wikimediaSource({ fetchImpl: jsonFetch(body, calls) })(q({ kind: 'photo', perPage: 8 }));
+    expect(calls[0].url.searchParams.get('iiextmetadatafilter')).toContain('Restrictions');
+    expect(out.map((c) => c.id)).toEqual(['wikimedia:3']);
   });
 
   it('请求参数与 User-Agent；按许可过滤（排除 NC/ND/BY-SA/未知），CC BY 置 attributionRequired', async () => {

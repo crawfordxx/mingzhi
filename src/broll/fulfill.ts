@@ -1,29 +1,33 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AppConfig } from '../config.js';
 import { EST_TASK_YUAN } from '../cost/constants.js';
 import { SEARCH_YUAN } from '../cost/estimate.js';
 import type { CostMeter } from '../cost/meter.js';
 import { rethrowIfCancelled, throwIfCancelled } from '../cancel.js';
 import { rethrowIfBalance } from '../llm/errors.js';
-import type { TaskClient } from '../llm/kexiang-task.js';
 import { normalizeStoryboard } from '../storyboard/normalize.js';
 import type { Storyboard, Visual } from '../storyboard/schema.js';
 import { visualsOf, type VisualNeed } from '../storyboard/visuals.js';
-import { generateImage, generateVideo, searchPexels } from './generate-media.js';
-import { screenshotUrl } from './screenshot.js';
-import { searchUrls } from './search.js';
+import type { NamedSource } from './gather.js';
 
 export interface BrollAsset { key: string; file: string; source: 'screenshot' | 'generate' | 'pexels' | 'video'; url?: string; cost?: number; cached?: boolean }
 export interface BrollDeps {
-  screenshot(url: string, out: string): Promise<void>;
+  /** size：截图视口（缺省 1080×1350） */
+  screenshot(url: string, out: string, size?: { width: number; height: number }): Promise<void>;
   search(query: string): Promise<string[]>;
-  image(prompt: string, out: string): Promise<{ cost?: number }>;
-  /** onStatus：长任务的状态回调（轮询到的状态文字），可选 */
-  video(prompt: string, out: string, onStatus?: (status: string) => void): Promise<{ cost?: number }>;
+  /** 生图；url 为生成图的公网地址（图生视频要用），size 为比例（缺省 1:1） */
+  image(prompt: string, out: string, opts?: { size?: string }): Promise<{ cost?: number; url?: string }>;
+  /** Seedance 图生视频：以 imageUrl 为首帧（不做文生视频）；onStatus：长任务的状态回调 */
+  video(prompt: string, imageUrl: string, out: string, onStatus?: (status: string) => void): Promise<{ cost?: number }>;
   pexels?(query: string, out: string): Promise<boolean>;
+  /** 免费图库来源（Wikimedia 免 key；Pexels、Pixabay 有 key 才有）；测试注入假来源，缺省为空 */
+  sources?: NamedSource[];
+  /** 下载图库素材用的 fetch（测试注入） */
+  fetchImpl?: typeof fetch;
 }
+/** 钩子要视频时先生图，图生视频放到 B-roll 最后、预算还够时再做（videoWanted） */
+export interface VideoWanted { shotIndex: number; key: string; prompt: string; imageUrl: string }
 export interface FulfillOptions {
   workDir: string;
   /** 分镜总时长（秒），最后一次归一化要用 */
@@ -38,15 +42,17 @@ export interface FulfillOptions {
   /** 某个素材开始获取前回调（缓存命中不回调） */
   onStart?: (need: VisualNeed) => void;
   onAsset?: (a: BrollAsset | { key: string; failed: string }) => void;
-  /** 视频任务的状态变化 */
+  /** 图生视频任务的状态变化（upgradeToVideo 用） */
   onStatus?: (status: string) => void;
   /** 取消信号：每个素材开始前检查，取消时抛 CancelledError */
   signal?: AbortSignal;
   /** 这些镜头的素材需求排到最后处理（工作台修改版本：先让没改动的卡片用上已付费的缓存，视频名额不被新卡片抢走） */
   deferShots?: number[];
+  /** 统一的预算检查（B-roll 上限与项目预算）；给出时代替 meter / budgetYuan 的检查 */
+  afford?: (estimate: number) => boolean;
 }
 /** failures[].shotIndex 指输入分镜（传入 fulfillVisuals 的 storyboard）的镜头下标；归一化可能合并或丢弃镜头，返回的 storyboard 下标可能不同 */
-export interface FulfillResult { storyboard: Storyboard; assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number }
+export interface FulfillResult { storyboard: Storyboard; assets: BrollAsset[]; failures: { shotIndex: number; reason: string }[]; costYuan: number; videoWanted: VideoWanted[] }
 
 /** 单次付费请求的预估花费（元），用于发起前的预算检查；接口没返回 cost 时也按它计 */
 const EST_IMAGE_YUAN = EST_TASK_YUAN.image;
@@ -57,8 +63,8 @@ const SEARCH_TRIES = 2;
 const PEXELS_WORDS = 6;
 
 type Attempt = { asset: BrollAsset } | { reason: string };
-interface Env { deps: BrollDeps; workDir: string; budgetYuan: number; maxVideos: number; meter?: CostMeter; reserveYuan: number; onStatus?: (status: string) => void }
-/** yuan：已花费；videos：已发起（含失败、含缓存命中）的视频请求数 */
+interface Env { deps: BrollDeps; workDir: string; budgetYuan: number; maxVideos: number; meter?: CostMeter; reserveYuan: number; afford?: (estimate: number) => boolean }
+/** yuan：已花费；videos：已用上的视频数（缓存命中） */
 interface Spend { yuan: number; videos: number }
 
 /** 递归按键名排序后序列化，字段顺序不同的同一需求得到同一个缓存键 */
@@ -76,19 +82,9 @@ export function visualKey(v: Visual): string {
   return createHash('sha1').update(canonical(v)).digest('hex').slice(0, 12);
 }
 
-export function makeDeps(opts: { apiKey: string; task: TaskClient; cfg: AppConfig; pexelsKey?: string; meter?: CostMeter }): BrollDeps {
-  const { apiKey, task, cfg, pexelsKey, meter } = opts;
-  return {
-    screenshot: (url, out) => screenshotUrl(url, out),
-    search: (query) => searchUrls(apiKey, query, { max: SEARCH_TRIES, meter }),
-    image: (prompt, out) => generateImage(task, prompt, out),
-    video: (prompt, out, onStatus) => generateVideo(task, prompt, out, cfg, undefined, onStatus),
-    ...(pexelsKey ? { pexels: (query: string, out: string) => searchPexels(pexelsKey, query, out) } : {}),
-  };
-}
-
 /** 再花 estimate 元（并为后续步骤留出 reserveYuan）是否仍在预算内：有 meter 以 meter 为准，否则按本步已花费累计 */
-const canAfford = (env: Env, spend: Spend, estimate: number): boolean => (env.meter ? env.meter.canSpend(estimate + env.reserveYuan) : spend.yuan + estimate + env.reserveYuan <= env.budgetYuan);
+const canAfford = (env: Env, spend: Spend, estimate: number): boolean =>
+  (env.afford ? env.afford(estimate) : env.meter ? env.meter.canSpend(estimate + env.reserveYuan) : spend.yuan + estimate + env.reserveYuan <= env.budgetYuan);
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const relFile = (key: string, ext: string): string => `broll/${key}.${ext}`;
@@ -136,12 +132,22 @@ function findCached(env: Env, key: string, source: Visual['source'], videoReques
   return hit ? { key, file: relFile(key, hit[0]), source: hit[1], cached: true } : undefined;
 }
 
+const hostOf = (url: string): string => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
+
+/** 截图网址：分镜给的网址只是模型记忆，必须联网核实（搜索结果里有同一域名才用它，否则用搜索给出的网址）；只有搜索词时直接搜 */
+async function screenshotUrls(env: Env, need: { url?: string; query?: string }): Promise<string[]> {
+  const host = need.url ? hostOf(need.url) : '';
+  const found = await env.deps.search(host ? `${host} ${need.query ?? ''}`.trim() : need.query ?? '');
+  const verified = need.url && found.some((u) => hostOf(u) === host) ? [need.url, ...found.filter((u) => u !== need.url)] : found;
+  return verified.slice(0, SEARCH_TRIES);
+}
+
 async function tryScreenshot(env: Env, key: string, need: { url?: string; query?: string }, spend: Spend): Promise<Attempt> {
   const file = relFile(key, 'png');
-  if (!need.url && !canAfford(env, spend, EST_SEARCH_YUAN)) return { reason: OVER_BUDGET };
+  if (!canAfford(env, spend, EST_SEARCH_YUAN)) return { reason: OVER_BUDGET };
   let urls: string[];
   try {
-    urls = need.url ? [need.url] : (await env.deps.search(need.query ?? '')).slice(0, SEARCH_TRIES);
+    urls = await screenshotUrls(env, need);
   } catch (err) {
     rethrowIfBalance(err);
     rethrowIfCancelled(err);
@@ -161,7 +167,8 @@ async function tryImage(env: Env, key: string, prompt: string, spend: Spend): Pr
   if (!canAfford(env, spend, EST_IMAGE_YUAN)) return { reason: OVER_BUDGET };
   const file = relFile(key, 'jpg');
   const r = await produce(join(env.workDir, file), (tmp) => env.deps.image(prompt, tmp));
-  return typeof r === 'string' ? { reason: `生图失败：${r}` } : { asset: { key, file, source: 'generate', cost: costOf(r.result, EST_IMAGE_YUAN) } };
+  if (typeof r === 'string') return { reason: `生图失败：${r}` };
+  return { asset: { key, file, source: 'generate', cost: costOf(r.result, EST_IMAGE_YUAN), ...(r.result.url ? { url: r.result.url } : {}) } };
 }
 
 async function tryPexels(env: Env, key: string, term: string): Promise<Attempt> {
@@ -182,29 +189,15 @@ async function tryGenerate(env: Env, key: string, prompt: string, spend: Spend, 
   return 'asset' in px ? px : { reason: `${img.reason}；${px.reason}` };
 }
 
-/** 视频：达到 maxVideos（尝试次数）或预算不够时不发起请求（tried=false），由调用方退到生图 */
-async function tryVideo(env: Env, key: string, prompt: string, spend: Spend): Promise<{ attempt: Attempt; tried: boolean }> {
-  if (spend.videos >= env.maxVideos) return { attempt: { reason: '视频数量已达上限' }, tried: false };
-  if (!canAfford(env, spend, EST_VIDEO_YUAN)) return { attempt: { reason: OVER_BUDGET }, tried: false };
-  const file = relFile(key, 'mp4');
-  const r = await produce(join(env.workDir, file), (tmp) => env.deps.video(prompt, tmp, env.onStatus));
-  const attempt: Attempt = typeof r === 'string' ? { reason: `生视频失败：${r}` } : { asset: { key, file, source: 'video', cost: costOf(r.result, EST_VIDEO_YUAN) } };
-  return { attempt, tried: true };
-}
-
-/** 按优先级取一份素材：截图（photo 失败退生图）、生成、视频（失败退生图）；videoTried 表示是否发起过视频请求 */
-async function fetchAsset(env: Env, need: VisualNeed, key: string, spend: Spend): Promise<{ outcome: Attempt; videoTried: boolean }> {
+/** 按优先级取一份素材：截图（photo 失败退生图）、生成；视频需求先生图（图生视频由调用方在预算还够时再做） */
+async function fetchAsset(env: Env, need: VisualNeed, key: string, spend: Spend): Promise<Attempt> {
   const v = need.visual;
-  if (v.source === 'generate') return { outcome: await tryGenerate(env, key, v.prompt, spend), videoTried: false };
-  if (v.source === 'video') {
-    const { attempt, tried } = await tryVideo(env, key, v.prompt, spend);
-    return { outcome: 'asset' in attempt ? attempt : await tryGenerate(env, key, v.prompt, spend), videoTried: tried };
-  }
+  if (v.source === 'generate' || v.source === 'video') return tryGenerate(env, key, v.prompt, spend);
   const shot = await tryScreenshot(env, key, v, spend);
-  if ('asset' in shot || need.template !== 'photo') return { outcome: shot, videoTried: false };
+  if ('asset' in shot || need.template !== 'photo') return shot;
   const original = v.query ?? v.url ?? '';
   const gen = await tryGenerate(env, key, `Editorial photo illustrating: ${original}`, spend, original);
-  return { outcome: 'asset' in gen ? gen : { reason: `${shot.reason}；${gen.reason}` }, videoTried: false };
+  return 'asset' in gen ? gen : { reason: `${shot.reason}；${gen.reason}` };
 }
 
 /** 把文件名（相对工作目录）写回对应镜头的卡片；visual 保留，返回新分镜 */
@@ -232,36 +225,45 @@ function giveUpPhoto(storyboard: Storyboard, need: VisualNeed): Storyboard {
   return { ...storyboard, shots };
 }
 
-/** 分镜里已有且文件真实存在的 image / video 引用（归一化时不能因为不在本次获取列表里被误删） */
-function existingFiles(storyboard: Storyboard, workDir: string): string[] {
+/** 分镜里已有且文件真实存在的素材引用（卡片的 image / video 与镜头的 B-roll；归一化时不能因为不在本次获取列表里被误删） */
+export function existingFiles(storyboard: Storyboard, workDir: string): string[] {
   return storyboard.shots.flatMap((s) => {
     const props = s.card && 'props' in s.card ? (s.card.props as { image?: string; video?: string }) : {};
-    return [props.image, props.video].filter((f): f is string => f !== undefined && existsSync(join(workDir, f)));
+    return [props.image, props.video, s.broll?.file].filter((f): f is string => f !== undefined && existsSync(join(workDir, f)));
   });
 }
 
+/** 视频需求生图成功（拿到了公网地址、没有现成的 mp4 缓存）时，记下以后做图生视频 */
+function wantVideo(need: VisualNeed, key: string, asset: BrollAsset): VideoWanted[] {
+  if (need.visual.source !== 'video' || asset.source !== 'generate' || !asset.url) return [];
+  return [{ shotIndex: need.shotIndex, key, prompt: need.visual.prompt, imageUrl: asset.url }];
+}
+
 /**
- * 严格串行（可想套餐同时只跑 1 个任务）取回分镜里的全部素材需求并写回卡片。
+ * 严格串行（可想套餐同时只跑 1 个任务）取回分镜卡片上的全部素材需求并写回卡片。
+ * 视频需求只生图（缓存里已有 mp4 且名额未满时直接用），图生视频由调用方在 B-roll 末尾、预算还够时用 upgradeToVideo 做。
  * 单个素材失败不抛错，只记入 failures；最后再归一化一次，拿不到图的 photo 会被丢弃并补成全屏。
  */
 export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, opts: FulfillOptions): Promise<FulfillResult> {
   mkdirSync(join(opts.workDir, 'broll'), { recursive: true });
-  const env: Env = { deps, workDir: opts.workDir, budgetYuan: opts.budgetYuan, maxVideos: opts.maxVideos, meter: opts.meter, reserveYuan: opts.reserveYuan ?? 0, onStatus: opts.onStatus };
+  const env: Env = { deps, workDir: opts.workDir, budgetYuan: opts.budgetYuan, maxVideos: opts.maxVideos, meter: opts.meter, reserveYuan: opts.reserveYuan ?? 0, afford: opts.afford };
   let current = storyboard;
   let assets: BrollAsset[] = [];
   let failures: FulfillResult['failures'] = [];
-  let videoRequests = 0;
+  let videoWanted: VideoWanted[] = [];
+  let videoHits = 0;
   const deferred = (n: VisualNeed): boolean => opts.deferShots?.includes(n.shotIndex) ?? false;
   const needs = visualsOf(storyboard);
   for (const need of [...needs.filter((n) => !deferred(n)), ...needs.filter(deferred)]) {
     throwIfCancelled(opts.signal);
     const key = visualKey(need.visual);
-    const cached = findCached(env, key, need.visual.source, videoRequests);
+    const cached = findCached(env, key, need.visual.source, videoHits);
     if (!cached) opts.onStart?.(need);
-    const { outcome, videoTried } = cached ? { outcome: { asset: cached } as Attempt, videoTried: cached.source === 'video' } : await fetchAsset(env, need, key, { yuan: yuanOf(assets), videos: videoRequests });
-    videoRequests += videoTried ? 1 : 0;
+    const outcome: Attempt = cached ? { asset: cached } : await fetchAsset(env, need, key, { yuan: yuanOf(assets), videos: videoHits });
     if ('asset' in outcome) {
+      videoHits += outcome.asset.source === 'video' ? 1 : 0;
       assets = [...assets, outcome.asset];
+      videoWanted = [...videoWanted, ...wantVideo(need, key, outcome.asset)];
       current = applyAsset(current, need.shotIndex, outcome.asset);
       opts.onAsset?.(outcome.asset);
     } else {
@@ -273,5 +275,34 @@ export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, op
   const files = [...assets.map((a) => a.file), ...existingFiles(storyboard, opts.workDir)];
   // 注意：最终归一化会去掉已取到素材的 photo 的 visual（既定行为：P5 的 regenerateVisual 编辑操作自带 visual）
   const normalized = normalizeStoryboard(current, opts.durationSec, files).storyboard;
-  return { storyboard: normalized, assets, failures, costYuan: yuanOf(assets) };
+  return { storyboard: normalized, assets, failures, costYuan: yuanOf(assets), videoWanted };
+}
+
+/** 钩子卡片上与 key 对应的视频需求所在的镜头（按需求内容找，归一化后下标可能变了） */
+function hookShotOf(storyboard: Storyboard, key: string): number {
+  return storyboard.shots.findIndex((s) => s.card?.template === 'hook' && s.card.props.visual !== undefined && visualKey(s.card.props.visual) === key);
+}
+
+/**
+ * Seedance 图生视频：只对已经生成的钩子关键图做（以它为首帧），最多 maxVideos 条，每条发起前检查预算。
+ * 成功的写进钩子卡片的 video；失败只记原因，钩子保留图片
+ */
+export async function upgradeToVideo(storyboard: Storyboard, wanted: readonly VideoWanted[], deps: BrollDeps, opts: Pick<FulfillOptions, 'workDir' | 'maxVideos' | 'afford' | 'onStatus' | 'signal'>): Promise<{ storyboard: Storyboard; assets: BrollAsset[]; failures: string[]; skipped: string[] }> {
+  let current = storyboard;
+  let assets: BrollAsset[] = [];
+  let failures: string[] = [];
+  let skipped: string[] = [];
+  for (const w of wanted.slice(0, opts.maxVideos)) {
+    throwIfCancelled(opts.signal);
+    const i = hookShotOf(current, w.key);
+    if (i < 0) continue;
+    if (opts.afford && !opts.afford(EST_VIDEO_YUAN)) { skipped = [...skipped, `钩子图生视频${OVER_BUDGET}，保留图片`]; continue; }
+    const file = relFile(w.key, 'mp4');
+    const r = await produce(join(opts.workDir, file), (tmp) => deps.video(w.prompt, w.imageUrl, tmp, opts.onStatus));
+    if (typeof r === 'string') { failures = [...failures, `图生视频失败：${r}`]; continue; }
+    const asset: BrollAsset = { key: w.key, file, source: 'video', cost: costOf(r.result, EST_VIDEO_YUAN) };
+    assets = [...assets, asset];
+    current = applyAsset(current, i, asset);
+  }
+  return { storyboard: current, assets, failures, skipped };
 }

@@ -27,6 +27,10 @@ export function wikimediaFetch(fetchImpl: typeof fetch = fetch): typeof fetch {
     fetchImpl(input, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), 'User-Agent': WIKIMEDIA_USER_AGENT } })) as typeof fetch;
 }
 
+/** Commons 的 Restrictions 元数据：商标、人格权（可识别人物）等非版权限制，商用有风险，一律排除 */
+const RESTRICTED = /trademark|personality|insignia|costume|ignore-copyright-restrictions/i;
+export const restricted = (value: string | undefined): boolean => !!value && RESTRICTED.test(value);
+
 function decodeEntities(text: string): string {
   return text
     .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
@@ -46,7 +50,7 @@ function toCandidate(page: WikiPage, kind: 'video' | 'photo'): Candidate | undef
   const meta = info.extmetadata ?? {};
   const licenseName = meta.LicenseShortName?.value?.trim() ?? '';
   const verdict = classifyLicense(licenseName);
-  if (!verdict) return undefined;
+  if (!verdict || restricted(meta.Restrictions?.value)) return undefined;
   const rawAuthor = stripHtml(meta.Artist?.value ?? '');
   const author = UNKNOWN_AUTHOR.test(rawAuthor) ? '' : rawAuthor;
   const attributionRequired = verdict.attributionRequired || meta.AttributionRequired?.value === 'true';
@@ -68,7 +72,7 @@ export function wikimediaSource(opts: SourceOptions = {}): Source {
     const params = new URLSearchParams({
       action: 'query', format: 'json', generator: 'search', gsrnamespace: '6',
       gsrsearch: `${q.text} filetype:${kind === 'video' ? 'video' : 'bitmap'}`, gsrlimit: String(q.perPage),
-      prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: String(THUMB_WIDTH), iiextmetadatafilter: 'LicenseShortName|LicenseUrl|Artist|AttributionRequired',
+      prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: String(THUMB_WIDTH), iiextmetadatafilter: 'LicenseShortName|LicenseUrl|Artist|AttributionRequired|Restrictions',
     });
     const json = await getJson<{ query?: { pages?: Record<string, WikiPage> } }>(NAME, `${API}?${params}`, { headers: { 'User-Agent': WIKIMEDIA_USER_AGENT } }, opts, signal);
     return Object.values(json.query?.pages ?? {})

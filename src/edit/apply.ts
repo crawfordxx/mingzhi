@@ -47,7 +47,8 @@ function stagesOf(op: EditOp): Stage[] {
   switch (op.type) {
     case 'setBackground': return ['matte', 'compose'];
     case 'setCoverStyle': return [];
-    case 'regenerateVisual': return ['broll', 'compose'];
+    case 'regenerateVisual':
+    case 'replaceBroll': return ['broll', 'compose'];
     case 'replaceCard': return needsBroll(op.card) ? ['broll', 'compose'] : ['compose'];
     // 不重做字幕文字与分镜内容：字幕重新对时、分镜平移（retimeCaptions / remapStoryboard），卡片与 B-roll 保留
     case 'pace':
@@ -133,6 +134,11 @@ function regenerateVisual(state: VersionState, i: number, visual: Visual): Versi
   return replaceCard(state, i, { template: card.template, props: { ...props, visual } } as CardSpec, false);
 }
 
+function requireBroll(state: VersionState, i: number): VersionState {
+  if (!shotAt(state, i).broll) throw new Error(`第 ${i} 个镜头没有 B-roll 素材，无法换一张`);
+  return state;
+}
+
 function editCaption(state: VersionState, index: number, text: string): VersionState {
   if (index >= state.captions.length) throw new Error(`没有第 ${index} 句字幕（共 ${state.captions.length} 句）`);
   const tooLong = captionTooLong(text);
@@ -183,6 +189,8 @@ export function applyOp(state: VersionState, op: EditOp): VersionState {
     case 'replaceCard': return replaceCard(state, op.shotIndex, op.card);
     case 'setLayout': return setLayout(state, op.shotIndex, op.layout);
     case 'regenerateVisual': return regenerateVisual(state, op.shotIndex, op.visual);
+    // 素材在素材步骤里重做（运行器按镜头时间定位），状态里先不动；这里只校验镜头带素材
+    case 'replaceBroll': return requireBroll(state, op.shotIndex);
     case 'editCaption': return editCaption(state, op.index, op.text);
     case 'pace': return { ...state, cutOptions: pace(state.cutOptions, op.direction) };
     case 'removeSpan': return removeSpan(state, op.fromSec, op.toSec);

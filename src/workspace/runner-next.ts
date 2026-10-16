@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateBackground } from '../background/resolve.js';
 import type { TimedCaption } from '../captions/lines.js';
@@ -10,12 +10,14 @@ import { validateBroll } from '../pipeline/broll-step.js';
 import { validateStyles } from '../pipeline/finish-step.js';
 import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
-import { brollStage, composeStage, finalQaStage, placeEnding, qaCardsStage } from '../pipeline/stages.js';
+import { brollStage, composeStage, finalQaStage, placeEnding, qaCardsStage, type BrollStageExtra } from '../pipeline/stages.js';
+import type { BrollMark } from '../pipeline/broll-redo.js';
+import { writeStoryboardCredits } from '../broll/credit-store.js';
 import type { SegmentedResult } from '../compose/segments.js';
 import type { CardQaEntry } from '../qa/visual.js';
 import type { CardSpec, Storyboard } from '../storyboard/schema.js';
 import type { VersionEnv, VersionOutcome } from './runner.js';
-import { ANALYSIS_FILE, COVER_FILES, FINAL_FILE, linkBroll, linkFile, linkIfExists, readJson, STATE_FILE, type BaseAnalysis } from './runner-files.js';
+import { ANALYSIS_FILE, COVER_FILES, FINAL_FILE, MARKS_FILE, linkBroll, linkFile, linkIfExists, readJson, STATE_FILE, type BaseAnalysis } from './runner-files.js';
 import { makeCover } from './runner-cover.js';
 import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, resolveBg, reusePerson, sameBackground, type Person } from './runner-media.js';
 import { recut, retime, writeAss } from './runner-retime.js';
@@ -95,10 +97,33 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
   const placed = placeEnding(args, timed.storyboard, timed.captions, plan.outputDurationSec);
   // 素材名额先让给没改动的卡片（它们的视频已经付过费），改动过的卡片排在后面
   const storyboard = c.stages.has('broll')
-    ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, changedShots(p.state, placed))
+    ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, { captions: timed.captions, deferShots: changedShots(p.state, placed), edit: brollEdit(p, c) })
     : placed;
   linkBroll(storyboard, env.base, env.dir);
+  writeStoryboardCredits(storyboard, env.base, env.dir);
   return { ...person, plan, captions: timed.captions, storyboard };
+}
+
+/**
+ * 修改版本的 B-roll 重做请求：「换一张 B-roll」指向的镜头（按镜头中点的成片秒数定位，素材步骤前的 CTA 放置不影响）、
+ * 上一版素材面板的标记（remove 去掉、replace 换一张）与上一版的节拍记录。不重新规划节拍
+ */
+function brollEdit(p: Parent, c: Change): NonNullable<BrollStageExtra['edit']> {
+  const shots = c.next.storyboard.shots;
+  const redoAt = c.ops.flatMap((o) => (o.type === 'replaceBroll' && shots[o.shotIndex] ? [(shots[o.shotIndex].start + shots[o.shotIndex].end) / 2] : []));
+  return { redoAt, marks: readMarks(p.dir), records: p.project?.broll?.beats ?? [] };
+}
+
+/** 上一版素材面板的标记（credits-marks.json，键是素材相对路径）；没有或损坏当作没有标记 */
+function readMarks(dir: string): Record<string, BrollMark> {
+  const file = join(dir, MARKS_FILE);
+  if (!existsSync(file)) return {};
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, { action?: unknown }>;
+    return Object.fromEntries(Object.entries(raw).flatMap(([k, v]) => (v?.action === 'replace' || v?.action === 'remove' ? [[k, v.action]] : [])));
+  } catch {
+    return {};
+  }
 }
 
 /** 键排序后序列化：同一张卡片不因字段顺序不同被当成改过 */

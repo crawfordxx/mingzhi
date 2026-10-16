@@ -22,6 +22,8 @@ export const EditOpSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('replaceCard'), shotIndex: index, card: CardSpecSchema }),
   z.object({ type: z.literal('setLayout'), shotIndex: index, layout: z.enum(LAYOUTS) }),
   z.object({ type: z.literal('regenerateVisual'), shotIndex: index, visual: VisualSchema }),
+  /** 换一张 B-roll：只重做该镜头的素材（素材面板标了删除的则去掉素材），其余镜头不动 */
+  z.object({ type: z.literal('replaceBroll'), shotIndex: index }),
   z.object({ type: z.literal('editCaption'), index, text: z.string().trim().min(1).max(60) }),
   z.object({ type: z.literal('pace'), direction: z.enum(['tighter', 'looser']) }),
   /** 成片时间（用户在预览里看到的时间） */

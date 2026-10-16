@@ -27,6 +27,11 @@ const countCards = (shots: Shot[]): number => shots.filter((s) => s.card !== und
 const plain = (s: Shot): Shot => ({ start: s.start, end: s.end, layout: 'full' });
 /** 画面上只有人物全屏的镜头（无卡片，也不显示 B-roll 素材）：可以互相合并 */
 const isPlain = (s: Shot): boolean => !s.card && visualLayout(s) === 'full';
+/** 画面上有内容（卡片，或显示出来的 B-roll 素材）的镜头：限长、不吞并相邻短镜头时与带卡片的镜头同等对待 */
+const hasContent = (s: Shot): boolean => s.card !== undefined || !isPlain(s);
+/** 全屏插入素材单次最长 3.5 秒（与 B-roll 节拍规划一致），其余带内容的镜头 MAX_SHOT_SEC */
+const FULL_BROLL_MAX_SEC = 3.5;
+const limitOf = (s: Shot): number => (visualLayout(s) === 'broll' ? FULL_BROLL_MAX_SEC : MAX_SHOT_SEC);
 
 function omitKey<P extends object, K extends keyof P>(obj: P, key: K): Omit<P, K> {
   return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key)) as Omit<P, K>;
@@ -78,7 +83,7 @@ function sanitizeBroll(shot: Shot, files: Set<string>): Shot {
 /** 无卡片的镜头除非有素材可显示（全屏插入、画中画、浮层、上半屏铺素材）否则变为全屏；full 镜头只有 cta 能显示卡片，带其他卡片的改为 split（保留内容，否则会为看不见的卡片白取素材）；卡片不可用则返回 null（镜头整体丢弃） */
 function sanitizeShot(raw: Shot, files: Set<string>): Shot | null {
   const shot = sanitizeBroll(raw, files);
-  if (!shot.card) return shot.broll && visualLayout(shot) !== 'full' ? shot : { ...shot, layout: 'full' };
+  if (!shot.card) return shot.broll && visualLayout(shot) !== 'full' ? shot : { ...omitKey(shot, 'broll'), layout: 'full' };
   const card = sanitizeCard(shot.card, files);
   if (!card) return null;
   return { ...shot, card, layout: shot.layout === 'full' && card.template !== 'cta' ? 'split' : shot.layout };
@@ -117,13 +122,13 @@ function extendCta(shots: Shot[], durationSec: number): Shot[] {
   return [...shots.slice(0, ctaIdx), { ...shots[ctaIdx], end: round(durationSec) }];
 }
 
-/** 带卡片的镜头限长 MAX_SHOT_SEC：普通镜头留开头，末尾的 cta 留结尾；余下由 fillGaps 补为全屏。余下不足 MIN_SHOT_SEC 时少留一点，避免被 mergeShort 并回 */
+/** 带卡片或显示 B-roll 素材的镜头限长 MAX_SHOT_SEC：普通镜头留开头，末尾的 cta 留结尾；余下由 fillGaps 补为全屏。余下不足 MIN_SHOT_SEC 时少留一点，避免被 mergeShort 并回 */
 function capLongShots(shots: Shot[]): { shots: Shot[]; capped: number } {
   const out = shots.map((s, i): Shot => {
     const len = round(s.end - s.start);
-    if (!s.card || len <= MAX_SHOT_SEC) return s;
+    if (!hasContent(s) || len <= MAX_SHOT_SEC) return s;
     const keep = len - MAX_SHOT_SEC < MIN_SHOT_SEC ? Math.min(MAX_SHOT_SEC, len - MIN_SHOT_SEC) : MAX_SHOT_SEC;
-    const tail = s.card.template === 'cta' && i === shots.length - 1;
+    const tail = s.card?.template === 'cta' && i === shots.length - 1;
     return tail ? { ...s, start: round(s.end - keep) } : { ...s, end: round(s.start + keep) };
   });
   return { shots: out, capped: out.filter((s, i) => s !== shots[i]).length };
@@ -148,9 +153,9 @@ type Fate = 'keep' | 'prev' | 'next' | 'plain';
 /** 短于 MIN_SHOT_SEC 的镜头（末尾 cta 除外；非末尾的 cta 之后会被降级，照常合并）：先并入前一个（带卡片的不超过 MAX_SHOT_SEC），再试并入后一个（同样限长），都不行时前一个按软上限并入，最后才改为全屏；首个镜头只能并入后一个，放不下就保留 */
 function shortFate(last: Shot | undefined, s: Shot, next: Shot | undefined): Fate {
   if (round(s.end - s.start) >= MIN_SHOT_SEC || (s.card?.template === 'cta' && !next)) return 'keep';
-  const fitsNext = next !== undefined && (!next.card || round(next.end - s.start) <= MAX_SHOT_SEC);
+  const fitsNext = next !== undefined && (!hasContent(next) || round(next.end - s.start) <= limitOf(next));
   if (!last) return fitsNext ? 'next' : 'keep';
-  if (!last.card || round(s.end - last.start) <= MAX_SHOT_SEC) return 'prev';
+  if (!hasContent(last) || round(s.end - last.start) <= limitOf(last)) return 'prev';
   if (fitsNext) return 'next';
   return round(s.end - last.start) < SOFT_MAX_SHOT_SEC ? 'prev' : 'plain';
 }
@@ -184,7 +189,7 @@ function ensureCtaRoom(shots: Shot[]): Shot[] {
   // 向下取整到帧，帧对齐后仍不短于 CTA_MIN_SEC
   const wanted = Math.floor(round(last.end - CTA_MIN_SEC) * CANVAS.fps) / CANVAS.fps;
   // 前一个是空镜头且借完不足 1 秒：整个并入 cta，再继续向更早的镜头借（镜头数递减，必然终止）
-  if (!prev.card && wanted - prev.start < MIN_SHOT_SEC) return ensureCtaRoom([...shots.slice(0, -2), { ...last, start: prev.start }]);
+  if (!hasContent(prev) && wanted - prev.start < MIN_SHOT_SEC) return ensureCtaRoom([...shots.slice(0, -2), { ...last, start: prev.start }]);
   const start = Math.max(wanted, round(prev.start + MIN_SHOT_SEC));
   return start >= last.start ? shots : [...shots.slice(0, -2), { ...prev, end: start }, { ...last, start }];
 }

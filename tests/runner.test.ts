@@ -215,7 +215,7 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     expect(stateOf(off, 2).storyboard.shots.some((s) => s.card?.template === 'photo')).toBe(false);
   });
 
-  it('regenerateVisual 换素材重新付费；maxVideos 用完时不再生成视频', async () => {
+  it('regenerateVisual 换素材重新付费；钩子要视频时先生图，短片的 B-roll 上限放不下图生视频', async () => {
     const f = await afterV1();
     const k = splitShots(stateOf(f, 1))[0];
     await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'replaceCard', shotIndex: k, card: { template: 'photo', props: { label: '图', visual: { source: 'generate', prompt: 'a savings jar on a desk, editorial photo' } } } } as EditOp], '加图');
@@ -232,7 +232,8 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     expect(g.calls.videos).toEqual([]);
     f.reset();
     await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'replaceCard', shotIndex: 0, card: hook } as EditOp], '加开场视频');
-    expect(f.calls.videos).toHaveLength(1); // 对照：maxVideos 为 1 时会生成
+    expect(f.calls.images).toEqual(['a jar of coins on a wooden table, slow push in']);
+    expect(f.calls.videos).toEqual([]); // maxVideos 为 1 也不做：每 2 分钟 ¥4 的上限按片长折算，短片放不下 ¥2.4 的视频
   });
 
   it('空操作（回退）：全部复用父版本，状态与父版本一致', async () => {
@@ -271,18 +272,18 @@ describe('修复轮 1 补充', () => {
     await expect(runNextVersion(f.ctx, f.spaceId, 1, [], '回退')).rejects.toThrow('v1 还没有完成');
   });
 
-  it('素材名额先给没改动的卡片：父版本已用掉视频名额时，新加在前面的视频卡退为生图，旧视频卡保留', async () => {
+  it('钩子视频需求先生图：父版本的钩子图命中缓存不重复付费，新加的钩子只生图', async () => {
     const f = await afterV1();
     const hook = (prompt: string, i: number) => ({ type: 'replaceCard', shotIndex: i, card: { template: 'hook', props: { index: 1, total: 1, headline: '钱要放在取得到的地方', highlight: ['取得到'], visual: { source: 'video', prompt } } } }) as EditOp;
     const later = splitShots(stateOf(f, 1))[1];
     await runNextVersion(f.ctx, f.spaceId, 1, [hook('old clip of coins on a table', later)], '后面加视频');
-    expect(f.calls.videos).toEqual(['old clip of coins on a table']);
+    expect(f.calls.images).toEqual(['old clip of coins on a table']);
     f.reset();
     await runNextVersion(f.ctx, f.spaceId, 2, [hook('new clip of a piggy bank', 0)], '前面再加视频');
     expect(f.calls.videos).toEqual([]);
     expect(f.calls.images).toEqual(['new clip of a piggy bank']);
-    const cards = stateOf(f, 3).storyboard.shots.flatMap((sh) => (sh.card?.template === 'hook' ? [sh.card.props as { video?: string; visual?: { prompt: string } }] : []));
-    expect(cards.find((c) => c.visual?.prompt === 'old clip of coins on a table')?.video).toMatch(/\.mp4$/);
+    const cards = stateOf(f, 3).storyboard.shots.flatMap((sh) => (sh.card?.template === 'hook' ? [sh.card.props as { image?: string; visual?: { prompt: string } }] : []));
+    expect(cards.find((c) => c.visual?.prompt === 'old clip of coins on a table')?.image).toMatch(/\.jpg$/);
   });
 
   it('换回用过的封面风格：在 base/covers/<风格> 里生成，命中已付费的底图缓存', async () => {

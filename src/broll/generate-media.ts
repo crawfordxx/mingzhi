@@ -16,21 +16,25 @@ const STYLE_SUFFIX = `${STYLE_TEMPLATE}${AVOID_TERMS}, no watermark, no logos`;
 
 export type Download = (url: string, dest: string) => Promise<void>;
 
-/** 文生图：1:1 / 1k / medium / jpeg，约 ¥0.2 一张 */
-export async function generateImage(task: TaskClient, prompt: string, dest: string, download: Download = downloadTo): Promise<{ cost?: number }> {
+/** 生图分辨率：1:1 用 1k（约 ¥0.2）；竖屏、横屏等非方图用 2k，短边才够铺 1080 宽的画面 */
+const resolutionOf = (size: string): string => (size === '1:1' ? '1k' : '2k');
+
+/** 文生图：缺省 1:1 / 1k / medium / jpeg，约 ¥0.2 一张；返回生成图的公网地址（图生视频以它为首帧） */
+export async function generateImage(task: TaskClient, prompt: string, dest: string, download: Download = downloadTo, size = '1:1'): Promise<{ cost?: number; url: string }> {
   const { url, cost } = await task.run(
-    { modelName: IMAGE_MODEL, modelType: 'text2img', prompt: `${prompt}${STYLE_SUFFIX}`, size: '1:1', resolution: '1k', quality: 'medium', output_format: 'jpeg' },
+    { modelName: IMAGE_MODEL, modelType: 'text2img', prompt: `${prompt}${STYLE_SUFFIX}`, size, resolution: resolutionOf(size), quality: 'medium', output_format: 'jpeg' },
     { kind: 'image', label: 'B-roll 生图' },
   );
   await download(url, dest);
-  return cost !== undefined ? { cost } : {};
+  return cost !== undefined ? { cost, url } : { url };
 }
 
-/** Seedance 文生视频：1:1 / 4 秒 / 720p，约 ¥2.4 一条；原片是 24fps，下载后统一转成 30fps 无音轨 */
-export async function generateVideo(task: TaskClient, prompt: string, dest: string, cfg: AppConfig, download: Download = downloadTo, onStatus?: (status: string) => void): Promise<{ cost?: number }> {
+/** Seedance 图生视频（首帧为 imageUrl，不做文生视频）：9:16 / 4 秒 / 720p，约 ¥2.4 一条；原片 24fps，下载后统一转成 30fps 无音轨 */
+export async function generateVideoFromImage(task: TaskClient, prompt: string, imageUrl: string, dest: string, cfg: AppConfig, download: Download = downloadTo, onStatus?: (status: string) => void, ratio = '9:16'): Promise<{ cost?: number }> {
+  const content = [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: imageUrl }, role: 'first_frame' }];
   const { url, cost } = await task.run(
-    { modelName: VIDEO_MODEL, modelType: 'text2video', content: [{ type: 'text', text: prompt }], ratio: '1:1', duration: 4, resolution: '720p', watermark: false, generate_audio: false },
-    { kind: 'video', timeoutMs: VIDEO_TIMEOUT_MS, onStatus, label: 'B-roll 视频' },
+    { modelName: VIDEO_MODEL, modelType: 'img2video', content, ratio, duration: 4, resolution: '720p', watermark: false, generate_audio: false },
+    { kind: 'video', timeoutMs: VIDEO_TIMEOUT_MS, onStatus, label: 'B-roll 图生视频' },
   );
   const raw = `${dest}.raw.mp4`;
   try {

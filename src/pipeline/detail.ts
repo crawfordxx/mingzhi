@@ -8,7 +8,7 @@ import type { ProjectFile, ProjectPatch } from './project.js';
 
 /** 进度事件携带的结构化数据，供工作台「剪辑直播」画界面；kind 决定 data 的形状 */
 export interface ProgressDetail {
-  kind: 'transcript' | 'cut' | 'captions' | 'shot' | 'qa' | 'cost' | 'progress';
+  kind: 'transcript' | 'cut' | 'captions' | 'shot' | 'qa' | 'cost' | 'progress' | 'broll';
   data: unknown;
 }
 
@@ -126,6 +126,14 @@ export function hardDetail(hard: HardCheck[]): ProgressDetail {
 /** 当前总花费与上限（元）；不限预算时 budget 为 null；工作台另带项目上限 cap（budget 是本版开始时的剩余额度） */
 export function costDetail(total: number, budget: number | null, cap?: number): ProgressDetail {
   return { kind: 'cost', data: { total, budget, ...(cap !== undefined ? { cap } : {}) } };
+}
+
+/**
+ * B-roll 编排直播：phase 为 plan（节拍表：beats 数与每个节拍的时间、呈现、画面）、beat（某个节拍：候选数、各来源候选数、入选来源与版式或跳过原因）、
+ * done（汇总：放进镜头的数量、各来源数量、花费）；spentYuan 是 B-roll 步骤至今的花费
+ */
+export function brollDetail(data: { phase: 'plan' | 'beat' | 'done'; spentYuan: number } & Record<string, unknown>): ProgressDetail {
+  return { kind: 'broll', data };
 }
 
 /** 抠像 / 渲染百分比；抠像另带帧数 */

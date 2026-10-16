@@ -27,7 +27,7 @@ import { limitTailLoudness } from '../audio/loudness.js';
 import type { CardQaEntry, CardScore } from '../qa/visual.js';
 import type { HardCheck } from '../qa/hard.js';
 import { prepareAudio } from './audio-step.js';
-import { runBroll } from './broll-step.js';
+import { runBroll, type BrollContext } from './broll-step.js';
 import { cardScoreDetail, progressDetail } from './detail.js';
 import { runCover, runLoudness } from './finish-step.js';
 import { mediaOf } from './media-deps.js';
@@ -162,7 +162,7 @@ export async function storyboardStage(
   args: PipelineArgs, captions: TimedCaption[], durationSec: number, brollDir: string, complete: Complete,
 ): Promise<Storyboard> {
   const planned = placeEnding(args, await planStoryboard(args.llm, captions, durationSec, complete), captions, durationSec);
-  return brollStage(args, planned, durationSec, brollDir, complete);
+  return brollStage(args, planned, durationSec, brollDir, complete, { captions });
 }
 
 /** CTA 提前到倒数第 5–8 秒（分镜阶段落盘，之后的归一化认 placed 标记不再拉回）；放不下就留在末尾 */
@@ -170,11 +170,15 @@ export function placeEnding(args: PipelineArgs, storyboard: Storyboard, captions
   return { ...storyboard, shots: placeCta(storyboard.shots, captions, contentSec, resolveOutro(args.outro).enabled) };
 }
 
-/** 只跑素材步骤（修改版本的 regenerateVisual 等也走这里，预算与 maxVideos 由 args.broll / args.meter 约束；deferShots 的需求排到最后） */
+/** 素材步骤的附加输入：字幕（节拍规划要用）、排到最后取的卡片素材镜头、修改版本的重做请求（有它就不重新规划节拍） */
+export interface BrollStageExtra { captions?: TimedCaption[]; deferShots?: number[]; edit?: BrollContext['edit'] }
+
+/** 只跑素材步骤（修改版本的 regenerateVisual、换一张 B-roll 也走这里，预算与 maxVideos 由 args.broll / args.meter 约束）；素材写到 brollDir/broll，credits.json 写到 args.workDir */
 export function brollStage(
-  args: PipelineArgs, storyboard: Storyboard, durationSec: number, brollDir: string, complete: Complete, deferShots?: number[],
+  args: PipelineArgs, storyboard: Storyboard, durationSec: number, brollDir: string, complete: Complete, extra: BrollStageExtra = {},
 ): Promise<Storyboard> {
-  return runBroll({ ...args, workDir: brollDir, reserveYuan: coverReserve(args), ...(deferShots ? { deferShots } : {}) }, storyboard, durationSec, complete);
+  const ctx = { ...args, workDir: brollDir, creditsDir: args.workDir, reserveYuan: coverReserve(args), ...extra };
+  return runBroll(ctx, storyboard, durationSec, complete);
 }
 
 /** 卡片自检（args.qa 为 false 时跳过）；only 给出时只检查这些镜头；keep 里的镜头只打分不重写 */
