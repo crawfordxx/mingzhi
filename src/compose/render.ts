@@ -10,6 +10,7 @@ import { CANVAS, type CardSpec, type TalkProps } from '../storyboard/schema.js';
 import type { CaptionStyleId } from '../captions/styles.js';
 import type { CoverProps } from '../cover/styles.js';
 import { run } from '../media/exec.js';
+import { browserOptions } from './browser.js';
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'render', 'index.ts');
 const DEFAULT_CONCURRENCY = 8;
@@ -74,9 +75,9 @@ export async function renderTalk(opts: RenderOptions): Promise<void> {
   try {
     await withBundle(opts.workDir, (serveUrl) => withCancelSignal(opts.signal, async (cancelSignal) => {
       const inputProps = opts.props;
-      const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+      const composition = await selectComposition({ ...browserOptions(), serveUrl, id: 'Talk', inputProps });
       await renderMedia({
-        composition, serveUrl, inputProps, codec: 'h264', crf: 18, outputLocation: tmp,
+        ...browserOptions(), composition, serveUrl, inputProps, codec: 'h264', crf: 18, outputLocation: tmp,
         concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
         onProgress: ({ progress }) => opts.onProgress?.(progress),
       });
@@ -92,8 +93,8 @@ export async function renderTalk(opts: RenderOptions): Promise<void> {
 export async function renderCardStill(opts: { workDir: string; card: CardSpec; output: string }): Promise<void> {
   await withBundle(opts.workDir, async (serveUrl) => {
     const inputProps = { card: opts.card };
-    const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
-    await renderStill({ composition, serveUrl, inputProps, output: opts.output, frame: 24 });
+    const composition = await selectComposition({ ...browserOptions(), serveUrl, id: 'CardStill', inputProps });
+    await renderStill({ ...browserOptions(), composition, serveUrl, inputProps, output: opts.output, frame: 24 });
   });
 }
 
@@ -109,8 +110,8 @@ export function cardSampleFrames(durationSec: number): number[] {
 /** 在已有打包上渲染三个取样帧到 files */
 async function renderSamples(serveUrl: string, card: CardSpec, durationSec: number, stills: { frame: number; file: string }[]): Promise<void> {
   const inputProps = { card, dur: durationSec };
-  const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
-  for (const s of stills) await renderStill({ composition, serveUrl, inputProps, output: s.file, frame: s.frame, imageFormat: 'png' });
+  const composition = await selectComposition({ ...browserOptions(), serveUrl, id: 'CardStill', inputProps });
+  for (const s of stills) await renderStill({ ...browserOptions(), composition, serveUrl, inputProps, output: s.file, frame: s.frame, imageFormat: 'png' });
 }
 
 /** 视觉自检用的三联图：卡片在镜头开头后 0.3 秒、中点、结束前 0.3 秒的静帧，ffmpeg 横向拼成 3240×960 再缩到 1620×480，返回 workDir/qa 下的 PNG 路径（调用方用完自行删除）。ffmpeg 由调用方传入（不在渲染层读配置）。传入 serveUrl 时复用已有打包（批量检查时只打一次包），否则自己打包 */
@@ -135,8 +136,8 @@ export async function renderCardFrames(workDir: string, card: CardSpec, duration
 export async function renderCaptionStill(opts: { workDir: string; captionStyle: CaptionStyleId; captionFontFile: string; text: string; bg?: string; output: string }): Promise<void> {
   await withBundle(opts.workDir, async (serveUrl) => {
     const inputProps = { text: opts.text, captionStyle: opts.captionStyle, captionFontFile: opts.captionFontFile, ...(opts.bg ? { bg: opts.bg } : {}) };
-    const composition = await selectComposition({ serveUrl, id: 'CaptionStill', inputProps });
-    await renderStill({ composition, serveUrl, inputProps, output: opts.output, frame: 0 });
+    const composition = await selectComposition({ ...browserOptions(), serveUrl, id: 'CaptionStill', inputProps });
+    await renderStill({ ...browserOptions(), composition, serveUrl, inputProps, output: opts.output, frame: 0 });
   });
 }
 
@@ -144,8 +145,8 @@ export async function renderCaptionStill(opts: { workDir: string; captionStyle: 
 export async function renderCoverStills(workDir: string, stills: { id: 'Cover34' | 'Cover43'; props: CoverProps; output: string }[]): Promise<void> {
   await withBundle(workDir, async (serveUrl) => {
     for (const still of stills) {
-      const composition = await selectComposition({ serveUrl, id: still.id, inputProps: still.props });
-      await renderStill({ composition, serveUrl, inputProps: still.props, output: still.output, frame: 0, imageFormat: 'png' });
+      const composition = await selectComposition({ ...browserOptions(), serveUrl, id: still.id, inputProps: still.props });
+      await renderStill({ ...browserOptions(), composition, serveUrl, inputProps: still.props, output: still.output, frame: 0, imageFormat: 'png' });
     }
   });
 }
@@ -156,9 +157,9 @@ export interface SegmentRenderOptions { serveUrl: string; props: TalkProps; outp
 export async function renderVideoSegment(opts: SegmentRenderOptions & { startFrame: number; endFrame: number }): Promise<void> {
   const { serveUrl, props: inputProps } = opts;
   await withCancelSignal(opts.signal, async (cancelSignal) => {
-    const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+    const composition = await selectComposition({ ...browserOptions(), serveUrl, id: 'Talk', inputProps });
     await renderMedia({
-      composition, serveUrl, inputProps, codec: 'h264', crf: 18, muted: true, outputLocation: opts.output,
+      ...browserOptions(), composition, serveUrl, inputProps, codec: 'h264', crf: 18, muted: true, outputLocation: opts.output,
       frameRange: [opts.startFrame, opts.endFrame - 1], concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
     });
   });
@@ -168,9 +169,9 @@ export async function renderVideoSegment(opts: SegmentRenderOptions & { startFra
 export async function renderAudioTrack(opts: SegmentRenderOptions): Promise<void> {
   const { serveUrl, props: inputProps } = opts;
   await withCancelSignal(opts.signal, async (cancelSignal) => {
-    const composition = await selectComposition({ serveUrl, id: 'Talk', inputProps });
+    const composition = await selectComposition({ ...browserOptions(), serveUrl, id: 'Talk', inputProps });
     await renderMedia({
-      composition, serveUrl, inputProps, codec: 'aac', outputLocation: opts.output, concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
+      ...browserOptions(), composition, serveUrl, inputProps, codec: 'aac', outputLocation: opts.output, concurrency: opts.concurrency ?? defaultConcurrency(), cancelSignal,
     });
   });
 }

@@ -1,0 +1,187 @@
+# 发布流水线：三平台各自打应用本体包、编译启动器（内置含 app 项的清单）、用启动器解包烟测，
+# 最后汇总三平台产物与合并后的清单，创建草稿 Release（需要人工检查后再发布）。
+# 触发：推送 v* 标签（必须与 package.json 的版本一致），或在 Actions 页手动运行（用 package.json 的版本）。
+name: 发布
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PNPM_VERSION: 9.15.0
+  NODE_VERSION: '22'
+
+jobs:
+  build:
+    name: 构建 ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          # Intel Mac：GitHub 已下线 macos-13 镜像，x64 改用 macos-15-intel
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: windows-latest
+            platform: win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      # Windows 上默认把 LF 转成 CRLF，打进包的源码会与其它平台不一致
+      - name: 保持换行符原样
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher
+
+      - name: 版本号
+        id: ver
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与 package.json 的版本 $VERSION 不一致"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建工作台前端
+        run: pnpm build:web
+
+      - name: 打应用本体包
+        run: |
+          # 包内文件的 mtime 取提交时间，同一提交重复打包结果一致
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) node scripts/bundle-app.mjs
+
+      - name: 生成清单（含本平台 app 项）
+        run: node scripts/build-manifest.mjs --app "$PLATFORM=dist/mingzhi-app-$PLATFORM.tar.zst"
+
+      - name: 编译启动器（内置 dist/manifest.json）
+        working-directory: launcher
+        env:
+          MINGZHI_MANIFEST_FILE: ${{ github.workspace }}/dist/manifest.json
+        run: cargo build --release --locked
+
+      - name: 烟测：用启动器的安装流程解包 app，再只靠包内依赖起服务
+        run: |
+          APP_ROOT="$RUNNER_TEMP/mingzhi root"
+          cargo run --release --locked --manifest-path launcher/Cargo.toml --example install_app -- \
+            dist/manifest.json dist "$APP_ROOT"
+          node scripts/smoke-app.mjs "$APP_ROOT/app/${{ steps.ver.outputs.version }}"
+
+      - name: 整理产物
+        run: |
+          EXE=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then EXE=".exe"; fi
+          mkdir -p out
+          cp "dist/mingzhi-app-$PLATFORM.tar.zst" "dist/mingzhi-app-$PLATFORM.tar.zst.sha256" out/
+          cp "launcher/target/release/mingzhi-launcher$EXE" "out/mingzhi-launcher-$PLATFORM$EXE"
+          cp dist/manifest.json "out/manifest-$PLATFORM.json"
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mingzhi-${{ matrix.platform }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: 汇总并创建草稿 Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # 只为 build-manifest 用到的 zod；不跑安装脚本（onnxruntime-node 在 Linux 上会去下 CUDA 组件）
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          pattern: mingzhi-*
+          merge-multiple: true
+
+      - name: 合并清单
+        run: |
+          node scripts/build-manifest.mjs --out out/manifest.json \
+            --app darwin-arm64=out/mingzhi-app-darwin-arm64.tar.zst \
+            --app darwin-x64=out/mingzhi-app-darwin-x64.tar.zst \
+            --app win32-x64=out/mingzhi-app-win32-x64.tar.zst
+
+      - name: 核对：各平台启动器内置的清单与合并清单一致
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const merged = JSON.parse(readFileSync('out/manifest.json', 'utf8'));
+            for (const p of ['darwin-arm64', 'darwin-x64', 'win32-x64']) {
+              const own = JSON.parse(readFileSync('out/manifest-' + p + '.json', 'utf8'));
+              const pick = (m) => JSON.stringify(m.items.filter((i) => i.platform === p || i.platform === 'any'));
+              if (own.version !== merged.version || pick(own) !== pick(merged)) throw new Error(p + ' 的内置清单与合并清单不一致');
+            }
+            console.log('三平台内置清单与合并清单一致');
+          "
+          rm out/manifest-*.json
+
+      - name: 创建草稿 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          cd out
+          ls -l
+          if gh release view "$TAG" --json isDraft --jq .isDraft > is_draft.txt 2>/dev/null; then
+            if [[ "$(cat is_draft.txt)" != "true" ]]; then
+              echo "::error::$TAG 已正式发布，不能覆盖"
+              exit 1
+            fi
+            gh release upload "$TAG" --clobber mingzhi-* manifest.json
+          else
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "明知AI剪辑 $TAG" --generate-notes \
+              mingzhi-* manifest.json
+          fi
+          rm -f is_draft.txt
