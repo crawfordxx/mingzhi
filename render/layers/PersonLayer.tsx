@@ -35,8 +35,8 @@ export function transformAt(shots: Shot[], sec: number, p: TalkProps): PersonTra
 /** 画中画的描边与阴影强度：随窗口圆角从 0（全屏）到 1（小窗）连续变化，收拢过程中逐渐出现 */
 const chromeOf = (radius: number): number => Math.min(1, Math.max(0, radius / PIP.radius));
 
-/** 人像：在可见窗口（全屏时为整张画布）里按缩放与位置放视频；画中画带白色细描边与柔和投影 */
-export const PersonLayer: React.FC<TalkProps & { sec: number }> = (p) => {
+/** 人像：在可见窗口（全屏时为整张画布）里按缩放与位置放视频；画中画带白色细描边与柔和投影。muted：结尾定格时静音（定格帧不重复出声） */
+export const PersonLayer: React.FC<TalkProps & { sec: number; muted?: boolean }> = (p) => {
   const t = transformAt(p.shots, p.sec, p);
   const c = t.clip ?? FULL_CLIP;
   const k = chromeOf(c.radius);
@@ -44,7 +44,7 @@ export const PersonLayer: React.FC<TalkProps & { sec: number }> = (p) => {
     <div style={{ position: 'absolute', left: c.x, top: c.y, width: c.w, height: c.h, borderRadius: c.radius, overflow: 'hidden',
       boxShadow: k > 0 ? `0 ${28 * k}px ${72 * k}px rgba(0, 0, 0, ${0.42 * k}), 0 ${6 * k}px ${18 * k}px rgba(0, 0, 0, ${0.22 * k})` : undefined }}>
       <div style={{ position: 'absolute', left: t.x - c.x, top: t.y - c.y, width: p.personWidth * t.scale, height: p.personHeight * t.scale }}>
-        <OffthreadVideo src={staticFile(p.person)} style={{ width: '100%', height: '100%' }} />
+        <OffthreadVideo src={staticFile(p.person)} muted={p.muted} style={{ width: '100%', height: '100%' }} />
       </div>
       {k > 0 ? <div style={{ position: 'absolute', inset: 0, borderRadius: c.radius, boxShadow: `inset 0 0 0 ${3 * k}px rgba(255, 255, 255, ${0.92 * k})` }} /> : null}
     </div>

@@ -3,6 +3,7 @@ import { basename, extname, join } from 'node:path';
 import { z } from 'zod';
 import { isPresetId } from '../background/presets.js';
 import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
+import { OUTRO_TEXT_MAX } from '../compose/ending.js';
 import { COVER_STYLES } from '../cover/styles.js';
 import { isInside } from '../workspace/runner-files.js';
 import { projectSpentYuan, type Space, type SpaceSettings, type VersionMeta } from '../workspace/store.js';
@@ -30,6 +31,7 @@ const SettingsPatch = z.object({
   budgetYuan: z.number().finite().min(0).max(1000).optional(),
   broll: z.boolean().optional(),
   maxVideos: z.number().int().min(0).max(10).optional(),
+  outro: z.object({ enabled: z.boolean(), text: z.string().trim().max(OUTRO_TEXT_MAX) }).strict().optional(),
   grain: z.boolean().optional(),
 }).strict();
 export type SettingsPatchInput = z.infer<typeof SettingsPatch>;

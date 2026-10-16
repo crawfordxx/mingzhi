@@ -2,6 +2,7 @@ import { copyFile, rm } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import type { AppConfig } from '../config.js';
 import { normalizeLoudness } from '../audio/loudness.js';
+import { DEFAULT_OUTRO, OUTRO_TEXT_MAX, type OutroOptions } from '../compose/ending.js';
 import { COVER_YUAN } from '../cost/estimate.js';
 import type { CostMeter } from '../cost/meter.js';
 import type { TimedCaption } from '../captions/lines.js';
@@ -117,12 +118,21 @@ export function validateStyles(captionStyle: CaptionStyleId | undefined, cover: 
   if (cover && !Object.hasOwn(COVER_STYLES, cover.style)) throw new Error(`未知封面风格「${cover.style}」，可用：${Object.keys(COVER_STYLES).join('、')}`);
 }
 
-/** 命令行参数 → 配乐、字幕样式、封面选项；id 不合法时报错并列出可选项 */
-export function parseFinishArgs(values: { bgm?: string; 'caption-style'?: string; 'cover-style'?: string; 'no-cover'?: boolean }): { audio: AudioOptions; captionStyle?: CaptionStyleId; cover: CoverOptions } {
+/** 命令行参数 → 片尾设置；没给任何片尾参数时返回 undefined（流程按缺省：开启，默认 logo + 文字） */
+function parseOutroArgs(values: { 'no-outro'?: boolean; 'outro-text'?: string }): OutroOptions | undefined {
+  const text = values['outro-text']?.trim();
+  if (text !== undefined && [...text].length > OUTRO_TEXT_MAX) throw new Error(`片尾文字最多 ${OUTRO_TEXT_MAX} 个字：${text}`);
+  if (!values['no-outro'] && text === undefined) return undefined;
+  return { enabled: !values['no-outro'], text: text ?? DEFAULT_OUTRO.text };
+}
+
+/** 命令行参数 → 配乐、字幕样式、封面、片尾选项；id 不合法时报错并列出可选项 */
+export function parseFinishArgs(values: { bgm?: string; 'caption-style'?: string; 'cover-style'?: string; 'no-cover'?: boolean; 'no-outro'?: boolean; 'outro-text'?: string }): { audio: AudioOptions; captionStyle?: CaptionStyleId; cover: CoverOptions; outro?: OutroOptions } {
   const captionStyle = values['caption-style'] as CaptionStyleId | undefined;
   const cover: CoverOptions = values['no-cover'] ? false : { style: (values['cover-style'] as CoverStyleId | undefined) ?? DEFAULT_COVER_STYLE };
   const audio = { bgm: values.bgm ?? 'auto' };
+  const outro = parseOutroArgs(values);
   validateAudio(audio);
   validateStyles(captionStyle, cover);
-  return { audio, ...(captionStyle ? { captionStyle } : {}), cover };
+  return { audio, ...(captionStyle ? { captionStyle } : {}), cover, ...(outro ? { outro } : {}) };
 }

@@ -1,3 +1,4 @@
+import { HOLD_SEC, OUTRO_SEC } from '../src/compose/ending.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -77,7 +78,8 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     const res = await runPipeline({ input, workDir: work, output: join(work, 'out.mp4'), cfg, llm, qaDeps: fakeQa().deps, onProgress });
     const src = await probe(input, cfg);
     const out = await probe(res.output, cfg);
-    expect(out.durationSec).toBeLessThan(src.durationSec - 1.0);
+    // 成片 = 剪后口播 + 最后一句后的留白 + 品牌片尾（OUTRO_SEC）；扣掉片尾后仍比原片短（留白不足 1 秒）
+    expect(out.durationSec - OUTRO_SEC).toBeLessThan(src.durationSec - 1.0);
     // 渲染进度事件（compose）会连续出现多次，按相邻去重后比较
     expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1])).toEqual(['probe', 'audio', 'asr', 'cuts', 'plan', 'render', 'captions', 'storyboard', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
     // 兜底分行按字数换行，「高性价比」可能被拆到相邻两行，所以拼接所有字幕行再断言
@@ -112,8 +114,11 @@ describe.skipIf(!hasModels())('runPipeline（需要本地模型）', () => {
     expect(project.storyboardCapped).toBe(0);
     const final = await probe(res.output, cfg);
     expect([final.width, final.height, final.fps, final.hasAudio]).toEqual([1080, 1920, 30, true]);
-    // 成片时长不超过人像视频（剪切结果）的实际时长
-    expect(final.durationSec).toBeLessThanOrEqual((await probe(join(work, 'cut.mp4'), cfg)).durationSec + 0.05);
+    // 成片 = 人像视频（剪切结果）+ 最后一句后的留白（不足 HOLD_SEC，最多补到 0.6 秒）+ 品牌片尾；
+    // 留白补出的部分不超过 HOLD_SEC，所以扣掉片尾后不超过人像时长 + HOLD_SEC
+    const cutSec = (await probe(join(work, 'cut.mp4'), cfg)).durationSec;
+    expect(final.durationSec - OUTRO_SEC).toBeLessThanOrEqual(cutSec + HOLD_SEC + 0.15);
+    expect(final.durationSec - OUTRO_SEC).toBeGreaterThanOrEqual(cutSec - 0.15);
     expect(existsSync(join(work, 'cut.mp4'))).toBe(true);
     expect(events.find((e) => e.step === 'captions')?.message).toContain('改用自动分行');
     expect(events.find((e) => e.step === 'cuts')?.message).toContain('丢弃 1 条');

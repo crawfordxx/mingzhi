@@ -16,10 +16,10 @@ import { probe } from './media/probe.js';
 import { qaSummary } from './pipeline/qa-step.js';
 import { runPipeline, type ProgressEvent } from './pipeline/run.js';
 
-const USAGE = '用法：pnpm mingzhi edit <口播视频> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] [--no-broll] [--max-videos N] [--budget 元] [--bgm auto|none|曲目id] [--caption-style 样式id] [--cover-style 风格id] [--no-cover] [--no-qa] [--yes]';
+const USAGE = '用法：pnpm mingzhi edit <口播视频> [-o 输出.mp4] [--work 工作目录] [--bg 预设id|背景图片] [--bg-prompt 一句话描述背景] [--no-broll] [--max-videos N] [--budget 元] [--bgm auto|none|曲目id] [--caption-style 样式id] [--cover-style 风格id] [--no-cover] [--no-outro] [--outro-text 片尾文字] [--no-qa] [--yes]';
 
 async function main(): Promise<void> {
-  const { positionals, values } = parseArgs({ allowPositionals: true, options: { output: { type: 'string', short: 'o' }, work: { type: 'string' }, bg: { type: 'string' }, 'bg-prompt': { type: 'string' }, 'no-broll': { type: 'boolean' }, 'max-videos': { type: 'string' }, budget: { type: 'string' }, bgm: { type: 'string' }, 'caption-style': { type: 'string' }, 'cover-style': { type: 'string' }, 'no-cover': { type: 'boolean' }, 'no-qa': { type: 'boolean' }, yes: { type: 'boolean', short: 'y' } } });
+  const { positionals, values } = parseArgs({ allowPositionals: true, options: { output: { type: 'string', short: 'o' }, work: { type: 'string' }, bg: { type: 'string' }, 'bg-prompt': { type: 'string' }, 'no-broll': { type: 'boolean' }, 'max-videos': { type: 'string' }, budget: { type: 'string' }, bgm: { type: 'string' }, 'caption-style': { type: 'string' }, 'cover-style': { type: 'string' }, 'no-cover': { type: 'boolean' }, 'no-outro': { type: 'boolean' }, 'outro-text': { type: 'string' }, 'no-qa': { type: 'boolean' }, yes: { type: 'boolean', short: 'y' } } });
   const [command, inputArg] = positionals;
   if (command !== 'edit' || !inputArg) throw new Error(USAGE);
   const baseDir = process.env.INIT_CWD ?? process.cwd();

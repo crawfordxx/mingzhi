@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join } from 'node:path';
 import type { BackgroundSpec } from '../background/resolve.js';
 import type { CaptionStyleId } from '../captions/styles.js';
+import type { OutroOptions } from '../compose/ending.js';
 import type { CoverStyleId } from '../cover/styles.js';
 import { roundYuan } from '../cost/meter.js';
 
@@ -14,6 +15,8 @@ export interface SpaceSettings {
   budgetYuan: number;
   broll: boolean;
   maxVideos: number;
+  /** 品牌片尾；缺省开启，默认 logo + 「用明知AI剪辑制作」，可改文字或关闭 */
+  outro?: OutroOptions;
   /** 颗粒质感层；新项目默认开，旧项目没有这个字段时按「用到 B-roll 才开」（见 compose/layout 的 grainOn） */
   grain?: boolean;
 }

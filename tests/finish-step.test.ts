@@ -7,6 +7,7 @@ import { loadConfig } from '../src/config.js';
 import { CostMeter } from '../src/cost/meter.js';
 import { FALLBACK_PRICES } from '../src/cost/prices.js';
 import { prepareAudio, validateAudio } from '../src/pipeline/audio-step.js';
+import { OUTRO_TEXT_MAX } from '../src/compose/ending.js';
 import { parseFinishArgs, runCover, runLoudness, validateStyles } from '../src/pipeline/finish-step.js';
 import type { ProjectFile, ProjectPatch } from '../src/pipeline/project.js';
 import type { Storyboard } from '../src/storyboard/schema.js';
@@ -114,6 +115,15 @@ describe('参数校验', () => {
     expect(() => parseFinishArgs({ 'caption-style': 'zzz' })).toThrow('未知字幕样式');
     expect(() => parseFinishArgs({ 'cover-style': 'zzz' })).toThrow('未知封面风格');
     expect(() => parseFinishArgs({ bgm: 'zzz' })).toThrow('未知曲目');
+  });
+
+  it('parseFinishArgs：片尾缺省不带 outro；--no-outro 关闭；--outro-text 改文字；文字过长报错', () => {
+    expect(parseFinishArgs({}).outro).toBeUndefined();
+    expect(parseFinishArgs({ 'no-outro': true }).outro).toEqual({ enabled: false, text: '用明知AI剪辑制作' });
+    expect(parseFinishArgs({ 'outro-text': ' 某某出品 ' }).outro).toEqual({ enabled: true, text: '某某出品' });
+    expect(parseFinishArgs({ 'outro-text': '', }).outro).toEqual({ enabled: true, text: '' });
+    expect(parseFinishArgs({ 'no-outro': true, 'outro-text': 'x' }).outro?.enabled).toBe(false);
+    expect(() => parseFinishArgs({ 'outro-text': '一'.repeat(OUTRO_TEXT_MAX + 1) })).toThrow('片尾文字');
   });
 });
 

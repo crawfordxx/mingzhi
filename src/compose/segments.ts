@@ -62,7 +62,7 @@ export function shotHash(shot: Shot, props: Omit<TalkProps, 'shots'>, _index: nu
   const { shots, range } = ctx;
   const { shots: hit, frames } = frameFingerprints(props, shots, range);
   const head = { v: 1, range, shot, hit, salt: ctx.salt ?? '', person: props.person, w: props.personWidth, h: props.personHeight, subject: props.subject,
-    style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '', ...(grainOn({ ...props, shots }) ? { grain: true } : {}) };
+    style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '', ...(grainOn({ ...props, shots }) ? { grain: true } : {}), ...(props.outro && range.end > secToFrame(props.outro.startSec) ? { outro: props.outro } : {}) };
   return sha1(`${JSON.stringify(head)}\n${frames.join('\n')}`);
 }
 
@@ -132,7 +132,8 @@ function shotsInRange(shots: Shot[], range: FrameRange): number[] {
 export async function segmentSalt(stamper: Stamper, props: TalkProps, i: number, range: FrameRange = segmentBounds(props.shots, props.durationSec)[i]): Promise<string> {
   const media = shotsInRange(props.shots, range).flatMap((k) => shotMedia(props.shots[k]));
   const fonts = props.captionFontFile ? `fonts/${props.captionFontFile}` : undefined;
-  const files = await Promise.all([props.person, fonts, ...media].map((n) => stamper.file(n)));
+  const logo = props.outro && range.end > secToFrame(props.outro.startSec) ? props.outro.logo : undefined;
+  const files = await Promise.all([props.person, fonts, logo, ...media].map((n) => stamper.file(n)));
   return [stamper.code, ...files].join('|');
 }
 

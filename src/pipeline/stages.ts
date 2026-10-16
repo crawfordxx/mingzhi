@@ -8,7 +8,9 @@ import { polishCaptions, type PolishResult } from '../captions/polish.js';
 import { PRESETS } from '../background/presets.js';
 import { resolveBackground, type BackgroundSpec, type ResolvedBackground } from '../background/resolve.js';
 import { rethrowIfCancelled } from '../cancel.js';
+import { outroProps, planEnding, resolveOutro } from '../compose/ending.js';
 import { renderSegmented, type SegmentedResult } from '../compose/segments.js';
+import { stageOutroLogo } from '../compose/stage-assets.js';
 import { COVER_YUAN } from '../cost/estimate.js';
 import type { CostMeter } from '../cost/meter.js';
 import { detectCuts, type Cut } from '../cut/llm-cuts.js';
@@ -215,9 +217,13 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
   if (relative(workDir, c.person).startsWith('..')) throw new Error(`人像视频必须在工作目录内：${c.person}`);
   const baseInfo = await m.probe(c.person, cfg);
   // 成片时长不超过人像视频的实际时长（剪切编码后可能比方案略短），避免末尾取不到帧
-  const durationSec = Math.min(c.outputDurationSec, baseInfo.durationSec);
+  const contentSec = Math.min(c.outputDurationSec, baseInfo.durationSec);
+  // 结尾：最后一句后留白、CTA 提前、接品牌片尾；分镜里仍存原样（cta 在末尾），只有渲染用的镜头做调整
+  const outroOptions = resolveOutro(args.outro);
+  const ending = planEnding(c.storyboard.shots, c.captions, contentSec, outroOptions.enabled);
+  const outro = ending.hasOutro ? outroProps(ending, outroOptions, await stageOutroLogo(workDir)) : undefined;
   const audioArgs = { workDir, cfg, input: args.input, audio: args.audio, captionStyle: args.captionStyle };
-  const audio = await prepareAudio(audioArgs, c.storyboard, c.captions, durationSec);
+  const audio = await prepareAudio(audioArgs, { ...c.storyboard, shots: ending.shots }, c.captions, ending.durationSec, outro?.startSec);
   audio.notes.forEach((note) => complete('compose', note));
   complete('compose', audio.summary, { audio: audio.info, captionStyle: audio.props.captionStyle });
   const progress = throttledRenderProgress((e) => args.onProgress?.(e));
@@ -226,7 +232,7 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
     onProgress: (done, total) => progress(total > 0 ? done / total : 1),
     props: {
       person: relative(workDir, c.person), personWidth: baseInfo.width, personHeight: baseInfo.height, subject: c.subject,
-      captions: c.captions, shots: c.storyboard.shots, durationSec, ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
+      captions: c.captions, shots: ending.shots, durationSec: ending.durationSec, ...(outro ? { outro } : {}), ...audio.props, ...(args.grain === undefined ? {} : { grain: args.grain }),
     },
   }).catch((err: unknown) => {
     rethrowIfCancelled(err);
@@ -235,7 +241,9 @@ export async function composeStage(args: PipelineArgs, c: ComposeInput, complete
   progress(1);
   complete('compose', '成片渲染完成');
   await runLoudness(cfg, c.raw, c.output, complete, m.loudness);
-  return res;
+  // 结尾规划可能让渲染用的镜头比分镜多（CTA 提前后拆出的全屏镜头）；对外仍按分镜的镜头序号，多出的不报
+  const count = c.storyboard.shots.length;
+  return { rendered: res.rendered.filter((i) => i < count), reused: res.reused.filter((i) => i < count), hashes: res.hashes.slice(0, count) };
 }
 
 /** 成片硬检查（args.qa 为 false 时跳过） */

@@ -24,6 +24,7 @@ export function pipelineArgs(env: VersionEnv, input: string, state: VersionState
     background: state.settings.background, captionStyle: state.settings.captionStyle, audio: state.bgm, cover,
     ...(state.settings.grain === undefined ? {} : { grain: state.settings.grain }),
     broll: { enabled: broll, maxVideos, budgetYuan, ...(ctx.cfg.pexelsKey ? { pexelsKey: ctx.cfg.pexelsKey } : {}) },
+    ...(space.settings.outro ? { outro: space.settings.outro } : {}),
     ...(ctx.brollDeps ? { brollDeps: ctx.brollDeps(meter) } : {}),
     coverDeps: ctx.coverDeps, qaDeps: ctx.qaDeps, media: ctx.media, cacheDir: join(env.base, 'segments'), signal: ctx.signal, onProgress: env.emit,
   };

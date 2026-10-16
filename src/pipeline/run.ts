@@ -16,6 +16,7 @@ import type { Storyboard } from '../storyboard/schema.js';
 import { validateAudio, type AudioOptions } from './audio-step.js';
 import { validateStyles, type CoverDeps, type CoverOptions } from './finish-step.js';
 import type { CaptionStyleId } from '../captions/styles.js';
+import type { OutroOptions } from '../compose/ending.js';
 import { projectRecorder, type ProjectFile, type ProjectPatch } from './project.js';
 import { costDetail, detailOfStep, type ProgressDetail } from './detail.js';
 import type { PipelineQa, QaDeps } from './qa-step.js';
@@ -39,6 +40,8 @@ export interface PipelineArgs {
   audio?: AudioOptions;
   /** 字幕样式；缺省 blade */
   captionStyle?: CaptionStyleId;
+  /** 品牌片尾；缺省开启，默认 logo + 「用明知AI剪辑制作」 */
+  outro?: Partial<OutroOptions>;
   /** 颗粒质感层开关；缺省时按分镜是否用到 B-roll 决定（旧项目不变） */
   grain?: boolean;
   /** 封面；缺省按默认风格生成，false 关闭 */
