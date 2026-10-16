@@ -8,6 +8,7 @@ import type { Api, Estimate, KeyInfo, Options, SettingsPatch, Space, SpaceSettin
 import { ApiError } from './api';
 import { probeDuration } from './lib/media';
 import { withRuns } from './mock-runs';
+import { withStock } from './mock-stock';
 
 const BACKGROUNDS: [string, string, string][] = [
   ['study', '书房', '01-study'], ['studio', '极简工作室', '02-studio'], ['cafe', '咖啡馆', '03-cafe'],
@@ -199,5 +200,5 @@ export function createMockApi(params: URLSearchParams): Api {
   const st: MockState = { keyConfigured: params.get('key') === '1', spaces, durations };
   const f = finder(st);
   const base = { ...keyMethods(st), ...crudMethods(st, f), ...mediaMethods(st, f) } as Api;
-  return withRuns(base, f, spaces);
+  return withStock(withRuns(base, f, spaces));
 }

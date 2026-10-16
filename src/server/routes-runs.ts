@@ -6,6 +6,7 @@ import type { Space } from '../workspace/store.js';
 import { opsYuan, remainingYuan, requireBudget } from './budget.js';
 import { appendChat, isTurnId, readChat, turnId } from './chat.js';
 import { loadPricesOrEmpty, type AppCtx } from './context.js';
+import { exportAttribution } from './credits.js';
 import { exportVersion } from './export.js';
 import { HttpError, readJsonBody, sendJson } from './http.js';
 import { doneVersion, loadSpace, parseVersionNumber, pickParent, readState } from './lookup.js';
@@ -137,8 +138,10 @@ async function exportRoute(app: AppCtx, c: RouteCtx): Promise<void> {
   const space = loadSpace(app, c.params.id);
   const n = doneVersion(space, parseVersionNumber(c.params.n)).n;
   try {
-    const files = await exportVersion(app.exportDir, space.title, n, app.store.versionDir(space.id, n));
-    sendJson(c.res, 200, { dir: app.exportDir, files });
+    const dir = app.store.versionDir(space.id, n);
+    const files = await exportVersion(app.exportDir, space.title, n, dir);
+    const attribution = exportAttribution(dir);
+    sendJson(c.res, 200, { dir: app.exportDir, files, ...(attribution ? { attribution } : {}) });
   } catch (err) {
     throw new HttpError(500, `导出失败：${err instanceof Error ? err.message : String(err)}`);
   }

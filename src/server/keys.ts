@@ -52,7 +52,8 @@ export class KeyCache {
     return stripped.replace(KEY_LIKE, REDACTED);
   }
 
-  private remember(key: string): void {
+  /** 记住一个要抹除的 key（图库 key 保存或读取时登记） */
+  remember(key: string): void {
     if (!this.seen.includes(key)) this.seen = [...this.seen, key];
   }
 

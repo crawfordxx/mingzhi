@@ -14,8 +14,10 @@ import { HttpError, readJsonBody, sendJson, sendNoContent } from './http.js';
 import { activeKey, maskKey } from './keys.js';
 import { handleBackgroundThumb, handleCaptionPreview, handleMedia } from './media.js';
 import { route, type Route } from './router.js';
+import { creditRoutes } from './routes-credits.js';
 import { runRoutes } from './routes-runs.js';
 import { spaceRoutes } from './routes-spaces.js';
+import { stockRoutes } from './routes-stock.js';
 import { DEFAULT_SETTINGS } from './spaces.js';
 
 const MAX_KEY_CHARS = 300;
@@ -94,8 +96,10 @@ export function buildRoutes(app: AppCtx): Route[] {
       app.keys.invalidate();
       sendNoContent(c.res);
     }),
+    ...stockRoutes(app),
     ...spaceRoutes(app),
     ...runRoutes(app),
+    ...creditRoutes(app),
     route('GET', 'media/:id/:n/:file', (c) => handleMedia(app, c)),
     route('GET', 'thumbs/backgrounds/:file', (c) => handleBackgroundThumb(app, c)),
     route('GET', 'previews/captions/:file', (c) => handleCaptionPreview(app, c)),

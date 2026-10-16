@@ -7,14 +7,24 @@ export type { Upload } from './useUploads';
 
 export const errText = (err: unknown): string => (err instanceof ApiError || err instanceof Error ? err.message : String(err));
 
+/** 提示条上的一个按钮（如导出成功后的「复制署名文本」） */
+export interface ToastAction { label: string; run: () => void }
+export interface ToastState { text: string; action?: ToastAction }
+export type Notify = (msg: string, action?: ToastAction) => void;
+
+const TOAST_MS = 2600;
+/** 带按钮的提示要留够时间点 */
+const TOAST_ACTION_MS = 9000;
+
 function useToast() {
-  const [toast, setToast] = useState<string>();
+  const [toast, setToast] = useState<ToastState>();
   useEffect(() => {
     if (!toast) return;
-    const id = window.setTimeout(() => setToast(undefined), 2600);
+    const id = window.setTimeout(() => setToast(undefined), toast.action ? TOAST_ACTION_MS : TOAST_MS);
     return () => window.clearTimeout(id);
   }, [toast]);
-  return { toast, notify: useCallback((msg: string) => setToast(msg), []) };
+  const dismiss = useCallback(() => setToast(undefined), []);
+  return { toast, dismiss, notify: useCallback<Notify>((text, action) => setToast({ text, action }), []) };
 }
 
 type BootData = { status: Status; options: Options; spaces: Space[] };
@@ -112,7 +122,7 @@ function useSpaceActions(space: Space | undefined, putSpace: (s: Space) => void,
 }
 
 export function useWorkbench() {
-  const { toast, notify } = useToast();
+  const { toast, dismiss: dismissToast, notify } = useToast();
   const { status, setStatus, options, spaces, setSpaces, currentId, setCurrentId, loadError } = useBoot();
   const space = useMemo(() => spaces.find((s) => s.id === currentId), [spaces, currentId]);
   const { estimate, estimating, refresh } = useEstimate(space, notify);
@@ -138,7 +148,7 @@ export function useWorkbench() {
   const keyVerified = useCallback(() => setStatus((s) => (s ? { ...s, keyConfigured: true } : s)), [setStatus]);
 
   return {
-    status, options, spaces, space, loadError, toast, estimate, estimating, ...up, ...actions,
+    status, options, spaces, space, loadError, toast, dismissToast, estimate, estimating, ...up, ...actions,
     selectSpace: setCurrentId, newSpace, keyVerified, notify, putSpace,
   };
 }

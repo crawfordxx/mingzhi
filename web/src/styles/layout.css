@@ -89,3 +89,7 @@
   .chip:nth-child(n + 3) { display: none; }
   .bar-msg > .it { display: none; }
 }
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast.has-act { padding-right: 8px; }
+.toast-act { font: 500 13px/1 var(--sans); color: #000; background: #fff; border-radius: 999px; padding: 7px 12px; white-space: nowrap; transition: background 0.15s; }
+.toast-act:hover { background: var(--brand-1); }

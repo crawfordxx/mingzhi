@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createKeyStore, validateKey, type Exec } from '../src/workspace/keychain.js';
+import { createKeyStore, PEXELS_SLOT, PIXABAY_SLOT, validateKey, type Exec } from '../src/workspace/keychain.js';
 
 const KEY = 'sk-test-secret-123';
 const NEW_KEY = 'sk-new-key-456';
@@ -262,5 +262,36 @@ describe('validateKey', () => {
     for (const status of [429, 404, 408, 500, 502]) {
       await expect(validateKey('x', asFetch(async () => res(status)))).rejects.toThrow(`无法校验 key：可想 AI 返回 HTTP ${status}`);
     }
+  });
+});
+
+describe('KeyStore 图库 key 槽位', () => {
+  it('macOS：钥匙串账号用槽位名，不覆盖可想 key', async () => {
+    const { exec, state } = fakeMac();
+    await createKeyStore(dir, 'darwin', exec, PEXELS_SLOT).set('pexels-secret-key');
+    const [, args, opts] = exec.mock.calls[0];
+    expect(args).toEqual(['-i']);
+    expect(opts).toEqual({ input: 'add-generic-password -U -s mingzhi -a pexels -w "pexels-secret-key"\n' });
+    expect(state.value).toBe('pexels-secret-key');
+    expect(exec.mock.calls.slice(1).every((c) => (c[1] as string[]).includes('pexels'))).toBe(true);
+  });
+
+  it('回退文件按槽位命名且 600；各槽互不影响', async () => {
+    await createKeyStore(dir, 'linux', okExec(), PEXELS_SLOT).set('pexels-k');
+    await createKeyStore(dir, 'linux', okExec(), PIXABAY_SLOT).set('pixabay-k');
+    await createKeyStore(dir, 'linux', okExec()).set(KEY);
+    expect(mode(join(dir, 'pexels-key'))).toBe(0o600);
+    expect(readFileSync(join(dir, 'pexels-key'), 'utf8').trim()).toBe('pexels-k');
+    expect(readFileSync(join(dir, 'pixabay-key'), 'utf8').trim()).toBe('pixabay-k');
+    expect(readFileSync(join(dir, 'key'), 'utf8').trim()).toBe(KEY);
+    await createKeyStore(dir, 'linux', okExec(), PEXELS_SLOT).clear();
+    expect(existsSync(join(dir, 'pexels-key'))).toBe(false);
+    expect(existsSync(join(dir, 'pixabay-key'))).toBe(true);
+  });
+
+  it('Windows：DPAPI 密文文件按槽位命名', async () => {
+    await createKeyStore(dir, 'win32', fakePowershell(), PIXABAY_SLOT).set('pixabay-k');
+    expect(existsSync(join(dir, 'pixabay-key.dpapi'))).toBe(true);
+    expect(existsSync(join(dir, 'key.dpapi'))).toBe(false);
   });
 });

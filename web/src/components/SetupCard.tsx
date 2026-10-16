@@ -10,6 +10,7 @@ import { It, SOFT } from '../ui';
 import { BackgroundPicker } from './setup/BackgroundPicker';
 import { BudgetEditor } from './setup/BudgetEditor';
 import { InputsDrop } from './setup/InputsDrop';
+import { StockKeys } from './setup/StockKeys';
 import { CaptionPicker, CoverPicker } from './setup/StylePickers';
 
 export { DEFAULT_COVER } from '../lib/cli';
@@ -54,18 +55,23 @@ export function blockerOf(wb: Workbench, space: Space, keyReady: boolean): strin
 
 /** 开始出片后收成一行摘要；点「(上限 ¥y)」展开上限滑块（项目上限任何时候都能调） */
 function SetupSummary({ wb, space, names }: Props & { names: (string | undefined)[] }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<'budget' | 'stock'>();
+  const toggle = (which: 'budget' | 'stock') => setOpen((o) => (o === which ? undefined : which));
   const budget = space.settings.budgetYuan;
   return (
     <motion.div layout className="card setup-sum" transition={SOFT}>
       <div className="sum-row">
         <b>设置</b>
         {names.filter(Boolean).map((t) => <span key={t}><span className="dot">·</span>{t}</span>)}
-        <button type="button" className="more lim-open" aria-expanded={open} onClick={() => setOpen((o) => !o)} title="调项目上限">
+        <button type="button" className="more stock-open" aria-expanded={open === 'stock'} onClick={() => toggle('stock')} title="Pexels、Pixabay 图库 key（选填）">
+          图库
+        </button>
+        <button type="button" className="more lim-open" aria-expanded={open === 'budget'} onClick={() => toggle('budget')} title="调项目上限">
           <It>(上限 ¥{budget})</It>
         </button>
       </div>
-      {open && <BudgetEditor spent={spentOf(space)} budget={budget} onSave={(v) => void wb.updateSettings({ budgetYuan: v })} />}
+      {open === 'budget' && <BudgetEditor spent={spentOf(space)} budget={budget} onSave={(v) => void wb.updateSettings({ budgetYuan: v })} />}
+      {open === 'stock' && <div className="stock-wrap"><StockKeys notify={wb.notify} /></div>}
     </motion.div>
   );
 }
@@ -102,6 +108,9 @@ export function SetupCard({ wb, space, options }: Props) {
       </Section>
       <Section n={4} title="封面风格" value={cover?.name} aside={<It>(示例图，不含真人)</It>}>
         <CoverPicker options={options.coverStyles} value={coverId} onChange={(id) => void wb.updateSettings({ coverStyle: id })} />
+      </Section>
+      <Section n={5} title="图库（选填）" aside={<It>(实拍视频空镜)</It>}>
+        <StockKeys notify={wb.notify} />
       </Section>
     </motion.div>
   );
