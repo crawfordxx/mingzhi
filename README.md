@@ -137,16 +137,58 @@
   <img src="docs/readme/flow.webp" alt="拖进口播 → 选背景字幕封面 → 开始出片 → 一句话修改 → 对比导出" width="100%">
 </picture>
 
-> [!TIP]
-> **一键启动器正在做。** 做好之后下载安装包双击就能用，不用装 Node、不用敲命令。在那之前，请按下面的步骤从源码运行。
+### 下载与首次运行
 
-### 1. 准备
+不用装 Node、不用敲命令：
+
+1. **下载启动器**：到 [Releases][releases] 下载最新版。macOS 选对应芯片（Apple 芯片 / Intel）的 zip，解压后双击里面的启动器；Windows 双击 `Mingzhi.exe`。第一次打开会被系统拦一下，放行方法见下面的[首次打开](#首次打开)。
+2. **出现一个终端（命令行）窗口，浏览器同时打开进度页**。这个窗口就是明知AI剪辑本身，用的时候别关。
+3. **首次下载运行环境与本地模型**：Node 运行时、ffmpeg、渲染用的 Chrome、语音识别与抠像模型和应用本体。macOS Apple 芯片约 **490 MB**、Intel 约 **510 MB**，Windows 约 **530 MB**；配乐与字体随后在后台补齐，不耽误开始用。全部断点续传、逐个校验 sha256，网断了点「重试」会接着下。
+4. **下载完自动跳到工作台**，粘贴[可想 AI][kexiang] 的 key（注册不需要邀请码）就能出片。
+
+之后再双击，几秒内直接打开工作台。
+
+**退出**：关掉那个终端窗口，或在工作台右上角的齿轮 →「退出明知AI剪辑」（有任务在跑时会提示将被中断）。只关浏览器的话，服务会在后台等着，没有页面打开、也没有任务满 2 小时后自己退出。
+
+<details>
+<summary><b>国内网络：镜像与 GitHub 代理前缀</b></summary>
+
+<br>
+
+- 默认「国内镜像优先」：Node 和 Chrome 走 npmmirror，模型和字体优先走 jsDelivr，失败时自动换下一个地址。人在海外或开着全局代理时，在进度页右上角「下载设置」里改成「官方源优先」。
+- 少数文件只在 GitHub 上。直连不稳时，可以在「下载设置」里填一个**你信任的** GitHub 代理前缀（只收 `https://` 地址），下载地址会变成「前缀 + 原地址」，失败时仍回到直连。我们不内置任何第三方代理。
+- 启动器会用系统代理（macOS 的系统代理设置，或 `HTTPS_PROXY` 环境变量）。暂不支持 SOCKS 代理。
+</details>
+
+<details>
+<summary><b>数据放在哪、怎么卸载</b></summary>
+
+<br>
+
+| | macOS | Windows |
+| --- | --- | --- |
+| 应用目录 | `~/Library/Application Support/Mingzhi` | `%LOCALAPPDATA%\Mingzhi` |
+
+应用目录里：`runtime/` 是 Node 与 Chrome，`app/<版本>/` 是应用本体，`data/` 是你的项目（`data/spaces/`）、模型（`data/models/`）、配乐字体（`data/assets/`）与 ffmpeg（`data/bin/`）。导出的成片和封面在 `下载/明知AI剪辑/`。可想 AI 的 key 在 macOS 上存于钥匙串（条目名 `mingzhi`），Windows 上加密存在 `data/` 里。
+
+**卸载**：先退出，删掉启动器，再删掉上面的应用目录（项目会一起删掉，「下载」里导出的成片不受影响）。macOS 上可以再到「钥匙串访问」里删掉名为 `mingzhi` 的条目。
+</details>
+
+### 更新
+
+有新版本时，工作台右上角会出现「有新版本 v0.x」，点开能看到更新说明，点「去下载」打开 Release 页面。下载新的启动器双击即可：它只会补下新的应用本体（约 50 MB），项目、模型和设置都保留。
+
+检查更新每天最多一次，只向 GitHub 发一个匿名请求，不带任何标识；不想要可以在齿轮 →「检查更新」里关掉。也可以随时自己去 [Releases][releases] 看。
+
+### 从源码运行
+
+#### 1. 准备
 
 - [Node.js 22][node] 或更高，以及 [pnpm][pnpm]
 - ffmpeg 与 ffprobe（优先用 `~/.mingzhi/bin/` 里的，也可以用环境变量 `MINGZHI_FFMPEG`、`MINGZHI_FFPROBE` 指定）
 - 一个[可想 AI][kexiang] 账号（注册不需要邀请码），在控制台创建 key
 
-### 2. 安装并启动
+#### 2. 安装并启动
 
 ```bash
 git clone https://github.com/crawfordxx/mingzhi.git && cd mingzhi
@@ -162,7 +204,7 @@ pnpm serve          # 启动本机服务，默认 http://127.0.0.1:4321
 > [!WARNING]
 > 模型和素材从 GitHub Releases 与上游站点下载，在中国大陆的部分网络下会失败；首次渲染还会下载约 94 MB 的 Chrome Headless Shell。需要代理时，在命令前加 `NODE_USE_ENV_PROXY=1`（Node 22.21 及以上），让 Node 使用 `HTTPS_PROXY` 等环境变量。所有下载都校验 sha256，中断后重跑会跳过已下载的文件。
 
-### 3. 出片
+### 出片
 
 1. **拖进口播**：一段或多段（mp4 / mov / mkv 等，单个不超过 4 GB），多段会按内容排好顺序再拼。
 2. **选背景、字幕样式、封面风格**：右边预览会实时示意；底部能拖动本项目的花费上限，旁边是预估花费和明细。
@@ -342,6 +384,7 @@ README 里的图片由 `scripts/readme/` 生成：真实工作台截图 + HTML �
 [node]: https://nodejs.org
 [pnpm]: https://pnpm.io
 [kexiang]: https://kexiangai.com
+[releases]: https://github.com/crawfordxx/mingzhi/releases
 [remotion]: https://www.remotion.dev
 [remotion-license]: https://www.remotion.dev/license
 [rvm]: https://github.com/PeterL1n/RobustVideoMatting

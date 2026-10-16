@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { CancelledError } from '../src/cancel.js';
 import { loadConfig } from '../src/config.js';
 import { startApp, type RunningApp } from '../src/server/app.js';
-import type { AppDeps } from '../src/server/context.js';
+import type { AppDeps, AppOptions } from '../src/server/context.js';
 import type { KeyStore } from '../src/workspace/keychain.js';
 import type { RunnerCtx } from '../src/workspace/runner.js';
 import { makeState } from './helpers/edit-state.js';
@@ -54,7 +54,7 @@ export interface TestApp extends RunningApp {
   call: (method: string, path: string, body?: unknown, headers?: Record<string, string>) => Promise<{ status: number; json: any; headers: Headers; text: string }>;
 }
 
-export interface TestOptions { key?: string | null; env?: string; devPort?: number; deps?: Partial<AppDeps> }
+export interface TestOptions { key?: string | null; env?: string; devPort?: number; deps?: Partial<AppDeps>; app?: Partial<AppOptions> }
 
 /** 起一个随机端口的服务：外部依赖（校验 key、探测视频、运行器、预览渲染）全是假的，数据放临时目录 */
 export async function startTestApp(o: TestOptions = {}): Promise<TestApp> {
@@ -85,6 +85,7 @@ export async function startTestApp(o: TestOptions = {}): Promise<TestApp> {
       renderCaptionPreview: async (id, dest) => { mkdirSync(join(dest, '..'), { recursive: true }); writeFileSync(dest, `preview-${id}`); },
       ...o.deps,
     },
+    ...o.app,
   }, 0);
   const call: TestApp['call'] = async (method, path, body, headers = {}) => {
     const res = await fetch(`${running.url}${path}`, {

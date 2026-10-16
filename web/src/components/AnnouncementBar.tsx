@@ -1,12 +1,14 @@
 /** 顶部公告条（ego 的 --brand-1 条 + 黑色小胶囊）：开源声明 + 本项目已花费 + 去可想 AI 查看余额 */
 import { motion } from 'motion/react';
+import type { ReactNode } from 'react';
 import { isMock } from '../api';
 import { yuan } from '../lib/media';
 import { Ico, It, SOFT } from '../ui';
 
 export const KEXIANG_URL = 'https://kexiangai.com';
 
-export function AnnouncementBar({ spent, fake }: { spent: number; fake?: boolean }) {
+/** end：右端（新版本胶囊与设置） */
+export function AnnouncementBar({ spent, fake, end }: { spent: number; fake?: boolean; end?: ReactNode }) {
   return (
     <motion.div className="bar" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={SOFT}>
       {isMock && <span className="bar-mock" title="地址栏带了 ?mock=1：项目、花费与 key 状态都是假的">演示数据</span>}
@@ -19,6 +21,7 @@ export function AnnouncementBar({ spent, fake }: { spent: number; fake?: boolean
       <motion.a className="btn btn-k" href={KEXIANG_URL} target="_blank" rel="noreferrer" whileTap={{ scale: 0.97 }}>
         去可想 AI 查看余额 {Ico.ext}
       </motion.a>
+      {end}
     </motion.div>
   );
 }

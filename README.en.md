@@ -140,16 +140,58 @@ Every run also makes **two covers, 3:4 and 4:3**, in one of 10 styles. The speak
   <img src="docs/readme/flow-en.webp" alt="Drop the talk → pick the look → make the cut → say what to change → compare and export" width="100%">
 </picture>
 
-> [!TIP]
-> **A one-click launcher is in the works.** Download, double-click, done: no Node, no terminal. Until then, run from source as below.
+### Download and first run
 
-### 1. Prerequisites
+No Node, no commands to type:
+
+1. **Download the launcher** from [Releases][releases]. On macOS pick the zip for your chip (Apple silicon / Intel), unzip it and double-click the launcher inside; on Windows double-click `Mingzhi.exe`. The system blocks it the first time; see [First launch](#first-launch) for how to let it through.
+2. **A terminal (command-line) window appears and your browser opens a progress page.** That window *is* Mingzhi; keep it open while you work.
+3. **The first run downloads the runtime and local models**: the Node runtime, ffmpeg, Chrome for rendering, the speech and matting models, and the app itself. About **490 MB** on Apple silicon, **510 MB** on Intel Macs and **530 MB** on Windows; music and fonts are filled in afterwards in the background, so you can start right away. Every download resumes where it stopped and is checked against a sha256; if the network drops, click "Retry" to pick up from there.
+4. **When it is done the page jumps to the workbench.** Paste your [Kexiang AI][kexiang] key (no invite code needed) and make a cut.
+
+After that, a double-click opens the workbench within a few seconds.
+
+**Quitting**: close that terminal window, or use the gear at the top right of the workbench → "退出明知AI剪辑" (quit; it warns you if a job would be interrupted). If you only close the browser, the server waits in the background and quits by itself after 2 hours with no page open and no job running.
+
+<details>
+<summary><b>Networks in mainland China: mirrors and a GitHub proxy prefix</b></summary>
+
+<br>
+
+- By default mirrors in China come first: Node and Chrome from npmmirror, models and fonts from jsDelivr, falling back to the next address on failure. If you are abroad or behind a global proxy, switch to "official sources first" under "Download settings" at the top right of the progress page.
+- A few files live only on GitHub. If GitHub is flaky for you, enter a GitHub proxy prefix **you trust** in "Download settings" (`https://` only); downloads then go to "prefix + original URL" and still fall back to the direct link. No third-party proxy is built in.
+- The launcher uses the system proxy (the macOS proxy settings, or the `HTTPS_PROXY` environment variable). SOCKS proxies are not supported yet.
+</details>
+
+<details>
+<summary><b>Where your data lives, and uninstalling</b></summary>
+
+<br>
+
+| | macOS | Windows |
+| --- | --- | --- |
+| App folder | `~/Library/Application Support/Mingzhi` | `%LOCALAPPDATA%\Mingzhi` |
+
+Inside: `runtime/` holds Node and Chrome, `app/<version>/` the app itself, and `data/` your projects (`data/spaces/`), models (`data/models/`), music and fonts (`data/assets/`) and ffmpeg (`data/bin/`). Exported videos and covers go to `Downloads/明知AI剪辑/`. Your Kexiang key is kept in the macOS Keychain (item `mingzhi`); on Windows it is stored encrypted under `data/`.
+
+**Uninstall**: quit, delete the launcher, then delete the app folder above (this deletes your projects too; exports in Downloads are untouched). On macOS you can also remove the `mingzhi` item in Keychain Access.
+</details>
+
+### Updating
+
+When a new version is out, the top right of the workbench shows "有新版本 v0.x" (new version). Click it for the release notes, then "去下载" (download) to open the Release page. Download the new launcher and double-click it: it only fetches the new app (about 50 MB) and keeps your projects, models and settings.
+
+The check runs at most once a day and sends a single anonymous request to GitHub, with nothing that identifies you; turn it off under the gear → "检查更新" (check for updates). You can always look at [Releases][releases] yourself.
+
+### Run from source
+
+#### 1. Prerequisites
 
 - [Node.js 22][node] or newer, and [pnpm][pnpm]
 - ffmpeg and ffprobe (`~/.mingzhi/bin/` is preferred; or point `MINGZHI_FFMPEG` / `MINGZHI_FFPROBE` at your own)
 - A [Kexiang AI][kexiang] account (no invite code needed) and a key from its console
 
-### 2. Install and start
+#### 2. Install and start
 
 ```bash
 git clone https://github.com/crawfordxx/mingzhi.git && cd mingzhi
@@ -165,7 +207,7 @@ Open the address printed in the terminal (the port moves up if it is taken). On 
 > [!WARNING]
 > Models and assets come from GitHub Releases and upstream sites, which can fail on some networks in mainland China; the first render also downloads Chrome Headless Shell (about 94 MB). Behind a proxy, prefix commands with `NODE_USE_ENV_PROXY=1` (Node 22.21+) so Node honours `HTTPS_PROXY` and friends. Every download is checked against a sha256, and re-running skips what is already there.
 
-### 3. Make a cut
+### Make a cut
 
 1. **Drop the talk**: one clip or several (mp4 / mov / mkv and more, up to 4 GB each); several clips are put in order by content and joined.
 2. **Pick background, caption style and cover style**: the preview follows along; the footer has the project's spending cap, the estimate and a breakdown.
@@ -345,6 +387,7 @@ Third-party assets are not shipped with the repo (except the sound effects); the
 [node]: https://nodejs.org
 [pnpm]: https://pnpm.io
 [kexiang]: https://kexiangai.com
+[releases]: https://github.com/crawfordxx/mingzhi/releases
 [remotion]: https://www.remotion.dev
 [remotion-license]: https://www.remotion.dev/license
 [rvm]: https://github.com/PeterL1n/RobustVideoMatting

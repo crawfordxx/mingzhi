@@ -3,6 +3,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { useCallback, useEffect, useRef } from 'react';
 import { spentOf, type Space } from './api';
 import { AnnouncementBar } from './components/AnnouncementBar';
+import { AppBarEnd, Exited } from './components/AppBarEnd';
 import { ChatFlow } from './components/ChatFlow';
 import { Composer } from './components/Composer';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -11,6 +12,7 @@ import { SpacesRail } from './components/SpacesRail';
 import { reduceLive } from './lib/liveModel';
 import { liveVersionOf } from './lib/versions';
 import { useReplay, type Replay } from './live';
+import { useAppBar } from './useAppBar';
 import { useConversation } from './useConversation';
 import { useClock, usePlayback, type Clock } from './usePlayback';
 import { useRuns } from './useRuns';
@@ -74,6 +76,7 @@ export function App() {
   useBlockFileDrop();
   const { space, options } = wb;
   const runs = useRuns({ space, putSpace: wb.putSpace, notify: wb.notify });
+  const bar = useAppBar(wb.status, wb.notify);
   const clock = usePlayback();
   // 剪辑直播与重播跟随首版（首版失败重开后不一定是 v1）
   const liveN = space ? liveVersionOf(space) : undefined;
@@ -94,7 +97,7 @@ export function App() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="app">
-        <AnnouncementBar spent={liveSpent(space, runningCost)} fake={!!wb.status?.fake} />
+        <AnnouncementBar spent={liveSpent(space, runningCost)} fake={!!wb.status?.fake} end={<AppBarEnd spaces={wb.spaces} bar={bar} />} />
         <div className="main">
           <SpacesRail spaces={wb.spaces} currentId={space?.id} onSelect={wb.selectSpace} onNew={wb.newSpace} />
           {space && options ? (
@@ -108,6 +111,7 @@ export function App() {
         </div>
       </div>
       <Toast text={wb.toast} />
+      {bar.exited && <Exited />}
     </MotionConfig>
   );
 }

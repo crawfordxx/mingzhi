@@ -17,7 +17,9 @@ import type { EditOp } from '../edit/plan.js';
 import { renderCaptionPreview } from './preview.js';
 import { makeBackgroundThumb } from './thumbs.js';
 import type { KeyCache } from './keys.js';
+import type { Activity } from './lifecycle.js';
 import type { RunManager } from './runs.js';
+import type { UpdateInfo } from './update.js';
 
 /** 可替换的外部依赖：默认是真实实现，测试注入假的 */
 export interface AppDeps {
@@ -43,6 +45,22 @@ export interface AppOptions {
   /** 开发时前端 dev server 的端口（vite 代理不改写 Host/Origin），默认读环境变量 MINGZHI_DEV_PORT */
   devPort?: number;
   deps?: Partial<AppDeps>;
+  /** 检查更新（src/server/update.ts）；不给时不查（测试、假模式） */
+  updates?: UpdateSource;
+  /** 优雅停止（POST /api/shutdown 或空闲退出）完成后调用；正式运行时是 process.exit */
+  onExit?: (code: number) => void;
+  /** 无请求、无任务满这么久自动退出；不给时不自动退出 */
+  idleExitMs?: number;
+  /** 空闲检查间隔，默认 1 分钟 */
+  idleCheckMs?: number;
+  /** 时钟（测试注入） */
+  now?: () => number;
+}
+
+/** 检查更新的最小接口：有新版本时 available() 返回它；poke() 到时间才真去查 */
+export interface UpdateSource {
+  available: () => UpdateInfo | null;
+  poke: () => Promise<void>;
 }
 
 export interface AppCtx {
@@ -61,6 +79,11 @@ export interface AppCtx {
   devPort?: number;
   /** 当前监听端口（listen 之后才有意义） */
   port: () => number;
+  /** 进行中的请求与最后活动时间（空闲退出用） */
+  activity: Activity;
+  updates?: UpdateSource;
+  /** 开始优雅停止，完成后以 0 退出（重复调用只停一次） */
+  requestShutdown: () => void;
 }
 
 export function buildDeps(cfg: AppConfig, over: Partial<AppDeps> = {}): AppDeps {
