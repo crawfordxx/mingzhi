@@ -321,6 +321,9 @@ async function facePerson(args: PipelineArgs, input: ComposeInput): Promise<Face
   return info ? { file: input.person, width: info.width, height: info.height, subject: input.subject } : undefined;
 }
 
+/** 局部重做的临时成片：与成片同目录（改名是原子的），扩展名不变（ffmpeg 按扩展名选封装） */
+const redoPathOf = (output: string): string => join(dirname(output), `${basename(output, extname(output))}.redo${extname(output)}`);
+
 /**
  * 整片自检（args.qa 为 false 时跳过）：度量成片；redo 为 true 时不达标的指标做一轮局部重做，按新分镜重渲（分段缓存只重渲受影响的镜头）。
  * metaDir 为素材记录所在目录（工作台传 base）。返回最终分镜与最终一次渲染的结果
@@ -328,9 +331,17 @@ async function facePerson(args: PipelineArgs, input: ComposeInput): Promise<Face
 export async function filmQaStage(args: PipelineArgs, input: ComposeInput, composed: Composed, complete: Complete, redo: boolean, metaDir?: string): Promise<{ storyboard: Storyboard; composed: Composed; film?: FilmQa }> {
   if (args.qa === false) return { storyboard: input.storyboard, composed };
   let last = composed;
+  // 重做渲染到成片旁的临时文件，成功后原子改名覆盖；渲染、响度统一失败或取消时已交付的成片原样保留
   const rerender = async (storyboard: Storyboard): Promise<FilmCut> => {
-    last = await composeStage(args, { ...input, storyboard }, complete);
-    complete('compose', `局部重做：重渲 ${last.rendered.length} 段 · 复用缓存 ${last.reused.length} 段`);
+    const redoOutput = redoPathOf(input.output);
+    try {
+      const next = await composeStage(args, { ...input, storyboard, output: redoOutput }, complete);
+      renameSync(redoOutput, input.output);
+      last = next;
+    } finally {
+      rmSync(redoOutput, { force: true });
+    }
+    complete('compose', `局部重做：重渲 ${last.rendered.length} 段 · 复用缓存 ${last.reused.length} 段`, { artifacts: { output: input.output, final: input.output } });
     return { video: input.output, storyboard, ...(last.outroStartSec === undefined ? {} : { outroStartSec: last.outroStartSec }) };
   };
   const face = await facePerson(args, input);
