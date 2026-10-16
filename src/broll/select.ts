@@ -153,8 +153,8 @@ export async function chooseUnique(opts: ChooseUniqueOptions): Promise<UniqueCho
 }
 
 /** 联系表用过的静帧缓存目录里取图算 dHash（与 contactSheet 的 stillsDir 保持一致即可免重复下载） */
-export function stillHasher(stillsDir: string, ffmpeg: string, fetchImpl?: typeof fetch): (c: Candidate) => Promise<bigint | null> {
-  return async (c) => dedupHash(await stillOf(c, stillsDir, ffmpeg, fetchImpl), ffmpeg);
+export function stillHasher(stillsDir: string, ffmpeg: string, fetchImpl?: typeof fetch, signal?: AbortSignal): (c: Candidate) => Promise<bigint | null> {
+  return async (c) => dedupHash(await stillOf(c, stillsDir, ffmpeg, fetchImpl, signal), ffmpeg);
 }
 
 export interface FocalBox { x: number; y: number; w: number; h: number }

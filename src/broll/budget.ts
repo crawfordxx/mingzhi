@@ -13,6 +13,8 @@ export const EST_YUAN = {
   focal: 0.04,
   search: 0.05,
   image: 0.2,
+  /** 竖屏、横屏（2k）生图，实测 ¥0.3 */
+  imageWide: 0.3,
   video: 2.4,
 } as const;
 

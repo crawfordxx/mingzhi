@@ -66,6 +66,14 @@ describe('screenshotUrl 子进程处理（假浏览器）', () => {
     expect(alive()).toBe(false);
   });
 
+  posixOnly('hideImages：不加载图片（只截页面与标题区，不截新闻配图本体）', async () => {
+    const { dir, fake } = fakeBrowser(`echo "$@" > "$(dirname "$0")/args.txt"\nexit 0`);
+    await expect(screenshotUrl('https://example.com', join(dir, 'o.png'), { browserPath: fake, hideImages: true })).rejects.toThrow('空白');
+    expect(readFileSync(join(dir, 'args.txt'), 'utf8')).toContain('--blink-settings=imagesEnabled=false');
+    await expect(screenshotUrl('https://example.com', join(dir, 'p.png'), { browserPath: fake })).rejects.toThrow('空白');
+    expect(readFileSync(join(dir, 'args.txt'), 'utf8')).not.toContain('imagesEnabled');
+  });
+
   posixOnly('浏览器没产出图片时报错（空白/被拦截）', async () => {
     const { dir, fake } = fakeBrowser('exit 0');
     const out = join(dir, 'o.png');

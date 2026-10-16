@@ -64,7 +64,13 @@ describe('attributionText', () => {
       source: 'openverse', author: 'Eve', authorUrl: 'https://www.flickr.com/photos/eve', page: 'https://www.flickr.com/photos/eve/1',
       license: 'CC BY 2.0', licenseUrl: 'https://creativecommons.org/licenses/by/2.0/', attributionRequired: true, modified: [],
     })]);
-    expect(by).toBe('素材：Openverse（CC BY 2.0 https://creativecommons.org/licenses/by/2.0/）@Eve（https://www.flickr.com/photos/eve https://www.flickr.com/photos/eve/1）');
+    expect(by).toBe('素材：Openverse（CC BY 2.0 https://creativecommons.org/licenses/by/2.0/）@Eve（https://www.flickr.com/photos/eve https://www.flickr.com/photos/eve/1）；部分图片经 Openverse 检索，Openverse 未对本作品背书');
+  });
+
+  it('用到 Openverse 素材才加「未背书」声明', () => {
+    const wiki = entry({ source: 'wikimedia', author: 'Eve', license: 'CC0', attributionRequired: false, modified: [] });
+    expect(attributionText([wiki])).not.toContain('Openverse');
+    expect(attributionText([wiki, entry({ source: 'openverse', author: 'Bo', license: 'CC0', attributionRequired: false, modified: [] })])).toMatch(/；部分图片经 Openverse 检索，Openverse 未对本作品背书$/);
   });
 
   it('只有 AI 生成；空列表返回空串', () => {

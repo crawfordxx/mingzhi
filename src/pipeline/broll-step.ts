@@ -3,12 +3,12 @@ import type { CostMeter } from '../cost/meter.js';
 import type { TimedCaption } from '../captions/lines.js';
 import { brollCapYuan, makeBudget, type BrollBudget } from '../broll/budget.js';
 import { makeDeps } from '../broll/deps.js';
-import { fulfillVisuals, upgradeToVideo, type BrollAsset, type BrollDeps, type FulfillOptions } from '../broll/fulfill.js';
+import { fulfillVisuals, pendingNeeds, upgradeToVideo, type BrollAsset, type BrollDeps, type FulfillOptions } from '../broll/fulfill.js';
 import { PROJECT_LUT } from '../broll/process.js';
 import type { BeatEnv } from '../broll/realize.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import { runBeats, type BeatRecord, type BeatsCtx } from './broll-beats.js';
-import { brollMix, finalize, mixSummary, recheck, recordCardAssets, writeCredits } from './broll-finish.js';
+import { brollMix, finalize, keepExisting, mixSummary, recheck, recordCardAssets, writeCredits } from './broll-finish.js';
 import { redoShots, type BrollMark } from './broll-redo.js';
 import { brollDetail } from './detail.js';
 import { rethrowIfCancelled } from '../cancel.js';
@@ -153,39 +153,49 @@ function beatsCtx(ctx: BrollContext, deps: BrollDeps, budget: BrollBudget, durat
 
 interface Shots { storyboard: Storyboard; records: BeatRecord[]; notes: string[]; imageUrls: Record<string, string> }
 
-/** 首版：规划节拍并放进镜头；修改版本：只重做指定镜头 */
+/** 首版：规划节拍并放进镜头；修改版本：只重做指定镜头。意外异常只放弃这一部分（镜头保持原样），余额不足与取消原样抛出 */
 async function placeBroll(ctx: BrollContext, bc: BeatsCtx | undefined, storyboard: Storyboard): Promise<Shots> {
-  if (!bc) return { storyboard, records: ctx.edit?.records ?? [], notes: [], imageUrls: {} };
-  if (ctx.edit) {
-    const r = await redoShots(bc, storyboard, ctx.edit.redoAt, ctx.edit.marks, ctx.edit.records);
-    return { storyboard: r.storyboard, records: ctx.edit.records, notes: r.notes, imageUrls: {} };
+  const records = ctx.edit?.records ?? [];
+  if (!bc) return { storyboard, records, notes: [], imageUrls: {} };
+  try {
+    if (ctx.edit) {
+      const r = await redoShots(bc, storyboard, ctx.edit.redoAt, ctx.edit.marks, records);
+      return { storyboard: r.storyboard, records: r.records, notes: r.notes, imageUrls: {} };
+    }
+    const r = await runBeats(bc, storyboard);
+    return { storyboard: r.storyboard, records: r.records, notes: r.note ? [r.note] : [], imageUrls: r.imageUrls };
+  } catch (err) {
+    rethrowIfBalance(err);
+    rethrowIfCancelled(err);
+    return { storyboard, records, notes: [`B-roll 节拍出错，已跳过：${err instanceof Error ? err.message : String(err)}`], imageUrls: {} };
   }
-  const r = await runBeats(bc, storyboard);
-  return { storyboard: r.storyboard, records: r.records, notes: r.note ? [r.note] : [], imageUrls: r.imageUrls };
 }
 
-/** 开启时：卡片素材 → 节拍编排（或重做指定镜头）→ 预算还够时钩子图生视频 → 归一化、复检、写 credits.json；整步异常不中断出片，降级为去掉待取素材的分镜 */
+/**
+ * 开启时：节拍编排（或重做指定镜头，先于卡片素材：铺了 B-roll 的钩子不再生图）→ 卡片素材 → 预算还够时钩子图生视频 → 归一化、复检、写 credits.json。
+ * 整步意外异常不中断出片：只放弃本次新增的部分，已有（含父版本已付费）的素材保留
+ */
 async function fetchBroll(ctx: BrollContext, broll: BrollOptions, storyboard: Storyboard, durationSec: number, complete: Complete): Promise<Storyboard> {
   try {
     const deps = resolveDeps(ctx, broll);
     const budget = makeBudget({ meter: ctx.meter, budgetYuan: broll.budgetYuan, reserveYuan: ctx.reserveYuan, capYuan: brollCapYuan(durationSec) });
-    const res = await fulfillVisuals(storyboard, deps, {
+    const placed = await placeBroll(ctx, beatsCtx(ctx, deps, budget, durationSec), storyboard);
+    const res = await fulfillVisuals(placed.storyboard, deps, {
       workDir: ctx.workDir, durationSec, maxVideos: broll.maxVideos, budgetYuan: broll.budgetYuan, meter: ctx.meter, reserveYuan: ctx.reserveYuan,
       signal: ctx.signal, afford: budget.canAfford, ...(ctx.deferShots ? { deferShots: ctx.deferShots } : {}),
-      ...progressHooks(ctx, visualsOf(storyboard).length),
+      ...progressHooks(ctx, pendingNeeds(placed.storyboard).length),
     });
     budget.note(res.costYuan);
     recordCardAssets(ctx.workDir, res.assets);
-    const placed = await placeBroll(ctx, beatsCtx(ctx, deps, budget, durationSec), res.storyboard);
-    const video = await upgradeToVideo(placed.storyboard, res.videoWanted, deps, { workDir: ctx.workDir, maxVideos: broll.maxVideos, afford: budget.canAfford, signal: ctx.signal, onStatus: videoStatus(ctx) });
+    const video = await upgradeToVideo(res.storyboard, res.videoWanted, deps, { workDir: ctx.workDir, maxVideos: broll.maxVideos, afford: budget.canAfford, signal: ctx.signal, onStatus: videoStatus(ctx) });
     video.assets.forEach((a) => budget.note(a.cost ?? 0));
     recordCardAssets(ctx.workDir, video.assets);
     return finishBroll(ctx, { ...placed, storyboard: video.storyboard, notes: [...placed.notes, ...video.skipped] }, [...res.assets, ...video.assets], [...res.failures, ...video.failures.map((reason) => ({ shotIndex: -1, reason }))], budget, durationSec, complete);
   } catch (err) {
     rethrowIfBalance(err);
     rethrowIfCancelled(err);
-    const fallback = withoutBroll(storyboard, durationSec);
-    complete('broll', `素材获取失败，已去掉待取素材的需求（图片卡改为全屏人像）：${err instanceof Error ? err.message : String(err)}`, { storyboard: fallback });
+    const fallback = keepExisting(storyboard, ctx.workDir, durationSec);
+    complete('broll', `素材获取失败，已保留已有素材、去掉还没取到素材的需求：${err instanceof Error ? err.message : String(err)}`, { storyboard: fallback });
     return fallback;
   }
 }

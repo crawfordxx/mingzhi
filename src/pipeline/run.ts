@@ -10,6 +10,7 @@ import { CancelledError, throwIfCancelled } from '../cancel.js';
 import type { LlmClient } from '../llm/kexiang.js';
 import type { TaskClient } from '../llm/kexiang-task.js';
 import { validateBroll, type BrollOptions } from './broll-step.js';
+import { writeStoryboardCredits } from '../broll/credit-store.js';
 import type { SubjectBox } from '../matting/composite.js';
 import type { BrollDeps } from '../broll/fulfill.js';
 import type { Storyboard } from '../storyboard/schema.js';
@@ -159,6 +160,8 @@ async function runSteps(args: PipelineArgs, projectPath: string, complete: Compl
   const analysis = await analyzeStage(args, join(args.workDir, 'audio16k.wav'), complete);
   const p = await produce(args, analysis, complete);
   const { storyboard, cards } = await qaCardsStage(args, meter, p.storyboard, p.captions, complete);
+  // 授权记录按卡片自检之后的最终分镜重写（自检可能改掉带图的卡）
+  if (args.broll?.enabled) writeStoryboardCredits(storyboard, args.workDir, args.workDir);
   const raw = join(args.workDir, 'final.raw.mp4');
   const cacheDir = args.cacheDir ?? join(args.workDir, 'segments');
   const outputDurationSec = analysis.plan.outputDurationSec;

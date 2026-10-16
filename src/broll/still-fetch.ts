@@ -44,8 +44,9 @@ async function readCapped(res: Response, maxBytes: number, url: string): Promise
 }
 
 /** 下载图片：校验状态码、Content-Type 为 image/*、字节上限与超时；通过校验才落盘，错误页不会留下缓存 */
-export async function downloadImage(url: string, dest: string, fetchImpl: typeof fetch, maxBytes: number): Promise<void> {
-  const res = await fetchImpl(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+export async function downloadImage(url: string, dest: string, fetchImpl: typeof fetch, maxBytes: number, signal?: AbortSignal): Promise<void> {
+  const timeout = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
+  const res = await fetchImpl(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   if (!res.ok) throw new Error(`图片下载失败 ${res.status}：${url}`);
   const type = res.headers.get('content-type') ?? '';
   if (!/^image\//i.test(type)) throw new Error(`下载到的不是图片（${type || '无 Content-Type'}）：${url}`);
@@ -93,13 +94,13 @@ export async function stillOf(c: Candidate, dir: string, ffmpeg: string, fetchIm
       if (!existsSync(preview)) throw new Error(`预览图不存在：${preview}`);
       return preview;
     }
-    await downloadImage(preview, dest, http, THUMB_MAX_BYTES);
+    await downloadImage(preview, dest, http, THUMB_MAX_BYTES, signal);
     return dest;
   }
   if (c.kind === 'video' || isVideoFile(preview)) {
     await middleFrame(preview || c.url, c.durationSec, dest, ffmpeg, signal);
     return dest;
   }
-  await downloadImage(c.url, dest, http, ORIGINAL_MAX_BYTES);
+  await downloadImage(c.url, dest, http, ORIGINAL_MAX_BYTES, signal);
   return dest;
 }

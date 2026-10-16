@@ -12,6 +12,7 @@ import type { ProjectFile } from '../pipeline/project.js';
 import type { PipelineArgs } from '../pipeline/run.js';
 import { brollStage, composeStage, finalQaStage, placeEnding, qaCardsStage, type BrollStageExtra } from '../pipeline/stages.js';
 import type { BrollMark } from '../pipeline/broll-redo.js';
+import type { BeatRecord } from '../pipeline/broll-beats.js';
 import { writeStoryboardCredits } from '../broll/credit-store.js';
 import type { SegmentedResult } from '../compose/segments.js';
 import type { CardQaEntry } from '../qa/visual.js';
@@ -24,7 +25,7 @@ import { recut, retime, writeAss } from './runner-retime.js';
 
 interface Change { next: VersionState; ops: EditOp[]; dropped: string[]; stages: Set<Stage>; newCover: boolean }
 interface Parent { n: number; dir: string; state: VersionState; project: ProjectFile | null; hashes?: string[]; contents?: string[] }
-interface Made extends Person { plan: CutPlan; captions: TimedCaption[]; storyboard: Storyboard }
+interface Made extends Person { plan: CutPlan; captions: TimedCaption[]; storyboard: Storyboard; brollBeats?: BeatRecord[] }
 
 const STAGE_LABEL: Record<Stage, string> = { cut: '剪切', matte: '换背景', captions: '字幕', storyboard: '分镜', broll: '素材', compose: '成片' };
 
@@ -100,8 +101,9 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
     ? await brollStage(args, placed, plan.outputDurationSec, env.base, env.complete, { captions: timed.captions, deferShots: changedShots(p.state, placed), edit: brollEdit(p, c) })
     : placed;
   linkBroll(storyboard, env.base, env.dir);
-  writeStoryboardCredits(storyboard, env.base, env.dir);
-  return { ...person, plan, captions: timed.captions, storyboard };
+  // 节拍记录：素材步骤跑了用它更新后的，否则沿用父版本
+  const brollBeats = c.stages.has('broll') ? env.record({}).broll?.beats : parentBeats(p);
+  return { ...person, plan, captions: timed.captions, storyboard, ...(brollBeats ? { brollBeats } : {}) };
 }
 
 /**
@@ -111,8 +113,11 @@ async function remake(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change)
 function brollEdit(p: Parent, c: Change): NonNullable<BrollStageExtra['edit']> {
   const shots = c.next.storyboard.shots;
   const redoAt = c.ops.flatMap((o) => (o.type === 'replaceBroll' && shots[o.shotIndex] ? [(shots[o.shotIndex].start + shots[o.shotIndex].end) / 2] : []));
-  return { redoAt, marks: readMarks(p.dir), records: p.project?.broll?.beats ?? [] };
+  return { redoAt, marks: readMarks(p.dir), records: parentBeats(p) ?? [] };
 }
+
+/** 父版本的节拍记录：版本状态里的为准，旧版本退回 project.json */
+const parentBeats = (p: Parent): BeatRecord[] | undefined => p.state.brollBeats ?? p.project?.broll?.beats;
 
 /** 上一版素材面板的标记（credits-marks.json，键是素材相对路径）；没有或损坏当作没有标记 */
 function readMarks(dir: string): Record<string, BrollMark> {
@@ -225,6 +230,8 @@ export async function produceNext(env: VersionEnv, input: string, parentN: numbe
   await cover(env, args, p, c, m);
   env.record({ plan: m.plan, captions: m.captions, storyboard });
   const qaScore = qaScoreOf(cards) ?? env.space.versions.find((v) => v.n === parentN)?.qaScore;
-  const state = { ...c.next, plan: m.plan, captions: m.captions, storyboard };
+  // 授权记录按卡片自检之后的最终分镜写
+  writeStoryboardCredits(storyboard, env.base, env.dir);
+  const state = { ...c.next, plan: m.plan, captions: m.captions, storyboard, ...(m.brollBeats ? { brollBeats: m.brollBeats } : {}) };
   return { state, changedShots: rendered.changed, rerenderedShots: rendered.rerendered, ...(rendered.hashes ? { shotHashes: rendered.hashes } : {}), ...(rendered.contents ? { contentHashes: rendered.contents } : {}), ...(qaScore !== undefined ? { qaScore } : {}) };
 }

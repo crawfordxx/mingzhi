@@ -61,6 +61,6 @@ export async function fetchOriginal(c: Candidate, dest: string, fetchImpl: typeo
   mkdirSync(dirname(dest), { recursive: true });
   const http = fetchFor(c, fetchImpl);
   if (c.kind === 'video') await downloadVideo(c.url, dest, http, signal);
-  else await downloadImage(sized.url, dest, http, ORIGINAL_MAX_BYTES);
+  else await downloadImage(sized.url, dest, http, ORIGINAL_MAX_BYTES, signal);
   return { width: sized.width, height: sized.height };
 }

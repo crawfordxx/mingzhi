@@ -67,8 +67,10 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const captions = await captionsStage(args, a, join(env.dir, 'captions.ass'), env.complete);
   const planned = await storyboardStage(args, captions, a.plan.outputDurationSec, env.base, env.complete);
   linkBroll(planned, env.base, env.dir);
-  writeStoryboardCredits(planned, env.base, env.dir);
+  const brollBeats = env.record({}).broll?.beats;
   const { storyboard, cards } = await qaCardsStage(args, env.meter, planned, captions, env.complete);
+  // 授权记录按卡片自检之后的最终分镜写（自检可能改掉带图的卡）
+  writeStoryboardCredits(storyboard, env.base, env.dir);
   const final = join(env.dir, FINAL_FILE);
   const raw = join(env.dir, 'final.raw.mp4');
   const composeInput = {
@@ -78,7 +80,7 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   env.complete('compose', `分段渲染：新渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
   await finalQaStage(args, final, storyboard, cards, env.complete, res.outroStartSec);
   await makeCover(env, args, init.coverStyle, storyboard, captions, person);
-  const state: VersionState = { ...init, plan: a.plan, captions, storyboard };
+  const state: VersionState = { ...init, plan: a.plan, captions, storyboard, ...(brollBeats ? { brollBeats } : {}) };
   const qaScore = qaScoreOf(cards);
   // 首个版本没有父版本可比，本版改动为空（界面显示「首版」）
   return { state, changedShots: [], rerenderedShots: [], shotHashes: res.hashes, contentHashes: res.contents, ...(qaScore !== undefined ? { qaScore } : {}) };

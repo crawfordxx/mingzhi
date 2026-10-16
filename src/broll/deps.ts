@@ -28,7 +28,8 @@ export function freeSources(cfg: Pick<AppConfig, 'dataDir'>, keys: { pexelsKey?:
 export function makeDeps(opts: { apiKey: string; task: TaskClient; cfg: AppConfig; pexelsKey?: string; pixabayKey?: string; meter?: CostMeter }): BrollDeps {
   const { apiKey, task, cfg, pexelsKey, meter } = opts;
   return {
-    screenshot: (url, out, size) => screenshotUrl(url, out, size ?? {}),
+    // 截图一律不加载图片：只截页面与标题区，不截新闻配图本体
+    screenshot: (url, out, size) => screenshotUrl(url, out, { ...size, hideImages: true }),
     search: (query) => searchUrls(apiKey, query, { max: SEARCH_TRIES, meter }),
     image: (prompt, out, o) => generateImage(task, prompt, out, undefined, o?.size),
     video: (prompt, imageUrl, out, onStatus) => generateVideoFromImage(task, prompt, imageUrl, out, cfg, undefined, onStatus),

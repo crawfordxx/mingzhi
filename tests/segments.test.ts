@@ -187,6 +187,8 @@ describe('盐值（素材与渲染代码指纹）', () => {
     const pip = await hashes(at({ layout: 'pip', broll: B }));
     expect(changed(await hashes(at({ layout: 'pip', broll: { ...B, focal: { x: 0.2, y: 0.5 } } })), pip)[3]).toBe(true);
     expect(changed(await hashes(at({ layout: 'pip', broll: { ...B, file: 'broll/a.png' } })), pip)[3]).toBe(true);
+    // 来源角标（截图来源、AI 生成）也进哈希
+    expect(changed(await hashes(at({ layout: 'pip', broll: { ...B, label: { kind: 'ai' as const, text: 'AI 生成' } } })), pip)[3]).toBe(true);
   });
   it('画中画退出的 0.4 秒里垫底的是上一镜素材：素材内容变，后一段也变；颗粒开关进哈希（旧分镜未设置时与关闭一致）', async () => {
     write('broll/v.mp4', 'v-v1');

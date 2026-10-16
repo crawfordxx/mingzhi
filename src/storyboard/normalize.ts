@@ -157,7 +157,8 @@ function shortFate(last: Shot | undefined, s: Shot, next: Shot | undefined): Fat
   if (!last) return fitsNext ? 'next' : 'keep';
   if (!hasContent(last) || round(s.end - last.start) <= limitOf(last)) return 'prev';
   if (fitsNext) return 'next';
-  return round(s.end - last.start) < SOFT_MAX_SHOT_SEC ? 'prev' : 'plain';
+  // 全屏插入不走软上限（单次最长 3.5 秒），碎片改为人物全屏
+  return limitOf(last) === MAX_SHOT_SEC && round(s.end - last.start) < SOFT_MAX_SHOT_SEC ? 'prev' : 'plain';
 }
 
 /** 合并短镜头；并入后一个时不输出本镜头，后一个从已排好的末尾开始（起点提前） */

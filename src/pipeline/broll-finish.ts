@@ -23,6 +23,23 @@ export function recordCardAssets(workDir: string, assets: readonly BrollAsset[],
   }
 }
 
+/** 卡片上还没有图或视频的素材需求（visual）去掉 */
+function dropPending(storyboard: Storyboard): Storyboard {
+  const shots = storyboard.shots.map((s) => {
+    const p = (s.card?.props ?? {}) as { image?: string; video?: string; visual?: unknown };
+    if (!s.card || p.visual === undefined || p.image || p.video) return s;
+    const { visual: _v, ...props } = p;
+    return { ...s, card: { ...s.card, props } } as Storyboard['shots'][number];
+  });
+  return { ...storyboard, shots };
+}
+
+/** 素材步骤意外失败时的降级：已有文件的素材（卡片图、B-roll，含父版本已付费的）全部保留，只去掉还没取到的需求 */
+export function keepExisting(storyboard: Storyboard, workDir: string, durationSec: number): Storyboard {
+  const pending = dropPending(storyboard);
+  return normalizeStoryboard(pending, durationSec, existingFiles(pending, workDir)).storyboard;
+}
+
 /** 最后一次归一化：可用文件 = 分镜里已有的卡片素材与 B-roll（都在 workDir 里） */
 export function finalize(storyboard: Storyboard, workDir: string, durationSec: number): Storyboard {
   return normalizeStoryboard(storyboard, durationSec, existingFiles(storyboard, workDir)).storyboard;

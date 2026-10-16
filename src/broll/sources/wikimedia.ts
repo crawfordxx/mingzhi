@@ -27,9 +27,8 @@ export function wikimediaFetch(fetchImpl: typeof fetch = fetch): typeof fetch {
     fetchImpl(input, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), 'User-Agent': WIKIMEDIA_USER_AGENT } })) as typeof fetch;
 }
 
-/** Commons 的 Restrictions 元数据：商标、人格权（可识别人物）等非版权限制，商用有风险，一律排除 */
-const RESTRICTED = /trademark|personality|insignia|costume|ignore-copyright-restrictions/i;
-export const restricted = (value: string | undefined): boolean => !!value && RESTRICTED.test(value);
+/** Commons 的 Restrictions 元数据：商标、人格权、徽章、货币等非版权限制，商用都有风险——非空一律排除 */
+export const restricted = (value: string | undefined): boolean => !!value && value.trim() !== '';
 
 function decodeEntities(text: string): string {
   return text

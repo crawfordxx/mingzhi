@@ -3,6 +3,7 @@ import { AbsoluteFill, Img, Loop, OffthreadVideo, Sequence, staticFile, useCurre
 import { kenBurnsAt, kenBurnsRects, shotAt, underlayAt, visualLayout } from '../../src/compose/layout.js';
 import type { Broll, Shot } from '../../src/storyboard/schema.js';
 import { shotStartFrame } from '../templates/ShotVideo.js';
+import { THEME } from '../theme.js';
 
 /** 素材底色：极深的暖黑（素材加载前或透明处不露米色） */
 export const BROLL_BG = '#0B0B0A';
@@ -42,10 +43,23 @@ const BrollVideo: React.FC<{ broll: Broll; local: number }> = ({ broll, local })
   );
 };
 
-/** 素材铺满所在容器（全屏、上半屏或浮层小窗共用） */
+/**
+ * 来源角标（截图「来源：站点」、AI 生成「AI 生成」）：右上、小号、半透明玻璃底，不随 Ken Burns 移动。
+ * 位置按容器比例：全屏在 y≈9%（避开平台顶栏与右上角搜索图标），远离下部字幕与右侧点赞栏
+ */
+const BrollBadge: React.FC<{ label: NonNullable<Broll['label']> }> = ({ label }) => (
+  <div style={{ position: 'absolute', top: '9%', right: '4%', padding: '6px 14px', borderRadius: 999, fontFamily: THEME.font, fontSize: 22, lineHeight: 1.2, fontWeight: 500, letterSpacing: 0.5,
+    color: 'rgba(255, 255, 255, 0.9)', background: 'rgba(18, 18, 16, 0.38)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+    border: '1px solid rgba(255, 255, 255, 0.18)', whiteSpace: 'nowrap' }}>
+    {label.text}
+  </div>
+);
+
+/** 素材铺满所在容器（全屏、上半屏或浮层小窗共用）；带 label 时叠来源角标 */
 export const BrollMedia: React.FC<{ broll: Broll; local: number; dur: number }> = ({ broll, local, dur }) => (
   <AbsoluteFill style={{ background: BROLL_BG }}>
     {broll.kind === 'video' ? <BrollVideo broll={broll} local={local} /> : <KenBurnsPhoto broll={broll} local={local} dur={dur} />}
+    {broll.label ? <BrollBadge label={broll.label} /> : null}
   </AbsoluteFill>
 );
 

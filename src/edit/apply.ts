@@ -6,6 +6,7 @@ import type { EditPlan as CutPlan, PlanOptions, TimeRange } from '../cut/plan.js
 import type { AudioOptions } from '../pipeline/audio-step.js';
 import { CardSpecSchema, MOODS, type CardSpec, type Layout, type Shot, type Storyboard, type Visual } from '../storyboard/schema.js';
 import type { SpaceSettings } from '../workspace/store.js';
+import type { BeatRecord } from '../pipeline/broll-beats.js';
 import { captionTooLong, cardHiddenIn, checkCard, layoutBlocker } from './check.js';
 import { canonicalize, layoutProblem } from './layout-rules.js';
 import { revealToLocal } from '../storyboard/reveal.js';
@@ -32,6 +33,8 @@ export interface VersionState {
   extraCuts: TimeRange[];
   /** 用户要求找回的片段（原片时间），重建时从 cutRanges 里扣掉，并作为语音段补回 */
   restored: TimeRange[];
+  /** B-roll 视觉节拍（完整字段与落点）：「换一张 B-roll」按原节拍重做；旧版本没有 */
+  brollBeats?: BeatRecord[];
 }
 
 export type Stage = 'cut' | 'matte' | 'captions' | 'storyboard' | 'broll' | 'compose';

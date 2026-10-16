@@ -79,6 +79,8 @@ function sourceItems(entries: readonly CreditEntry[]): string[] {
 }
 
 const PROCESSED = /crop|lut|grade|color/;
+/** Openverse 使用条款：引用其检索结果时声明不代表其背书 */
+export const OPENVERSE_NOTE = '部分图片经 Openverse 检索，Openverse 未对本作品背书';
 
 /** 发布正文末尾的中文署名段落 */
 export function attributionText(entries: readonly CreditEntry[]): string {
@@ -91,5 +93,6 @@ export function attributionText(entries: readonly CreditEntry[]): string {
     processed ? '部分素材已裁切调色' : '',
     hosts.length > 0 ? `部分画面截自 ${hosts.join('、')}` : '',
     ai ? '部分画面为 AI 生成' : '',
+    entries.some((e) => e.source === 'openverse') ? OPENVERSE_NOTE : '',
   ].filter(Boolean).join('；');
 }

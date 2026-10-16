@@ -62,10 +62,14 @@ async function rawFile(env: BeatEnv, c: Candidate): Promise<{ file: string; size
   return { file, size: await fetchOriginal(c, file, env.fetchImpl, env.signal) };
 }
 
-/** 主体位置：生图按提示词构图（居中），其余对单张图问一次模型；预算不够也用中心 */
+/** 截图的取景：页面上部的标题区 */
+const PAGE_TOP: Point = { x: 0.5, y: 0.25 };
+
+/** 主体位置：生图按提示词构图（居中），截图取标题区，其余对单张图问一次模型；预算不够也用中心 */
 async function focalOf(env: BeatEnv, c: Candidate, file: string): Promise<Point> {
+  if (c.source === 'screenshot') return PAGE_TOP;
   if (c.source === 'generated' || !env.budget.canAfford(EST_YUAN.focal)) return CENTER;
-  const image = c.kind === 'video' ? await stillOf(c, stillsDirOf(env.workDir), env.ffmpeg, env.fetchImpl) : file;
+  const image = c.kind === 'video' ? await stillOf(c, stillsDirOf(env.workDir), env.ffmpeg, env.fetchImpl, env.signal) : file;
   return (await locateFocal(env.llm, image)).focal;
 }
 
@@ -118,7 +122,7 @@ const newHash = (before: PickedState, after: PickedState): bigint | null => (aft
  * 返回新的全片已选状态（失败的候选不算用过）。余额不足与取消原样抛出
  */
 export async function realizeBest(env: BeatEnv, beat: Beat, candidates: readonly Candidate[], scores: readonly CandidateScore[], state: PickedState): Promise<Realized> {
-  const hashOf = env.hashOf ?? stillHasher(stillsDirOf(env.workDir), env.ffmpeg, env.fetchImpl);
+  const hashOf = env.hashOf ?? stillHasher(stillsDirOf(env.workDir), env.ffmpeg, env.fetchImpl, env.signal);
   const failed: string[] = [];
   const failures: string[] = [];
   for (let i = 0; i < MAX_TRIES; i += 1) {

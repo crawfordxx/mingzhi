@@ -233,6 +233,9 @@ export function existingFiles(storyboard: Storyboard, workDir: string): string[]
   });
 }
 
+/** 要取的卡片素材需求：已铺了 B-roll 的镜头（钩子做底）不再取 */
+export const pendingNeeds = (storyboard: Storyboard): VisualNeed[] => visualsOf(storyboard).filter((n) => !storyboard.shots[n.shotIndex]?.broll);
+
 /** 视频需求生图成功（拿到了公网地址、没有现成的 mp4 缓存）时，记下以后做图生视频 */
 function wantVideo(need: VisualNeed, key: string, asset: BrollAsset): VideoWanted[] {
   if (need.visual.source !== 'video' || asset.source !== 'generate' || !asset.url) return [];
@@ -253,7 +256,7 @@ export async function fulfillVisuals(storyboard: Storyboard, deps: BrollDeps, op
   let videoWanted: VideoWanted[] = [];
   let videoHits = 0;
   const deferred = (n: VisualNeed): boolean => opts.deferShots?.includes(n.shotIndex) ?? false;
-  const needs = visualsOf(storyboard);
+  const needs = pendingNeeds(storyboard);
   for (const need of [...needs.filter((n) => !deferred(n)), ...needs.filter(deferred)]) {
     throwIfCancelled(opts.signal);
     const key = visualKey(need.visual);

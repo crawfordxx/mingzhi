@@ -346,9 +346,9 @@ describe.skipIf(!hasModels())('runPipeline B-roll 步骤（需要本地模型）
       broll: { enabled: true, maxVideos: 1, budgetYuan: 10 }, onProgress: (e) => events.push(e) });
     expect(events.map((e) => e.step).filter((s, i, all) => s !== all[i - 1]).slice(-7)).toEqual(['broll', 'qa-cards', 'compose', 'loudness', 'qa-final', 'cover', 'done']);
     const brollEvents = events.filter((e) => e.step === 'broll').map((e) => e.message);
-    expect(brollEvents[0]).toBe('素材 1/2：生图（钩子关键图）中…');
-    // 假模型不会规划节拍：节拍编排整体跳过，不中断出片；钩子先生图，图生视频在 B-roll 上限（短片 ¥1）下放不下
-    expect(brollEvents.some((m) => m.includes('节拍规划失败'))).toBe(true);
+    // 节拍编排先于卡片素材；假模型不会规划节拍：节拍整体跳过，不中断出片；钩子先生图，图生视频在 B-roll 上限（短片 ¥1）下放不下
+    expect(brollEvents[0]).toContain('节拍规划失败');
+    expect(brollEvents[1]).toBe('素材 1/2：生图（钩子关键图）中…');
     expect(brollEvents.at(-1)).toMatch(/^素材 2 个（实拍 0 \/ 图片 0 \/ 截图 0 \/ 生成 2） · 花费 ¥0\.40 · 失败 0 个/);
     expect(calls.video).toHaveLength(0);
     expect(calls.image).toHaveLength(2);

@@ -45,6 +45,8 @@ describe('regionIn 切段', () => {
     expect(r[1] - r[0]).toBeCloseTo(3.5);
     // 镜头只有 1.2 秒：放不下 1.5 秒
     expect(regionIn(full(10, 11.2), 10, 11.2, 3.5)).toBeNull();
+    // 帧对齐的循环小数边界：取整后不越界
+    expect(regionIn(full(6.166666666666667, 8.166666666666666), 6.2, 8.17, 3.5)).toEqual([6.166666666666667, 8.166666666666666]);
   });
 });
 
@@ -81,18 +83,31 @@ describe('placeAsset 分配到镜头', () => {
     expect((r.shots[4].card?.props as { reveal?: number[] }).reveal).toEqual([0, 0]);
   });
 
-  it('卡片镜头太短切不出：轻卡片（标题）铺图做底；信息密的卡（对比条）不铺，跳过', () => {
+  it('卡片镜头太短切不出：铺在卡片上半屏做底（分屏升级，对比条等信息卡同样）', () => {
     const short: Shot[] = [full(0, 10), card(10, 13), full(13, 20)];
     const r = placeAsset(short, beat({ start: 10.5, end: 12.5 }), asset());
     expect(r.layout).toBe('split');
     expect(r.shots[1].broll?.file).toBe('broll/a.jpg');
     const dense: Shot[] = [full(0, 10), { start: 10, end: 13, layout: 'split', card: { template: 'compareBars', props: { items: [{ name: '甲', value: 0.5, tone: 'bad' }] } } }, full(13, 20)];
-    expect(placeAsset(dense, beat({ start: 10.5, end: 12.5, present: 'split' }), asset()).layout).toBeUndefined();
+    expect(placeAsset(dense, beat({ start: 10.5, end: 12.5, present: 'split' }), asset())).toMatchObject({ layout: 'split', placement: 'card' });
   });
 
-  it('钩子、CTA 不让占：返回原分镜与原因', () => {
-    expect(placeAsset(sb, beat({ start: 0.5, end: 3.5 }), asset())).toMatchObject({ shots: sb, reason: expect.stringContaining('钩子') });
+  it('还没有图的钩子：素材铺在钩子上半屏做底；钩子已有图、CTA 不让占，返回原分镜与原因', () => {
+    expect(placeAsset(sb, beat({ start: 0.5, end: 3.5 }), asset())).toMatchObject({ layout: 'split', placement: 'card' });
+    const withImage: Shot[] = sb.map((s, i) => (i === 0 && s.card?.template === 'hook' ? { ...s, card: { ...s.card, props: { ...s.card.props, image: 'broll/h.jpg' } } } : s));
+    expect(placeAsset(withImage, beat({ start: 0.5, end: 3.5 }), asset())).toMatchObject({ shots: withImage, reason: expect.stringContaining('CTA') });
     expect(placeAsset(sb, beat({ start: 20.5, end: 22.5 }), asset()).layout).toBeUndefined();
+  });
+
+  it('落点：人物镜头 free、卡片头尾切 carve', () => {
+    expect(placeAsset(sb, beat({ start: 6, end: 9 }), asset()).placement).toBe('free');
+    expect(placeAsset([full(0, 10), card(10, 16), full(16, 20)], beat({ start: 11, end: 14 }), asset()).placement).toBe('carve');
+  });
+
+  it('角标：截图标来源站点、AI 生成标「AI 生成」，图库不标', () => {
+    expect(placeAsset(sb, beat({ start: 6, end: 9 }), asset('broll/s.jpg', { credit: { ...meta().credit, source: 'screenshot', page: 'https://www.minzhi.example.org/a' } })).shots.find((x) => x.broll)?.broll?.label).toEqual({ kind: 'source', text: '来源：minzhi.example.org' });
+    expect(placeAsset(sb, beat({ start: 6, end: 9 }), asset('broll/g.jpg', { credit: { ...meta().credit, source: 'generated', aiGenerated: true } })).shots.find((x) => x.broll)?.broll?.label).toEqual({ kind: 'ai', text: 'AI 生成' });
+    expect(placeAsset(sb, beat({ start: 6, end: 9 }), asset()).shots.find((x) => x.broll)?.broll?.label).toBeUndefined();
   });
 
   it('浮层只放素材小窗、画中画放全屏素材', () => {
@@ -106,7 +121,8 @@ describe('placeAsset 分配到镜头', () => {
     expect(layoutFor('split', 'pip')).toBe('overlay');
     expect(isFree(full(0, 1))).toBe(true);
     expect(isCardHost(card(0, 4))).toBe(true);
-    expect(isCardHost(card(0, 4, 'hook'))).toBe(false);
+    expect(isCardHost(card(0, 4, 'hook'))).toBe(true); // 还没有图的钩子可以铺素材
+    expect(isCardHost(card(0, 4, 'cta'))).toBe(false);
     const ins: Shot = { start: 0, end: 3, layout: 'broll', broll: { file: 'broll/a.jpg', kind: 'photo', focal: { x: 0.5, y: 0.5 } } };
     expect(swapBroll(ins, asset('broll/b.jpg', { downgrade: 'split' }))).toMatchObject({ layout: 'split', broll: { file: 'broll/b.jpg' } });
     expect(dropBroll(ins)).toEqual({ start: 0, end: 3, layout: 'full' });
@@ -146,6 +162,9 @@ describe('免费来源检索', () => {
     expect(fitOf({ width: 3840, height: 2160 }, t)).toBe('cover');
     expect(fitOf({ width: 1920, height: 1080 }, t)).toBe('split');
     expect(fitOf({ width: 1280, height: 720 }, t)).toBe('none');
+    // Openverse 图片长边多为 1024：横图最多铺上半屏，竖图连上半屏都不够，都进不了全屏插入
+    expect(fitOf({ width: 1024, height: 768 }, t)).toBe('split');
+    expect(fitOf({ width: 768, height: 1024 }, t)).toBe('none');
   });
 
   it('一个来源网络失败不影响其它来源；排除已用、重复、太长的视频与撑不起的小图；能铺满的、实拍视频排前面', async () => {
@@ -186,9 +205,11 @@ describe('搜索词', () => {
 });
 
 describe('Wikimedia 遗留项', () => {
-  it('Restrictions 带商标、人格权的排除', () => {
+  it('Restrictions 非空一律排除（商标、人格权、货币、徽章等）', () => {
     expect(restricted('trademarked')).toBe(true);
     expect(restricted('personality|trademarked')).toBe(true);
+    expect(restricted('currency')).toBe(true);
+    expect(restricted('  ')).toBe(false);
     expect(restricted(undefined)).toBe(false);
     expect(restricted('')).toBe(false);
   });
@@ -202,9 +223,10 @@ describe('Wikimedia 遗留项', () => {
 });
 
 describe('截图网址核实', () => {
-  it('urlHint 只有搜索结果里有同一域名才用；否则用搜索给出的网址', async () => {
+  it('urlHint 只有搜索结果里有完全相同的网址才用；只对上域名时用搜索结果里同域名的那条；否则用搜索给出的网址', async () => {
     const hinted = beat({ kind: 'screenshot', urlHint: 'https://www.palantir.com/careers/', queryZh: ['Palantir 招聘'] });
-    expect(await verifiedUrls({ search: async () => ['https://palantir.com/careers/fde', 'https://x.org'] }, hinted)).toEqual(['https://www.palantir.com/careers/', 'https://palantir.com/careers/fde']);
+    expect(await verifiedUrls({ search: async () => ['https://x.org', 'https://www.palantir.com/careers'] }, hinted)).toEqual(['https://www.palantir.com/careers/', 'https://x.org']);
+    expect(await verifiedUrls({ search: async () => ['https://x.org', 'https://palantir.com/careers/fde'] }, hinted)).toEqual(['https://palantir.com/careers/fde', 'https://x.org']);
     expect(await verifiedUrls({ search: async () => ['https://jobs.example.org/fde'] }, hinted)).toEqual(['https://jobs.example.org/fde']);
     const queries: string[] = [];
     await verifiedUrls({ search: async (q) => { queries.push(q); return []; } }, beat({ kind: 'screenshot', queryZh: ['敏之 AI 社区'] }));

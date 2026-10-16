@@ -3,29 +3,48 @@ import type { AssetMeta } from './credit-store.js';
 import { MAX_FULL_SEC, MIN_BEAT_SEC } from './plan-check.js';
 import type { Beat } from './plan.js';
 
-/** 有自己画面的卡片（钩子、图片、网页）和 CTA 不让 B-roll 占用 */
-const PROTECTED: readonly TemplateId[] = ['hook', 'cta', 'photo', 'browser'];
-/** 能铺在图上的轻卡片：标题、大数字、标签（列表、对比条、流程这类信息密的卡压在图上读不清） */
-const LIGHT: readonly TemplateId[] = ['title', 'bigNumber', 'chips'];
+/** 自带画面的卡片（图片、网页）和 CTA 不让 B-roll 占用；钩子已有图或视频时同样不占 */
+const PROTECTED: readonly TemplateId[] = ['cta', 'photo', 'browser'];
+/** 头部切会让演进条目在镜头开头挤着出现：同等收益时优先尾部切 */
+const HEAD_CARVE_PENALTY = 0.5;
 /** 全屏插入从卡片镜头头尾切出时，卡片至少留这么长（来得及进场、读完） */
 export const CARD_KEEP_SEC = 2.5;
 const EPS = 1e-6;
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 
 export interface PlaceAsset { file: string; meta: AssetMeta }
-export interface PlaceResult { shots: Shot[]; layout?: Layout; reason?: string }
+/** 落点：free 人物镜头里切一段、carve 从卡片镜头头尾切一段、card 卡片镜头上半屏做底、half 人物镜头里切一段上半屏铺素材 */
+export type Placement = 'free' | 'carve' | 'card' | 'half';
+export interface PlaceResult { shots: Shot[]; layout?: Layout; placement?: Placement; reason?: string }
 
 /** 人物全屏、没有卡片也没有素材的镜头：可以切出一段放 B-roll */
 export const isFree = (s: Shot): boolean => !s.card && !s.broll && s.layout === 'full';
-/** 分屏轻卡片镜头：素材可以铺在上半屏做底，卡片变玻璃排在图上 */
-export const isCardHost = (s: Shot): boolean => s.layout === 'split' && !!s.card && LIGHT.includes(s.card.template) && !s.broll;
-/** 可以从头尾切出一段做全屏插入的卡片镜头（普通卡片，留得下 2.5 秒卡片） */
-const isCarvable = (s: Shot): boolean => s.layout === 'split' && !!s.card && !PROTECTED.includes(s.card.template) && !s.broll && s.end - s.start >= CARD_KEEP_SEC + MIN_BEAT_SEC - EPS;
+/** 卡片自己有没有画面：图片卡、网页卡、已取到图或视频的钩子 */
+function ownMedia(s: Shot): boolean {
+  if (!s.card) return false;
+  if (PROTECTED.includes(s.card.template)) return true;
+  const p = s.card.props as { image?: string; video?: string };
+  return s.card.template === 'hook' && Boolean(p.image || p.video);
+}
+/** 分屏卡片镜头（含还没有图的钩子）：素材铺满上半屏 + 底部渐变压暗，卡片变玻璃排在图上 */
+export const isCardHost = (s: Shot): boolean => s.layout === 'split' && !!s.card && !ownMedia(s) && !s.broll;
+/** 可以从头尾切出一段做全屏插入的卡片镜头（普通卡片，留得下 2.5 秒卡片；钩子不切） */
+const isCarvable = (s: Shot): boolean => isCardHost(s) && s.card?.template !== 'hook' && s.end - s.start >= CARD_KEEP_SEC + MIN_BEAT_SEC - EPS;
+
+const hostOf = (url: string): string => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
+
+/** 画面角标：截图标来源站点，AI 生成标「AI 生成」；图库素材不标（署名在 credits 与导出文本里） */
+export function labelOf(meta: AssetMeta): Broll['label'] {
+  if (meta.credit.source === 'generated' || meta.credit.aiGenerated) return { kind: 'ai', text: 'AI 生成' };
+  const host = meta.credit.source === 'screenshot' ? hostOf(meta.credit.page) : '';
+  return host ? { kind: 'source', text: `来源：${host}`.slice(0, 30) } : undefined;
+}
 
 /** 镜头里的素材字段 */
 export function brollOf(asset: PlaceAsset): Broll {
   const { meta } = asset;
-  return { file: asset.file, kind: meta.kind, focal: meta.focal, ...(meta.kind === 'video' && meta.durationSec ? { durationSec: meta.durationSec } : {}) };
+  const label = labelOf(meta);
+  return { file: asset.file, kind: meta.kind, focal: meta.focal, ...(meta.kind === 'video' && meta.durationSec ? { durationSec: meta.durationSec } : {}), ...(label ? { label } : {}) };
 }
 
 /** beat 的呈现方式 → 镜头版式；素材只够铺上半屏（1080p 横屏）时全屏类退到分屏 */
@@ -42,7 +61,10 @@ const overlap = (s: Shot, a: number, b: number): number => Math.max(0, Math.min(
  */
 export function regionIn(shot: Shot, start: number, end: number, maxLen: number): [number, number] | null {
   const starts = [shot.start, Math.max(shot.start, start), shot.start + MIN_SHOT_SEC];
-  const options = starts.flatMap((a) => [shot.end, Math.min(shot.end, end), a + maxLen, shot.end - MIN_SHOT_SEC].map((b) => [round(a), round(b)] as [number, number]));
+  // 取整到毫秒后再夹回镜头内：镜头边界是帧对齐的循环小数（如 8.1666…），取整会越界
+  const near = (v: number, edge: number): boolean => Math.abs(v - edge) < 1e-3;
+  const within = (v: number): number => (near(v, shot.start) ? shot.start : near(v, shot.end) ? shot.end : Math.min(shot.end, Math.max(shot.start, round(v))));
+  const options = starts.flatMap((a) => [shot.end, Math.min(shot.end, end), a + maxLen, shot.end - MIN_SHOT_SEC].map((b) => [within(a), within(b)] as [number, number]));
   const ok = ([a, b]: [number, number]): boolean => {
     const len = b - a, head = a - shot.start, tail = shot.end - b;
     return a >= shot.start - EPS && b <= shot.end + EPS && len >= MIN_BEAT_SEC - EPS && len <= maxLen + EPS
@@ -91,7 +113,7 @@ function carveCard(shots: Shot[], i: number, beat: Beat, asset: PlaceAsset, layo
   const tail = regionIn({ start: s.start + CARD_KEEP_SEC, end: s.end, layout: 'full' }, beat.start, beat.end, maxLen);
   const head = regionIn({ start: s.start, end: s.end - CARD_KEEP_SEC, layout: 'full' }, beat.start, beat.end, maxLen);
   const gain = (r: [number, number] | null): number => (r ? overlap({ ...s, start: r[0], end: r[1] }, beat.start, beat.end) : -1);
-  const useTail = gain(tail) >= gain(head);
+  const useTail = gain(tail) >= gain(head) - HEAD_CARVE_PENALTY;
   const r = useTail ? tail : head;
   if (!r) return null;
   const pieces: Shot[] = useTail
@@ -116,25 +138,23 @@ function placeOnCard(shots: Shot[], beat: Beat, asset: PlaceAsset): Shot[] | nul
 }
 
 /**
- * 把一个加工好的素材放进分镜（不改入参）：全屏插入、画中画、浮层先放进人物全屏镜头里切出的一段；
- * 全屏插入、画中画再试从普通卡片镜头头尾切一段（卡片留 2.5 秒）；放不下或呈现方式是分屏时，铺到重叠的轻卡片（标题、大数字、标签）上半屏做底；
- * 再不行在人物镜头里切一段上半屏铺素材。都不行返回原分镜与原因
+ * 把一个加工好的素材放进分镜（不改入参），按顺序试：
+ * 1. 全屏插入、画中画、浮层：人物全屏镜头里切一段（free）；
+ * 2. 全屏插入、画中画：从普通卡片镜头头尾切一段，卡片留 2.5 秒（carve）；
+ * 3. 时间上覆盖到的卡片镜头（含还没有图的钩子）：素材铺满上半屏做底，卡片排在图上（card，分屏升级）；
+ * 4. 人物镜头里切一段上半屏铺素材（half）。都不行返回原分镜与原因
  */
 export function placeAsset(shots: Shot[], beat: Beat, asset: PlaceAsset): PlaceResult {
   const layout = layoutFor(beat.present, asset.meta.downgrade);
-  if (layout !== 'split') {
-    const free = placeOnFree(shots, beat, asset, layout);
-    if (free) return { shots: free, layout };
-  }
-  if (layout === 'broll' || layout === 'pip') {
-    const edge = placeOnCardEdge(shots, beat, asset, layout);
-    if (edge) return { shots: edge, layout };
-  }
+  const free = layout === 'split' ? null : placeOnFree(shots, beat, asset, layout);
+  if (free) return { shots: free, layout, placement: 'free' };
+  const edge = layout === 'broll' || layout === 'pip' ? placeOnCardEdge(shots, beat, asset, layout) : null;
+  if (edge) return { shots: edge, layout, placement: 'carve' };
   const card = placeOnCard(shots, beat, asset);
-  if (card) return { shots: card, layout: 'split' };
+  if (card) return { shots: card, layout: 'split', placement: 'card' };
   const half = placeOnFree(shots, beat, asset, 'split');
-  if (half) return { shots: half, layout: 'split' };
-  return { shots, reason: '这段时间没有可放素材的镜头（钩子、CTA、自带画面或信息密的卡片占着）' };
+  if (half) return { shots: half, layout: 'split', placement: 'half' };
+  return { shots, reason: '这段时间没有可放素材的镜头（CTA 或自带画面的卡片占着）' };
 }
 
 /** 把镜头里的素材换成另一个（重做单个镜头）：全屏类素材只够铺上半屏时改成分屏 */

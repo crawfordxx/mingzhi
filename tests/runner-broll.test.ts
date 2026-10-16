@@ -40,6 +40,8 @@ describe('运行器 × B-roll 编排', () => {
     const credits1 = readJson<{ file: string; source: string }[]>(join(dir1, 'credits.json'));
     expect(credits1.map((c) => c.source)).toEqual(['wikimedia', 'wikimedia']);
     expect(readJson<ProjectFile>(join(dir1, 'project.json')).broll?.beats).toHaveLength(2);
+    // 节拍（完整字段与落点）存进版本状态，「换一张」按原节拍重做
+    expect(readJson<VersionState>(join(dir1, 'state.json')).brollBeats?.map((b) => [b.present, b.placement, b.mustShow])).toEqual([['broll-full', 'free', []], ['pip', 'free', []]]);
 
     const k = withB[0];
     const meta2 = await runNextVersion(f.ctx, f.spaceId, 1, [{ type: 'replaceBroll', shotIndex: k }], '换一张 B-roll');

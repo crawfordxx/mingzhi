@@ -15,6 +15,8 @@ export interface SheetOptions {
   fetchImpl?: typeof fetch;
   /** 每个候选的静帧缓存目录（去重算哈希复用同一批图）；缺省为联系表所在目录下的 stills，由调用方在流水线收尾时清理 */
   stillsDir?: string;
+  /** 取消信号：传给远程下载与抽帧 */
+  signal?: AbortSignal;
 }
 
 /** 取图失败而留空的格：index 是联系表序号（从 1 开始） */
@@ -45,7 +47,7 @@ export async function buildContactSheet(candidates: readonly Candidate[], out: s
   const picked = candidates.slice(0, SHEET_MAX);
   if (picked.length === 0) throw new Error('没有候选可拼联系表');
   const stillsDir = opts.stillsDir ?? defaultStillsDir(out);
-  const fetched = await Promise.all(picked.map((c) => stillOf(c, stillsDir, ffmpeg, opts.fetchImpl).then((file) => ({ file }), (err: unknown) => ({ reason: reasonOf(err) }))));
+  const fetched = await Promise.all(picked.map((c) => stillOf(c, stillsDir, ffmpeg, opts.fetchImpl, opts.signal).then((file) => ({ file }), (err: unknown) => ({ reason: reasonOf(err) }))));
   const blanks = fetched.flatMap((f, i): BlankCell[] => ('reason' in f ? [{ index: i + 1, id: picked[i].id, reason: f.reason }] : []));
   if (blanks.length === picked.length) throw new Error(`所有候选的画面都取不到：${blanks[0].reason}`);
   const inputs = fetched.flatMap((f) => ('file' in f ? ['-i', f.file] : ['-f', 'lavfi', '-i', `color=c=${BLANK_COLOR}:s=${CELL}x${CELL}`]));

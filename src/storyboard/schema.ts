@@ -81,7 +81,7 @@ const extOf = (file: string): string => /\.[a-z0-9]+$/i.exec(file)?.[0].toLowerC
 const isProjectPath = (file: string): boolean => !/^[/\\]|^[a-z][a-z0-9+.-]*:/i.test(file) && !file.includes('\\') && !file.split('/').includes('..');
 /**
  * 镜头素材（只由 B-roll 编排层写入，归一化时还要对照可用素材列表）：file 为工作目录内的相对路径；focal 为主体位置（0–1）；
- * kenBurns 省略时由 focal 计算（只用于静图）；durationSec 为视频素材时长，给出时镜头比素材长就循环，否则停在末帧
+ * kenBurns 省略时由 focal 计算（只用于静图）；durationSec 为视频素材时长，给出时镜头比素材长就循环，否则停在末帧；label 为画面角标
  */
 export const BrollSchema = z.object({
   file: z.string().trim().min(1).max(200).refine(isProjectPath, '素材必须是项目内的相对路径'),
@@ -89,6 +89,8 @@ export const BrollSchema = z.object({
   focal: z.object({ x: unit, y: unit }),
   kenBurns: z.object({ from: RectSchema, to: RectSchema }).optional(),
   durationSec: z.number().finite().positive().optional(),
+  /** 画面角标：网页截图标来源站点（kind=source），AI 生成标「AI 生成」（kind=ai）；图库素材不标（署名在 credits 与导出文本里） */
+  label: z.object({ kind: z.enum(['source', 'ai']), text: z.string().trim().min(1).max(30) }).optional(),
 }).refine((b) => (BROLL_EXTS[b.kind] as readonly string[]).includes(extOf(b.file)), '素材扩展名与类型不符');
 export type Broll = z.infer<typeof BrollSchema>;
 

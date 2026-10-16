@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -52,7 +52,10 @@ describe('B-roll 编排端到端（假来源 + 假模型）', () => {
     const llm = fakeLlm();
     const r = await go({ brollDeps: deps, llm });
     const shots = brollShots(r.out);
-    expect(shots.map((s) => s.layout)).toEqual(['broll', 'split', 'broll', 'pip']);
+    // 截图只截首屏标题区，画中画节拍改成上半屏，并带来源角标
+    expect(shots.map((s) => s.layout)).toEqual(['broll', 'split', 'broll', 'split']);
+    expect(shots[3].broll?.label).toEqual({ kind: 'source', text: '来源：minzhi.example.org' });
+    expect(shots[0].broll?.label).toBeUndefined();
     expect(r.out.shots.find((s) => s.layout === 'split' && s.broll)?.card?.template).toBe('title'); // 卡片镜头做底
     expect(shots.every((s) => /^broll\/b[0-9a-f]{12}\.(jpg|mp4)$/.test(s.broll?.file ?? ''))).toBe(true);
     expect(new Set(shots.map((s) => s.broll?.file)).size).toBe(4);
@@ -138,7 +141,43 @@ describe('B-roll 编排端到端（假来源 + 假模型）', () => {
   });
 });
 
+describe('节拍落点', () => {
+  it('落在还没有图的钩子上：素材铺在钩子上半屏做底，钩子不再生图；记录落点', async () => {
+    const { deps, calls } = fakeDeps([wiki(POOL)]);
+    const r = await go({ brollDeps: deps, llm: fakeLlm({ beats: { beats: [beat(0.5, 3.5, 'broll-full'), beat(5, 8, 'broll-full', 'footage')] } }) });
+    expect(r.out.shots[0]).toMatchObject({ layout: 'split', card: { template: 'hook' }, broll: { file: expect.stringMatching(/^broll\//) } });
+    expect(calls.image.filter((p) => p.includes('HOOK'))).toEqual([]);
+    expect(r.patches.at(-1)?.broll?.beats?.map((b) => [b.status, b.placement])).toEqual([['placed', 'card'], ['placed', 'free']]);
+  });
+});
+
 describe('修改版本：换一张 B-roll', () => {
+  it('生图素材连续换两次：三张不同的图（同一节拍第 n 次生成换变体与缓存键），用原节拍的完整字段', async () => {
+    const low = (o: ChatOptions) => ({ scores: Array.from({ length: Number(/共 (\d+) 格/.exec(o.user)?.[1]) }, (_, i) => ({ index: i + 1, relevance: 2, aesthetic: 5, brand: 5, clean: 5, tech: 5 })) });
+    const { deps, calls } = fakeDeps([wiki(POOL)]);
+    const mustShow = { mustShow: ['合同纸张'] };
+    const llm = () => fakeLlm({ beats: { beats: [beat(5, 8, 'broll-full', 'photo', mustShow)] }, score: low });
+    const first = await go({ brollDeps: deps, llm: llm() });
+    const records = first.patches.at(-1)?.broll?.beats ?? [];
+    const k = first.out.shots.findIndex((s) => s.broll);
+    const files = [first.out.shots[k].broll?.file];
+    let sb = first.out;
+    let recs = records;
+    for (let n = 0; n < 2; n += 1) {
+      const at = [(sb.shots[k].start + sb.shots[k].end) / 2];
+      const redo = await go({ brollDeps: deps, llm: llm(), edit: { redoAt: at, marks: {}, records: recs } }, sb, first.dir);
+      sb = redo.out;
+      recs = redo.patches.at(-1)?.broll?.beats ?? recs;
+      files.push(sb.shots[k].broll?.file);
+    }
+    expect(new Set(files).size).toBe(3);
+    const gens = calls.image.filter((p) => !p.includes('HOOK'));
+    expect(gens).toHaveLength(3);
+    expect(gens.every((p) => p.includes('合同纸张'))).toBe(true); // 重做时用原节拍的 mustShow
+    expect(gens[1]).toContain('Variation 1');
+    expect(gens[2]).toContain('Variation 2');
+  });
+
   it('只重做指向的镜头（换成没用过的素材），其余镜头不动；标了 remove 的去掉素材；不重新规划', async () => {
     const { deps } = fakeDeps([wiki(POOL)]);
     const first = await go({ brollDeps: deps, llm: fakeLlm() });
@@ -158,6 +197,21 @@ describe('修改版本：换一张 B-roll', () => {
     const removed = await go({ brollDeps: deps, llm: fakeLlm(), edit: { redoAt: at, marks, records } }, first.out, first.dir);
     expect(removed.out.shots.filter((s) => s.broll)).toHaveLength(3); // 只处理 op 指向的那个镜头的标记
     expect(removed.out.shots.some((s) => s.broll?.file === old.broll?.file)).toBe(false);
+  });
+});
+
+describe('意外异常的降级', () => {
+  it('收尾出错（写 credits 失败）：只放弃本次新增，已有的素材（父版本已付费）保留', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mz-bstep-keep-'));
+    mkdirSync(join(dir, 'broll'), { recursive: true });
+    copyFileSync(join(fx, 'p0.jpg'), join(dir, 'broll', 'old.jpg'));
+    const kept: Storyboard = { shots: [{ start: 0, end: 4, layout: 'full' }, { start: 4, end: 7, layout: 'broll', broll: { file: 'broll/old.jpg', kind: 'photo', focal: { x: 0.5, y: 0.5 } } }, { start: 7, end: 40, layout: 'full' }] };
+    const asFile = join(dir, 'not-a-dir');
+    writeFileSync(asFile, 'x');
+    const { deps } = fakeDeps([wiki(POOL)]);
+    const r = await go({ brollDeps: deps, llm: fakeLlm({ beats: { beats: [] } }), creditsDir: join(asFile, 'sub') }, kept, dir);
+    expect(r.events.at(-1)?.message).toContain('已保留已有素材');
+    expect(r.out.shots.find((s) => s.broll)?.broll?.file).toBe('broll/old.jpg');
   });
 });
 
