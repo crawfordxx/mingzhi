@@ -46,6 +46,16 @@ describe('macOS 打包资源', () => {
     expect(c).toContain('EXPECTED_SHA256="@LAUNCHER_SHA256@"');
   });
 
+  it('start.command：交接退出码与启动器的 HANDOFF_EXIT_CODE 一致，交接时不显示「已退出」', () => {
+    const code = /pub const HANDOFF_EXIT_CODE: u8 = (\d+);/.exec(read('launcher', 'src', 'instance.rs'))?.[1];
+    expect(code).toBeDefined();
+    const c = read('launcher', 'macos', 'start.command');
+    expect(c).toContain(`if [ "$code" -eq ${code} ]; then`);
+    // 交接分支在打印「已退出」之前就退出
+    expect(c.indexOf(`-eq ${code}`)).toBeLessThan(c.indexOf('明知AI剪辑已退出'));
+    expect(read('launcher', 'src', 'instance.rs')).toContain('明知AI剪辑已在运行，已为你打开浏览器；这个窗口可以关闭。');
+  });
+
   it('entitlements 为空：启动器不需要任何 hardened runtime 豁免', () => {
     expect(read('launcher', 'macos', 'entitlements.plist')).toContain('<dict/>');
   });
@@ -104,6 +114,11 @@ describe('发布流水线对打包脚本与产物名的引用', () => {
     expect(wf).toContain('sha256sum -c');
     expect(wf).toContain('Mingzhi-macos.zip');
     expect(wf).not.toContain('.app');
+  });
+
+  it('Release 附带第三方许可声明 THIRD_PARTY_NOTICES.md（由 scripts/third-party-notices.mjs 生成）', () => {
+    expect(wf).toContain('node scripts/third-party-notices.mjs --out out/THIRD_PARTY_NOTICES.md');
+    expect(wf.match(/manifest\.json THIRD_PARTY_NOTICES\.md/g)?.length).toBe(2); // 新建与补传两条路径
   });
 
   it('签名相关 secrets 只在配齐时才传给脚本（缺失时走跳过分支，不让 CI 失败）', () => {

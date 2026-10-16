@@ -13,6 +13,7 @@
     "fetch-models": "node scripts/fetch-models.mjs",
     "fetch-assets": "node scripts/fetch-assets.mjs",
     "make-fixture": "bash scripts/make-fixture.sh",
+    "third-party-notices": "node scripts/third-party-notices.mjs",
     "mingzhi": "tsx src/cli.ts",
     "serve": "tsx src/server/index.ts",
     "build:web": "vite build web",

@@ -312,6 +312,10 @@ jobs:
           "
           rm out/manifest-*.json
 
+      # 启动器二进制静态链接的 Rust 库的许可声明，随 Release 一起发布（cargo 取源码读各库的 LICENSE）
+      - name: 生成第三方许可声明
+        run: node scripts/third-party-notices.mjs --out out/THIRD_PARTY_NOTICES.md
+
       - name: 创建草稿 Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -325,9 +329,9 @@ jobs:
               echo "::error::$TAG 已正式发布，不能覆盖"
               exit 1
             fi
-            gh release upload "$TAG" --clobber mingzhi-* Mingzhi* manifest.json
+            gh release upload "$TAG" --clobber mingzhi-* Mingzhi* manifest.json THIRD_PARTY_NOTICES.md
           else
             gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "明知AI剪辑 $TAG" --generate-notes \
-              mingzhi-* Mingzhi* manifest.json
+              mingzhi-* Mingzhi* manifest.json THIRD_PARTY_NOTICES.md
           fi
           rm -f is_draft.txt

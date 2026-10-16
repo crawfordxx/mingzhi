@@ -172,7 +172,7 @@ After that, a double-click opens the workbench within a few seconds.
 | --- | --- | --- |
 | App folder | `~/Library/Application Support/Mingzhi` | `%LOCALAPPDATA%\Mingzhi` |
 
-Inside: `runtime/` holds Node and Chrome, `app/<version>/` the app itself, and `data/` your projects (`data/spaces/`), models (`data/models/`), music and fonts (`data/assets/`) and ffmpeg (`data/bin/`). Exported videos and covers go to `Downloads/明知AI剪辑/`. Your Kexiang key is kept in the macOS Keychain (item `mingzhi`); on Windows it is stored encrypted under `data/`.
+Inside: `runtime/` holds Node and Chrome, `app/<version>/` the app itself, and `data/` your projects (`data/spaces/`), models (`data/models/`), music and fonts (`data/assets/`) ffmpeg (`data/bin/`) and the render cache (`data/cache/remotion/`, about 170 MB after the first render; safe to delete, it is rebuilt on the next render). `data/data-version` records the highest version that has used this data: if you open an older launcher by mistake, it says "请使用最新版启动器" (use the latest launcher) and exits without touching your data. The whole installation takes about **1.1 GB** (app about 250 MB, Node and Chrome about 380 MB, models, ffmpeg, music and fonts about 480 MB). Exported videos and covers go to `Downloads/明知AI剪辑/`. Your Kexiang key is kept in the macOS Keychain (item `mingzhi`); on Windows it is stored encrypted under `data/`.
 
 **Uninstall**: quit, delete the launcher, then delete the app folder above (this deletes your projects too; exports in Downloads are untouched). On macOS you can also remove the `mingzhi` item in Keychain Access.
 </details>
@@ -181,7 +181,7 @@ Inside: `runtime/` holds Node and Chrome, `app/<version>/` the app itself, and `
 
 When a new version is out, the top right of the workbench shows "有新版本 v0.x" (new version). Click it for the release notes, then "去下载" (download) to open the Release page. Download the new launcher and double-click it: usually it only needs the new app (about 50–60 MB); components that did not change, such as the models, are not downloaded again, and your projects and settings stay.
 
-Old versions are not removed automatically: the `app/` folder inside the app folder keeps the old version's directory (about 230–250 MB each). Once the new version works, quit and delete `app/<old version>/` by hand; delete only that folder, never `data/` or `runtime/`.
+The launcher cleans up old versions when it starts: `app/` keeps the current version and the previous one (for rolling back, about 250 MB each); older versions, and Chrome versions no longer in use (`runtime/chrome-headless-shell/<old version>/`), are deleted. It only touches those two places, and only folders named like a version number; `data/` is never touched. If you do not want to keep the previous version either, quit and delete `app/<previous version>/` by hand.
 
 The check runs at most once a day and sends a single anonymous request to GitHub, with nothing that identifies you; it uses the `HTTPS_PROXY` environment variable or the macOS system proxy. If it fails (for example, no network at the time) you simply see nothing, and it does not retry that day; turn it off under the gear → "检查更新" (check for updates). You can always look at [Releases][releases] yourself.
 
@@ -307,7 +307,7 @@ The software is free. Model calls are pay-as-you-go, charged straight to your Ke
 
 - **CPU**: Apple M1, or an 8-core x86. Matting and rendering run locally; the sample takes matted at about 10–13 fps on Apple silicon.
 - **Memory**: 16 GB.
-- **Disk**: about 500 MB to start (models 243 MB, music and fonts 128 MB, Chrome for rendering about 94 MB), plus intermediate files per project.
+- **Disk**: the launcher install takes about 1.1 GB (app 250 MB, Node and Chrome 380 MB, models / ffmpeg / music and fonts 480 MB), plus about 170 MB of render cache after the first render, plus intermediate files per project. Running from source takes about 500 MB to start (models 243 MB, music and fonts 128 MB, Chrome for rendering about 94 MB).
 - **Network**: access to Kexiang AI, and to the model and asset downloads on first install.
 
 ## FAQ
@@ -379,12 +379,31 @@ Push a `v<version>` tag (matching `version` in `package.json`) or run the "发�
 
 **Remotion**: free for individuals, non-profits and companies of up to 3 people; **companies with more than 3 people need a [Remotion company license][remotion-license]**.
 
-Third-party assets are not shipped with the repo (except the sound effects); they are downloaded from upstream at setup:
+The code in this repository is MIT. The third-party components below have their own licenses; the launcher downloads some of them on first run, and the launcher's "About" panel lists the same items. Full license texts live upstream; for the assets they are also in [crawfordxx/mingzhi-assets][assets-repo] under `licenses/`.
 
-- Music: tracks by HoliznaCC0, CC0 1.0, from [OpenGameArt][oga] (`pnpm fetch-assets`)
-- Sound effects: [Kenney][kenney]'s Interface Sounds, CC0, included under `assets/sfx/`
-- Fonts: SIL OFL 1.1 (Noto Sans SC, Noto Serif SC, LXGW WenKai, Smiley Sans, ZCOOL KuaiLe, ...) (`pnpm fetch-assets`)
-- Matting model: [RobustVideoMatting][rvm], code and weights GPL-3.0 (`pnpm fetch-models`)
+**Runtime (downloaded by the launcher on first run, not shipped in this repo)**
+
+- **FFmpeg / FFprobe**: GPL-3.0-or-later. Static builds (with x264, x265, libass), packaged by the b6.1.1 release of [eugeneware/ffmpeg-static][ffmpeg-static]; the binaries come from osxexperts.net (macOS Apple silicon), evermeet.cx (macOS Intel) and gyan.dev essentials (Windows). Corresponding source: FFmpeg 6.1.1 at [ffmpeg.org/releases][ffmpeg-src]; the sources of x264, x265 and libass are at their own upstreams; build details are with the three build providers above. You can also ask for the corresponding source by opening an issue here. The launcher only downloads these to your machine and runs them as separate programs; they are not linked into this software.
+- **Chrome Headless Shell** (for rendering): from [Chrome for Testing][cft]; Chromium's BSD-3-Clause, with bundled third-party components under their own licenses (full text in `LICENSE.headless_shell` inside the package, installed under `runtime/chrome-headless-shell/<version>/`).
+- **Node.js**: MIT; the licenses of its bundled third-party components are in the `LICENSE` of the Node package (installed under `runtime/node/`).
+- **Remotion**: see above; companies with more than 3 people need a commercial license. The app package contains Remotion.
+
+**Models (downloaded by the launcher on first run)**
+
+- **SenseVoice** (speech recognition): [FunASR Model Open Source License][funasr-license], from [FunAudioLLM/SenseVoice][sensevoice], using the int8 conversion by sherpa-onnx ([the converted model on Hugging Face][sensevoice-hf], pinned to a specific commit). The license allows use, copying, modification and sharing, but requires keeping the source and author attribution and following its other terms; please read the full text before use. The model is large, so the launcher downloads it straight from upstream, not through mingzhi-assets.
+- **Silero VAD** (voice activity detection): MIT, from [snakers4/silero-vad][silero].
+- **RobustVideoMatting** (matting): code and weights are GPL-3.0. The launcher downloads the weights from [crawfordxx/mingzhi-assets][assets-repo] (redistributed unchanged, with the GPL-3.0 text); the corresponding source is the upstream repository [PeterL1n/RobustVideoMatting][rvm].
+
+**Assets**
+
+- **Music**: tracks by HoliznaCC0, CC0 1.0, from [OpenGameArt][oga]. The launcher's 19 MP3s come from [crawfordxx/mingzhi-assets][assets-repo] (transcoded with ffmpeg from the original archives, still CC0).
+- **Fonts**: SIL OFL 1.1 (Noto Sans SC, Noto Serif SC, LXGW WenKai, Smiley Sans, ZCOOL KuaiLe and ZCOOL QingKe HuangYou). Noto Sans SC, Smiley Sans and the two ZCOOL fonts come from mingzhi-assets; Noto Serif SC and LXGW WenKai are fetched straight from upstream (their files exceed jsDelivr's 20 MB limit). Fonts are used unmodified.
+- **UI sound effects**: [Kenney][kenney]'s Interface Sounds, CC0, in `assets/sfx/`. The sound effects of the promo film (`promo/`) are Kenney CC0 plus sounds synthesized in code; nothing from other sound libraries.
+- The IBM Plex fonts used by the launcher's own progress page: SIL OFL 1.1 (full text in `launcher/assets/OFL-IBM-Plex.txt`).
+
+**Rust crates linked into the launcher** (rustls, ring, ureq, zip, tar, xz2, zstd and others, statically linked into the launcher binary): the license list is `THIRD_PARTY_NOTICES.md` attached to every Release, generated from `Cargo.lock` by `pnpm third-party-notices`.
+
+The launcher gets its assets (RVM weights, fonts, music) from [crawfordxx/mingzhi-assets][assets-repo]; running from source, `pnpm fetch-assets` and `pnpm fetch-models` download from the upstream sites instead, with the same sources and licenses.
 
 <br>
 
@@ -405,6 +424,14 @@ Third-party assets are not shipped with the repo (except the sound effects); the
 [sherpa]: https://github.com/k2-fsa/sherpa-onnx
 [oga]: https://opengameart.org
 [kenney]: https://kenney.nl
+[assets-repo]: https://github.com/crawfordxx/mingzhi-assets
+[ffmpeg-static]: https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1
+[ffmpeg-src]: https://ffmpeg.org/releases/
+[cft]: https://googlechromelabs.github.io/chrome-for-testing/
+[funasr-license]: https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE
+[sensevoice]: https://github.com/FunAudioLLM/SenseVoice
+[sensevoice-hf]: https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
+[silero]: https://github.com/snakers4/silero-vad
 [badge-license]: https://img.shields.io/badge/license-MIT-014DF9?style=flat-square
 [badge-node]: https://img.shields.io/badge/node-%E2%89%A522-1f1f22?style=flat-square
 [badge-asr]: https://img.shields.io/badge/speech%20recognition-on%20device-5c81d6?style=flat-square

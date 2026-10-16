@@ -169,7 +169,7 @@
 | --- | --- | --- |
 | 应用目录 | `~/Library/Application Support/Mingzhi` | `%LOCALAPPDATA%\Mingzhi` |
 
-应用目录里：`runtime/` 是 Node 与 Chrome，`app/<版本>/` 是应用本体，`data/` 是你的项目（`data/spaces/`）、模型（`data/models/`）、配乐字体（`data/assets/`）与 ffmpeg（`data/bin/`）。导出的成片和封面在 `下载/明知AI剪辑/`。可想 AI 的 key 在 macOS 上存于钥匙串（条目名 `mingzhi`），Windows 上加密存在 `data/` 里。
+应用目录里：`runtime/` 是 Node 与 Chrome，`app/<版本>/` 是应用本体，`data/` 是你的项目（`data/spaces/`）、模型（`data/models/`）、配乐字体（`data/assets/`）、ffmpeg（`data/bin/`）与渲染缓存（`data/cache/remotion/`，首次出片后约 170 MB，可随时删除，下次渲染会重建）。`data/data-version` 记录用过这份数据的最高版本：如果你不小心打开了旧版启动器，它会提示「请使用最新版启动器」并退出，不会改动你的数据。安装后一共约 **1.1 GB**（应用本体约 250 MB，Node 与 Chrome 约 380 MB，模型、ffmpeg、配乐与字体约 480 MB）。导出的成片和封面在 `下载/明知AI剪辑/`。可想 AI 的 key 在 macOS 上存于钥匙串（条目名 `mingzhi`），Windows 上加密存在 `data/` 里。
 
 **卸载**：先退出，删掉启动器，再删掉上面的应用目录（项目会一起删掉，「下载」里导出的成片不受影响）。macOS 上可以再到「钥匙串访问」里删掉名为 `mingzhi` 的条目。
 </details>
@@ -178,7 +178,7 @@
 
 有新版本时，工作台右上角会出现「有新版本 v0.x」，点开能看到更新说明，点「去下载」打开 Release 页面。下载新的启动器双击即可：通常只需补下新的应用本体（约 50–60 MB），模型等没变的组件不会重下，项目和设置都保留。
 
-旧版本不会自动删除：应用目录的 `app/` 下会留着旧版本的文件夹（每个约 230–250 MB）。确认新版本能正常用之后，可以先退出，再手动删掉 `app/<旧版本号>/`；只删这个文件夹，不要动 `data/`、`runtime/`。
+启动器启动时会自动清理旧版本：`app/` 下保留当前版本和上一版（便于回退，每个约 250 MB），更早的版本，以及不再使用的旧版 Chrome（`runtime/chrome-headless-shell/<旧版本>/`）会被删除。只清理这两处、名称是版本号的文件夹，不会动 `data/`。上一版不想留的话，退出后手动删掉 `app/<上一版版本号>/` 即可。
 
 检查更新每天最多一次，只向 GitHub 发一个匿名请求，不带任何标识；会使用 `HTTPS_PROXY` 环境变量或 macOS 的系统代理。没查到（比如当时网络不通）也不会提示，当天不再重试；不想要可以在齿轮 →「检查更新」里关掉。也可以随时自己去 [Releases][releases] 看。
 
@@ -304,7 +304,7 @@ Windows 版暂时没有代码签名；macOS 的启动入口「明知AI剪辑.com
 
 - **处理器**：Apple M1，或 8 核 x86。抠像和渲染都在本机，样片在 Apple 芯片上抠像约 10–13 帧/秒。
 - **内存**：16 GB。
-- **磁盘**：约 500 MB 起（模型 243 MB、配乐与字体 128 MB、渲染用的 Chrome 约 94 MB），另加每个项目的中间文件。
+- **磁盘**：启动器版安装后约 1.1 GB（应用本体 250 MB、Node 与 Chrome 380 MB、模型 / ffmpeg / 配乐与字体 480 MB），首次出片后再加约 170 MB 渲染缓存，另加每个项目的中间文件。从源码运行约 500 MB 起（模型 243 MB、配乐与字体 128 MB、渲染用的 Chrome 约 94 MB）。
 - **网络**：能访问可想 AI；首次安装还要能下载模型与素材。
 
 ## 常见问题
@@ -376,12 +376,31 @@ README 里的图片由 `scripts/readme/` 生成：真实工作台截图 + HTML �
 
 **Remotion**：个人、非营利组织和不超过 3 人的公司可免费使用；**超过 3 人的公司需要购买 [Remotion 公司许可证][remotion-license]**。
 
-第三方素材都不随仓库分发（音效除外），运行时从上游下载：
+本仓库的代码是 MIT。下面这些第三方组件各有各的许可；启动器版会在首次运行时下载其中一部分，进度页「关于」列的就是这几项。所有许可全文都在对应上游，素材类的全文另见 [crawfordxx/mingzhi-assets][assets-repo] 的 `licenses/`。
 
-- 配乐：HoliznaCC0 的作品，CC0 1.0，来自 [OpenGameArt][oga]（`pnpm fetch-assets`）
-- 音效：[Kenney][kenney] 的 Interface Sounds，CC0，已放在 `assets/sfx/`
-- 字体：SIL OFL 1.1（Noto Sans SC、Noto Serif SC、LXGW WenKai、得意黑 Smiley Sans、ZCOOL KuaiLe 等）（`pnpm fetch-assets`）
-- 抠像模型：[RobustVideoMatting][rvm]，代码与权重为 GPL-3.0（`pnpm fetch-models`）
+**运行环境（启动器首次运行时下载，不随仓库分发）**
+
+- **FFmpeg / FFprobe**：GPL-3.0-or-later。用的是静态构建（含 x264、x265、libass），由 [eugeneware/ffmpeg-static][ffmpeg-static] 的 b6.1.1 发布页打包，二进制分别来自 osxexperts.net（macOS Apple 芯片）、evermeet.cx（macOS Intel）和 gyan.dev essentials（Windows）。对应源码：FFmpeg 6.1.1 见 [ffmpeg.org/releases][ffmpeg-src]，x264、x265 和 libass 的源码在各自上游；构建细节见上面三个构建来源。需要对应源码也可以在本仓库提 Issue 索取。启动器只是把它下载到你电脑上，以独立程序调用，不链接进本程序。
+- **Chrome Headless Shell**（渲染用）：来自 [Chrome for Testing][cft]，Chromium 的 BSD-3-Clause，内含的第三方组件各有许可，全文在包内的 `LICENSE.headless_shell`（安装后位于 `runtime/chrome-headless-shell/<版本>/` 下）。
+- **Node.js**：MIT，内含的第三方组件许可见其安装包里的 `LICENSE`（安装后位于 `runtime/node/`）。
+- **Remotion**：见上面，超过 3 人的公司需要购买商用许可。应用本体里带着 Remotion。
+
+**模型（启动器首次运行时下载）**
+
+- **SenseVoice**（语音识别）：[FunASR Model Open Source License][funasr-license]，来自 [FunAudioLLM/SenseVoice][sensevoice]，用的是 sherpa-onnx 转换的 int8 版本（[Hugging Face 上的转换版][sensevoice-hf]，固定到具体提交）。许可允许使用、复制、修改和分享，但要求保留来源与作者署名、遵守许可里的其它条款，使用前请读全文。模型体积较大，启动器直接从上游下载，不经过 mingzhi-assets。
+- **Silero VAD**（人声检测）：MIT，来自 [snakers4/silero-vad][silero]。
+- **RobustVideoMatting**（抠像）：代码与权重均为 GPL-3.0。启动器版的权重从 [crawfordxx/mingzhi-assets][assets-repo] 下载（原样再分发，附 GPL-3.0 全文），对应源码即上游仓库 [PeterL1n/RobustVideoMatting][rvm]。
+
+**素材**
+
+- **配乐**：HoliznaCC0 的作品，CC0 1.0，来自 [OpenGameArt][oga]；启动器版的 19 首 MP3 由 [crawfordxx/mingzhi-assets][assets-repo] 提供（用 ffmpeg 从原始压缩包转码，同样是 CC0）。
+- **字体**：SIL OFL 1.1（Noto Sans SC、Noto Serif SC、霞鹜文楷 LXGW WenKai、得意黑 Smiley Sans、站酷快乐体和站酷庆科黄油体）。其中 Noto Sans SC、得意黑、两款站酷字体来自 mingzhi-assets，Noto Serif SC 和霞鹜文楷直接取自上游（文件超过 jsDelivr 的 20 MB 限制）。字体原样使用，没有改动。
+- **界面音效**：[Kenney][kenney] 的 Interface Sounds，CC0，在仓库的 `assets/sfx/`。发布片（`promo/`）的音效是 Kenney CC0 加代码合成，没有用其它音效库的素材。
+- 启动器进度页自己用的 IBM Plex 字体：SIL OFL 1.1（全文见 `launcher/assets/OFL-IBM-Plex.txt`）。
+
+**启动器自带的第三方 Rust 库**（rustls、ring、ureq、zip、tar、xz2、zstd 等，静态链接进启动器二进制）：许可清单见每个 Release 里的 `THIRD_PARTY_NOTICES.md`，由 `pnpm third-party-notices` 从 `Cargo.lock` 生成。
+
+启动器版的素材（RVM 权重、字体、配乐）取自 [crawfordxx/mingzhi-assets][assets-repo]；从源码运行时则由 `pnpm fetch-assets`、`pnpm fetch-models` 直接从上游下载，来源和许可相同。
 
 <br>
 
@@ -402,6 +421,14 @@ README 里的图片由 `scripts/readme/` 生成：真实工作台截图 + HTML �
 [sherpa]: https://github.com/k2-fsa/sherpa-onnx
 [oga]: https://opengameart.org
 [kenney]: https://kenney.nl
+[assets-repo]: https://github.com/crawfordxx/mingzhi-assets
+[ffmpeg-static]: https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1
+[ffmpeg-src]: https://ffmpeg.org/releases/
+[cft]: https://googlechromelabs.github.io/chrome-for-testing/
+[funasr-license]: https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE
+[sensevoice]: https://github.com/FunAudioLLM/SenseVoice
+[sensevoice-hf]: https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
+[silero]: https://github.com/snakers4/silero-vad
 [badge-license]: https://img.shields.io/badge/license-MIT-014DF9?style=flat-square
 [badge-node]: https://img.shields.io/badge/node-%E2%89%A522-1f1f22?style=flat-square
 [badge-asr]: https://img.shields.io/badge/%E8%AF%AD%E9%9F%B3%E8%AF%86%E5%88%AB-%E6%9C%AC%E6%9C%BA-5c81d6?style=flat-square
