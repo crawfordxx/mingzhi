@@ -111,7 +111,8 @@ describe('runNextVersion：只重跑受影响的阶段', () => {
     const k = splitShots(before)[1];
     const op = { type: 'replaceCard', shotIndex: k, card: { template: 'title', props: { title: '换过的标题' } } } as EditOp;
     const meta = await runNextVersion(f.ctx, f.spaceId, 1, [op], '换卡片');
-    expect(meta.changedShots).toEqual([k, k + 1]);
+    expect(meta.changedShots).toEqual([k]);
+    expect(meta.rerenderedShots).toEqual([k, k + 1]);
     expect(f.calls.segments).toHaveLength(2);
     expect(f.calls.qaOnly).toEqual([[k]]);
     expect(stateOf(f, 2).storyboard.shots[k].card).toEqual({ template: 'title', props: { title: '换过的标题' } });

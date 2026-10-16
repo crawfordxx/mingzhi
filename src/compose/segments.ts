@@ -13,7 +13,12 @@ import { CANVAS, type Shot, type TalkProps } from '../storyboard/schema.js';
 
 export interface FrameRange { start: number; end: number }
 /** shots：完整镜头列表（用于相邻镜头、转场、是否末镜头）；range：本段帧区间 [start,end)；salt：画面素材与渲染代码的指纹（见 segmentSalt） */
-export interface HashContext { shots: Shot[]; range: FrameRange; salt?: string }
+/**
+ * layer：render 是渲染缓存键（含上一张卡的交叉淡出，缺省）；content 是「这个镜头自己的内容」键，不含仅因上一张卡淡出而重渲的部分，
+ * 用来判断用户可见的改动（changedShots）。两者其余口径一致
+ */
+export type HashLayer = 'render' | 'content';
+export interface HashContext { shots: Shot[]; range: FrameRange; salt?: string; layer?: HashLayer }
 
 const sha1 = (text: string): string => createHash('sha1').update(text).digest('hex');
 const secToFrame = (sec: number): number => Math.round(sec * CANVAS.fps);
@@ -36,13 +41,13 @@ export function segmentBounds(shots: Shot[], durationSec: number): FrameRange[] 
  *   镜头的版式与素材字段（文件、焦点、Ken Burns、时长）随镜头进入指纹；画中画退出过渡里垫底的上一镜素材也计入
  * - 卡片交叉过渡：镜头开头 0.3 秒里仍在淡出的上一张卡（镜头与淡出进度）也计入
  */
-function frameFingerprints(props: Omit<TalkProps, 'shots'>, shots: Shot[], range: FrameRange): { shots: unknown[]; frames: string[] } {
+function frameFingerprints(props: Omit<TalkProps, 'shots'>, shots: Shot[], range: FrameRange, layer: HashLayer = 'render'): { shots: unknown[]; frames: string[] } {
   const vis = visualShots(shots);
   const full: TalkProps = { ...props, shots: vis };
   const secs = frameSecs(range);
   const hits = secs.map((sec) => shotAt(vis, sec)?.index ?? -1);
   const unders = secs.map((sec) => underlayAt(vis, sec)?.index ?? -1);
-  const carries = secs.map((sec) => cardCarry(vis, sec));
+  const carries = secs.map((sec) => (layer === 'render' ? cardCarry(vis, sec) : null));
   const seen = [...new Set([...hits, ...unders, ...carries.map((c) => c?.index ?? -1)].filter((i) => i >= 0))];
   const frames = secs.map((sec, k) => {
     const t = transformAt(vis, sec, full);
@@ -65,7 +70,7 @@ const clipStamp = (t: PersonTransform): string => (t.clip ? `|${t.clip.x},${t.cl
  */
 export function shotHash(shot: Shot, props: Omit<TalkProps, 'shots'>, _index: number, ctx: HashContext): string {
   const { shots, range } = ctx;
-  const { shots: hit, frames } = frameFingerprints(props, shots, range);
+  const { shots: hit, frames } = frameFingerprints(props, shots, range, ctx.layer);
   const head = { v: 1, range, shot, hit, salt: ctx.salt ?? '', person: props.person, w: props.personWidth, h: props.personHeight, subject: props.subject,
     style: props.captionStyle ?? DEFAULT_CAPTION_STYLE, font: props.captionFontFile ?? '', ...(grainOn({ ...props, shots }) ? { grain: true } : {}), ...(props.outro && range.end > secToFrame(props.outro.startSec) ? { outro: props.outro } : {}) };
   return sha1(`${JSON.stringify(head)}\n${frames.join('\n')}`);
@@ -124,9 +129,9 @@ function shotMedia(shot: Shot | undefined): string[] {
 }
 
 /** 本段帧区间里实际出现的镜头序号（按画面时间轴；各层每帧只画当前镜头、画中画退出时垫底的上一镜与交叉过渡里淡出的上一张卡，所以只有这些镜头的素材会进画面） */
-function shotsInRange(shots: Shot[], range: FrameRange): number[] {
+function shotsInRange(shots: Shot[], range: FrameRange, layer: HashLayer = 'render'): number[] {
   const vis = visualShots(shots);
-  const idx = frameSecs(range).flatMap((sec) => [shotAt(vis, sec)?.index ?? -1, underlayAt(vis, sec)?.index ?? -1, cardCarry(vis, sec)?.index ?? -1]);
+  const idx = frameSecs(range).flatMap((sec) => [shotAt(vis, sec)?.index ?? -1, underlayAt(vis, sec)?.index ?? -1, layer === 'render' ? cardCarry(vis, sec)?.index ?? -1 : -1]);
   return [...new Set(idx.filter((i) => i >= 0))];
 }
 
@@ -134,8 +139,8 @@ function shotsInRange(shots: Shot[], range: FrameRange): number[] {
  * 第 i 段的盐值：渲染代码 + 人像与字幕字体的内容 + 本段画面里出现的镜头引用的素材内容。
  * 只看本段帧里实际出现的镜头：相邻镜头换了带图的卡片不会让本段被误判为改动（镜头边界不在整帧上时，段边缘的帧属于相邻镜头，照样计入）
  */
-export async function segmentSalt(stamper: Stamper, props: TalkProps, i: number, range: FrameRange = segmentBounds(props.shots, props.durationSec)[i]): Promise<string> {
-  const media = shotsInRange(props.shots, range).flatMap((k) => shotMedia(props.shots[k]));
+export async function segmentSalt(stamper: Stamper, props: TalkProps, i: number, range: FrameRange = segmentBounds(props.shots, props.durationSec)[i], layer: HashLayer = 'render'): Promise<string> {
+  const media = shotsInRange(props.shots, range, layer).flatMap((k) => shotMedia(props.shots[k]));
   const fonts = props.captionFontFile ? `fonts/${props.captionFontFile}` : undefined;
   const logo = props.outro && range.end > secToFrame(props.outro.startSec) ? props.outro.logo : undefined;
   const files = await Promise.all([props.person, fonts, logo, ...media].map((n) => stamper.file(n)));
@@ -162,8 +167,8 @@ export interface SegmentedOptions {
   /** 取消信号：每段开始前检查，正在渲染的那一段也会被终止（抛 CancelledError，不留半截缓存） */
   signal?: AbortSignal;
 }
-/** rendered / reused：本次实际重渲与命中缓存的镜头序号；hashes：每个镜头（按序号）的画面内容哈希，用于和父版本比较 */
-export interface SegmentedResult { rendered: number[]; reused: number[]; hashes: string[] }
+/** rendered / reused：本次实际重渲与命中缓存的镜头序号；hashes：每个镜头（按序号）的渲染哈希（含交叉淡出）；contents：每个镜头自己内容的哈希（不含交叉淡出），用于和父版本比较用户可见的改动 */
+export interface SegmentedResult { rendered: number[]; reused: number[]; hashes: string[]; contents: string[] }
 
 /** concat 列表里的路径用单引号包裹，路径里的单引号要转义 */
 const concatLine = (file: string): string => `file '${file.replace(/'/g, "'\\''")}'`;
@@ -214,7 +219,8 @@ export async function renderSegmented(opts: SegmentedOptions): Promise<Segmented
   const plan = await Promise.all(segmentBounds(shots, props.durationSec).map(async (range, i) => {
     const salt = await segmentSalt(stamper, props, i, range);
     const hash = shotHash(shots[i], rest, i, { shots, range, salt });
-    return { range, i, hash, file: join(cacheDir, `${hash}.mp4`) };
+    const content = shotHash(shots[i], rest, i, { shots, range, salt: await segmentSalt(stamper, props, i, range, 'content'), layer: 'content' });
+    return { range, i, hash, content, file: join(cacheDir, `${hash}.mp4`) };
   }));
   const todo = plan.filter((s) => s.range.end > s.range.start);
   const audio = join(workDir, 'audio.m4a');
@@ -236,5 +242,6 @@ export async function renderSegmented(opts: SegmentedOptions): Promise<Segmented
     rendered: done.filter((d) => !d.reused).map((d) => d.i),
     reused: done.filter((d) => d.reused).map((d) => d.i),
     hashes: plan.map((s) => s.hash),
+    contents: plan.map((s) => s.content),
   };
 }

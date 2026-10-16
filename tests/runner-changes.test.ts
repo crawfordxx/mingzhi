@@ -38,8 +38,9 @@ describe('本版改动 = 与父版本逐镜头内容比较（I2）', () => {
     f.reset();
     const v3 = await runNextVersion(f.ctx, f.spaceId, 2, [{ type: 'replaceCard', shotIndex: k, card: original } as EditOp], '换回去');
     expect(f.calls.segments).toEqual([]); // 命中 v1 留下的分段缓存
-    // 下一镜头开头 0.3 秒里这张卡还在交叉淡出，所以它的画面也变了
-    expect(v3.changedShots).toEqual([k, k + 1]);
+    // 用户可见的改动只有这一个镜头；下一镜头开头 0.3 秒里这张卡还在交叉淡出，所以它也被重渲，但内容没变
+    expect(v3.changedShots).toEqual([k]);
+    expect(v3.rerenderedShots).toEqual([k, k + 1]);
     expect(f.calls.qaOnly).toEqual([[k]]);
     expect(v3.shotHashes).toEqual(metaOf(f, 1).shotHashes);
   });
@@ -64,13 +65,25 @@ describe('本版改动 = 与父版本逐镜头内容比较（I2）', () => {
     expect(cover.shotHashes).toEqual(metaOf(f, 2).shotHashes);
   });
 
-  it('父版本是旧数据（没有记哈希）时，退回用实际重渲的镜头', async () => {
+  it('只换一张卡：changedShots 只有这个镜头，rerenderedShots 含交叉淡出波及的下一镜头；版本里同时存了两套哈希', async () => {
     const f = await afterV1();
-    f.store.updateVersion(f.spaceId, 1, { shotHashes: undefined });
     const k = splitShots(stateOf(f, 1))[0];
     const meta = await runNextVersion(f.ctx, f.spaceId, 1, [card(k, '新标题')], '换卡片');
-    // 实际重渲的段：本镜头 + 卡片交叉淡出覆盖到的下一镜头
-    expect(meta.changedShots).toEqual([k, k + 1]);
+    expect(meta.changedShots).toEqual([k]);
+    expect(meta.rerenderedShots).toEqual([k, k + 1]);
+    expect(meta.contentHashes).toHaveLength(stateOf(f, 2).storyboard.shots.length);
+    expect(meta.shotHashes).toHaveLength(meta.contentHashes!.length);
+  });
+
+  it('父版本是旧数据时退回：没有内容哈希就用渲染哈希比，什么哈希都没有就用实际重渲的镜头（都含交叉淡出波及的镜头）', async () => {
+    const f = await afterV1();
+    const k = splitShots(stateOf(f, 1))[0];
+    f.store.updateVersion(f.spaceId, 1, { contentHashes: undefined });
+    const noContent = await runNextVersion(f.ctx, f.spaceId, 1, [card(k, '新标题')], '换卡片');
+    expect(noContent.changedShots).toEqual([k, k + 1]);
+    f.store.updateVersion(f.spaceId, 1, { contentHashes: undefined, shotHashes: undefined });
+    const none = await runNextVersion(f.ctx, f.spaceId, 1, [card(k, '另一个标题')], '再换');
+    expect(none.changedShots).toEqual([k, k + 1]);
   });
 
   it('版本花费写入前取整到 0.0001 元', async () => {

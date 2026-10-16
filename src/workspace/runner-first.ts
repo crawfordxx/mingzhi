@@ -79,5 +79,5 @@ export async function produceFirst(env: VersionEnv, input: string): Promise<Vers
   const state: VersionState = { ...init, plan: a.plan, captions, storyboard };
   const qaScore = qaScoreOf(cards);
   // 首个版本没有父版本可比，本版改动为空（界面显示「首版」）
-  return { state, changedShots: [], shotHashes: res.hashes, ...(qaScore !== undefined ? { qaScore } : {}) };
+  return { state, changedShots: [], rerenderedShots: [], shotHashes: res.hashes, contentHashes: res.contents, ...(qaScore !== undefined ? { qaScore } : {}) };
 }

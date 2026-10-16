@@ -26,10 +26,14 @@ export interface VersionMeta {
   createdAt: string;
   parent?: number;
   summary: string;
-  /** 和父版本相比画面内容变了的镜头序号（首个版本为空） */
+  /** 和父版本相比用户可见的「内容变了」的镜头序号（镜头自己的内容哈希变；不含仅因上一张卡交叉淡出而重渲的镜头；首个版本为空） */
   changedShots: number[];
-  /** 各镜头（按序号）的画面内容哈希，下一版据此和本版比较；旧数据没有 */
+  /** 本版实际重渲的镜头序号（含交叉淡出波及的、渲染缓存用；给报告看，界面的「改了 N 段」用 changedShots）；旧数据没有 */
+  rerenderedShots?: number[];
+  /** 各镜头（按序号）的渲染哈希（含交叉淡出），旧数据只有这一项；下一版据此判断 rerenderedShots */
   shotHashes?: string[];
+  /** 各镜头（按序号）自己内容的哈希，下一版据此和本版比较得出 changedShots；旧数据没有，退回 shotHashes */
+  contentHashes?: string[];
   costYuan: number;
   qaScore?: number;
   status: 'running' | 'done' | 'failed';

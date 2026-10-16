@@ -49,8 +49,8 @@ export interface VersionEnv {
   emit: (e: ProgressEvent) => void;
 }
 
-/** changedShots：和父版本相比画面变了的镜头序号；shotHashes：各镜头的画面内容哈希；qaScore：本版卡片自检的平均分（没有自检时沿用父版本） */
-export interface VersionOutcome { state: VersionState; changedShots: number[]; shotHashes?: string[]; qaScore?: number }
+/** changedShots：和父版本相比镜头自己内容变了的镜头序号；rerenderedShots：实际重渲的镜头；shotHashes / contentHashes：渲染哈希与内容哈希；qaScore：本版卡片自检的平均分（没有自检时沿用父版本） */
+export interface VersionOutcome { state: VersionState; changedShots: number[]; rerenderedShots?: number[]; shotHashes?: string[]; contentHashes?: string[]; qaScore?: number }
 
 /** 多段口播拼成的合成原片：之后的识别时间戳、剪口误、抠像、各版本修改都把它当作单段原片 */
 const sourceOf = (base: string): string => join(base, SOURCE_FILE);
@@ -82,7 +82,9 @@ function finish(env: VersionEnv, out: VersionOutcome): VersionMeta {
     status: 'done',
     costYuan: roundYuan(env.meter.total),
     changedShots: out.changedShots,
+    ...(out.rerenderedShots ? { rerenderedShots: out.rerenderedShots } : {}),
     ...(out.shotHashes ? { shotHashes: out.shotHashes } : {}),
+    ...(out.contentHashes ? { contentHashes: out.contentHashes } : {}),
     ...(out.qaScore !== undefined ? { qaScore: out.qaScore } : {}),
   });
   env.emit({ step: 'done', message: '完成' });

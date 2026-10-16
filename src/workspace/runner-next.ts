@@ -21,7 +21,7 @@ import { compositePerson, cutAsPerson, pipelineArgs, qaScoreOf, resolveBg, reuse
 import { recut, retime, writeAss } from './runner-retime.js';
 
 interface Change { next: VersionState; ops: EditOp[]; dropped: string[]; stages: Set<Stage>; newCover: boolean }
-interface Parent { n: number; dir: string; state: VersionState; project: ProjectFile | null; hashes?: string[] }
+interface Parent { n: number; dir: string; state: VersionState; project: ProjectFile | null; hashes?: string[]; contents?: string[] }
 interface Made extends Person { plan: CutPlan; captions: TimedCaption[]; storyboard: Storyboard }
 
 const STAGE_LABEL: Record<Stage, string> = { cut: '剪切', matte: '换背景', captions: '字幕', storyboard: '分镜', broll: '素材', compose: '成片' };
@@ -33,7 +33,7 @@ function readParent(env: VersionEnv, n: number): Parent {
   if (meta.status !== 'done' || !existsSync(join(dir, STATE_FILE))) throw new Error(`v${n} 还没有完成，不能在它上面修改`);
   const project = existsSync(join(dir, 'project.json')) ? readJson<ProjectFile>(join(dir, 'project.json'), `v${n} 的工程文件`) : null;
   const state = readJson<VersionState>(join(dir, STATE_FILE), `v${n} 的版本状态`);
-  return { n, dir, state, project, ...(meta.shotHashes ? { hashes: meta.shotHashes } : {}) };
+  return { n, dir, state, project, ...(meta.shotHashes ? { hashes: meta.shotHashes } : {}), ...(meta.contentHashes ? { contents: meta.contentHashes } : {}) };
 }
 
 /** 校验并应用修改；付费开关与预算以项目当前设置为准 */
@@ -147,11 +147,16 @@ function checkChanged(env: VersionEnv, args: PipelineArgs, parent: VersionState,
   return qaCardsStage(args, env.meter, m.storyboard, m.captions, env.complete, changed, userCards(c.ops, m.storyboard, changed));
 }
 
-interface Rendered { changed: number[]; hashes?: string[]; outroStartSec?: number }
+interface Rendered { changed: number[]; rerendered: number[]; hashes?: string[]; contents?: string[]; outroStartSec?: number }
 
-/** 画面和父版本比：父版本没记哈希（旧数据）时退回实际重渲的镜头 */
-function diffWithParent(parentHashes: string[] | undefined, res: SegmentedResult): number[] {
-  return parentHashes ? changedAgainst(parentHashes, res.hashes) : res.rendered;
+/** 实际重渲的镜头（含交叉淡出波及的）：和父版本的渲染哈希比；父版本没记哈希（旧数据）时退回本次实际重渲的镜头 */
+function rerenderedAgainst(p: Parent, res: SegmentedResult): number[] {
+  return p.hashes ? changedAgainst(p.hashes, res.hashes) : res.rendered;
+}
+
+/** 用户可见的改动：和父版本的内容哈希比（不含仅因上一张卡淡出而重渲的镜头）；父版本没有内容哈希（旧数据）时退回渲染哈希的比较 */
+function changedAgainstParent(p: Parent, res: SegmentedResult): number[] {
+  return p.contents ? changedAgainst(p.contents, res.contents) : rerenderedAgainst(p, res);
 }
 
 /** 有阶段要跑才渲染（未改动的镜头命中分段缓存）；只换封面或回退时直接引用父版本成片，画面与父版本相同 */
@@ -160,7 +165,7 @@ async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change,
   if (c.stages.size === 0) {
     linkFile(join(p.dir, FINAL_FILE), final);
     env.record({ artifacts: { output: final, final } });
-    return { changed: [], ...(p.hashes ? { hashes: p.hashes } : {}) };
+    return { changed: [], rerendered: [], ...(p.hashes ? { hashes: p.hashes } : {}), ...(p.contents ? { contents: p.contents } : {}) };
   }
   const input = {
     person: m.person, subject: m.subject, captions: m.captions, storyboard: m.storyboard, outputDurationSec: m.plan.outputDurationSec,
@@ -168,7 +173,7 @@ async function render(env: VersionEnv, args: PipelineArgs, p: Parent, c: Change,
   };
   const res = await composeStage(args, input, env.complete);
   env.complete('compose', `分段渲染：重渲 ${res.rendered.length} 段 · 复用缓存 ${res.reused.length} 段`);
-  return { changed: diffWithParent(p.hashes, res), hashes: res.hashes, ...(res.outroStartSec === undefined ? {} : { outroStartSec: res.outroStartSec }) };
+  return { changed: changedAgainstParent(p, res), rerendered: rerenderedAgainst(p, res), hashes: res.hashes, contents: res.contents, ...(res.outroStartSec === undefined ? {} : { outroStartSec: res.outroStartSec }) };
 }
 
 /** 封面只在换了封面风格时重做，否则引用父版本的封面 */
@@ -196,5 +201,5 @@ export async function produceNext(env: VersionEnv, input: string, parentN: numbe
   env.record({ plan: m.plan, captions: m.captions, storyboard });
   const qaScore = qaScoreOf(cards) ?? env.space.versions.find((v) => v.n === parentN)?.qaScore;
   const state = { ...c.next, plan: m.plan, captions: m.captions, storyboard };
-  return { state, changedShots: rendered.changed, ...(rendered.hashes ? { shotHashes: rendered.hashes } : {}), ...(qaScore !== undefined ? { qaScore } : {}) };
+  return { state, changedShots: rendered.changed, rerenderedShots: rendered.rerendered, ...(rendered.hashes ? { shotHashes: rendered.hashes } : {}), ...(rendered.contents ? { contentHashes: rendered.contents } : {}), ...(qaScore !== undefined ? { qaScore } : {}) };
 }

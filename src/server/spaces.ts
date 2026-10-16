@@ -91,10 +91,10 @@ export function publicSettings(settings: SpaceSettings): SpaceSettings {
 }
 
 /** 给前端的版本：内容哈希只在服务端比较用，不下发 */
-const publicVersion = ({ shotHashes: _h, ...v }: VersionMeta): Omit<VersionMeta, 'shotHashes'> => v;
+const publicVersion = ({ shotHashes: _h, contentHashes: _c, ...v }: VersionMeta): Omit<VersionMeta, 'shotHashes' | 'contentHashes'> => v;
 
 export type SpaceDto = Omit<Space, 'inputs' | 'versions'> & {
-  inputs: string[]; versions: Omit<VersionMeta, 'shotHashes'>[]; job: RunState | null; chatCostYuan: number; totalCostYuan: number;
+  inputs: string[]; versions: Omit<VersionMeta, 'shotHashes' | 'contentHashes'>[]; job: RunState | null; chatCostYuan: number; totalCostYuan: number;
 };
 
 /** 返回给前端的项目：输入与自定义背景只给文件名（不泄露本机路径），附当前任务状态与累计花费 */
