@@ -95,6 +95,7 @@ describe('清单 schema 校验', () => {
     expect(item.properties.kind.enum).toEqual([...KINDS]);
     expect(item.properties.platform.enum).toEqual([...PLATFORMS]);
     expect(item.properties.unpack.enum).toEqual([...UNPACKS]);
+    expect(item.properties.optional.type).toBe('boolean');
     expect(Object.keys(item.properties).sort()).toEqual(Object.keys(itemFields.shape).sort());
     expect([...item.required].sort()).toEqual(['dest', 'id', 'kind', 'platform', 'sha256', 'size', 'urls']);
   });
@@ -171,6 +172,48 @@ describe('入库的锁定清单 launcher/manifest.lock.json', () => {
       const a = assets.find((x: { id: string }) => x.id === `music-${k}`);
       expect(a.sha256).toBe(z.sha256);
       expect(a.urls).toContain(z.url);
+    }
+  });
+
+  it('Node 条目带 exec：mac 为 runtime/node/bin/node，win 为 runtime/node/node.exe', () => {
+    for (const n of byKind('node')) {
+      expect(n.exec, n.id).toBe(n.platform === 'win32-x64' ? 'runtime/node/node.exe' : 'runtime/node/bin/node');
+    }
+  });
+
+  it('素材（配乐、字体）标记 optional，核心依赖（node/ffmpeg/chrome/model）都不是 optional', () => {
+    for (const i of lock.items) expect(i.optional === true, i.id).toBe(i.kind === 'asset');
+  });
+
+  it('清单里不出现分支名引用（main / master / HEAD），版本都钉死', () => {
+    for (const i of lock.items) for (const url of i.urls) expect(url, `${i.id}: ${url}`).not.toMatch(/\/(main|master|HEAD)\/|@(main|master|HEAD)\//);
+  });
+
+  it('GPL 许可字段不丢：ffmpeg / ffprobe 的 license 含 GPL', () => {
+    for (const i of lock.items.filter((x: { id: string }) => /^ff(mpeg|probe)-/.test(x.id))) expect(i.license, i.id).toMatch(/GPL/);
+  });
+
+  it('配乐转码依赖 ffmpeg：transcode 的输出是 data/assets/music/<id>.mp3，且同平台必有 data/bin/ffmpeg 条目、排在素材之前', () => {
+    const transcoding = lock.items.filter((i: ManifestItem) => i.entries?.some((e: { transcode?: string }) => e.transcode));
+    expect(transcoding.length).toBeGreaterThan(0);
+    for (const i of transcoding) {
+      for (const e of i.entries) expect(e.dest, i.id).toMatch(/^data\/assets\/music\/[\w.-]+\.mp3$/);
+    }
+    const m = buildManifest(lock, { appVersion: '0.1.0', appItems: [] });
+    for (const platform of PLATFORMS.filter((p: string) => p !== 'any')) {
+      const ffmpegIdx = m.items.findIndex((i: ManifestItem) => i.dest === `data/bin/ffmpeg${platform === 'win32-x64' ? '.exe' : ''}` && i.platform === platform);
+      expect(ffmpegIdx, platform).toBeGreaterThanOrEqual(0);
+      expect(ffmpegIdx).toBeLessThan(m.items.findIndex((i: ManifestItem) => transcoding.some((t: ManifestItem) => t.id === i.id)));
+    }
+  });
+
+  it('JSON Schema 的 relPath 正则与校验器对同一批路径给出相同结论', () => {
+    const re = new RegExp(readJson(SCHEMA_PATH).$defs.relPath.pattern);
+    const cases = ['data/models/a.onnx', '{app}', '{app}/x', 'runtime/node', '.hidden/x', '/abs', 'a/../b', 'a\\b', 'C:/x', 'data/{app}/x', 'a//b', 'a/', './a', ''];
+    for (const p of cases) {
+      let valid = true;
+      try { validateManifest(manifestOf([{ ...goodItem, dest: p }])); } catch { valid = false; }
+      expect(re.test(p), JSON.stringify(p)).toBe(valid);
     }
   });
 

@@ -3,7 +3,7 @@
 //       锁定清单 launcher/manifest.lock.json（入库）+ 可选 app 条目 → 最终清单。不联网。
 //   --platform <p> / --only <kind>   只输出（或只校验/更新）该平台（含 any）/该类型的条目
 //   --verify        实际下载锁定清单里每个 url，核对 sha256 与 size（体积大，建议配合 --only/--platform 分批）
-//   --update-lock   按 scripts/manifest-sources.mjs 下载并计算 sha256/size，写回锁定清单（已有且定义未变的条目跳过，--force 强制重算）
+//   --update-lock   按 scripts/manifest-sources.mjs 下载并计算 sha256/size，写回锁定清单（url 与已知 sha256 未变的条目不重下，--force 强制重算；带过滤时被过滤的项保留旧条目）
 // 下载走代理时加 NODE_USE_ENV_PROXY=1。
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -12,6 +12,7 @@ import { parseArgs } from 'node:util';
 import {
   DEFAULT_RELEASE_REPO, SCHEMA_VERSION, buildManifestWithApps, filterItems, hashUrl, parseAppSpecs, validateLock, validateManifest, verifyItem,
 } from './manifest-lib.mjs';
+import { updateLockItems } from './manifest-lock.mjs';
 import { sourceItems } from './manifest-sources.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -54,47 +55,18 @@ async function hashWithLog(url) {
 
 async function updateLock() {
   const existing = existsSync(lockPath) ? validateLock(JSON.parse(readFileSync(lockPath, 'utf8'))).items : [];
-  const byId = new Map(existing.map((i) => [i.id, i]));
-  const wanted = new Set(filterItems(sourceItems(), filter).map((i) => i.id));
   const drafts = sourceItems();
-  const items = [];
-  for (const [index, draft] of drafts.entries()) {
-    const old = byId.get(draft.id);
-    const same = old && JSON.stringify({ ...old, sha256: undefined, size: undefined }) === JSON.stringify({ ...draft, sha256: undefined, size: undefined })
-      && (!draft.sha256 || draft.sha256 === old.sha256);
-    if (!wanted.has(draft.id) || (same && !opts.force)) {
-      if (old) items.push(old);
-      else if (wanted.has(draft.id)) throw new Error(`内部错误：${draft.id} 既未计算也没有旧条目`);
-      continue;
-    }
-    console.log(`计算 ${draft.id}`);
-    let got = null;
-    for (const url of draft.urls) {
-      // 同一个 url 最多试两次（镜像偶尔卡死），再换下一个
-      for (let attempt = 1; attempt <= 2 && !got; attempt += 1) {
-        try {
-          console.log(`  下载 ${url}${attempt > 1 ? '（重试）' : ''}`);
-          got = await hashWithLog(url);
-          console.log(`  完成 ${mb(got.size)}，${got.seconds.toFixed(1)}s，${mb(got.size / got.seconds)}/s，sha256 ${got.sha256}`);
-          if (draft.sha256 && draft.sha256 !== got.sha256) {
-            // 镜像可能 200 返回限流页等错误内容：与已知哈希不符就换下一个 url，不重试
-            console.warn(`  与已知 sha256 不符（${mb(got.size)}），弃用此 url`);
-            got = null;
-            break;
-          }
-        } catch (e) {
-          console.warn(`  失败（${e.message}）`);
-        }
-      }
-      if (got) break;
-    }
-    if (!got) throw new Error(`${draft.id} 所有 url 都下载失败`);
-    items.push({ ...draft, sha256: got.sha256, size: got.size });
-    // 每个条目算完就落盘（已算的 + 后面还没轮到的旧条目），长时间任务中断后可续
-    const rest = drafts.slice(index + 1).map((d) => byId.get(d.id)).filter(Boolean);
-    writeJson(lockPath, validateLock({ schemaVersion: SCHEMA_VERSION, items: [...items, ...rest] }));
-  }
-  writeJson(lockPath, validateLock({ schemaVersion: SCHEMA_VERSION, items }));
+  const wanted = new Set(filterItems(drafts, filter).map((i) => i.id));
+  const hash = async (url) => {
+    const got = await hashWithLog(url);
+    console.log(`  完成 ${mb(got.size)}，${got.seconds.toFixed(1)}s，${mb(got.size / got.seconds)}/s，sha256 ${got.sha256}`);
+    return got;
+  };
+  const write = (items) => writeJson(lockPath, validateLock({ schemaVersion: SCHEMA_VERSION, items }));
+  const items = await updateLockItems({ drafts, existing, wanted, force: opts.force, hash, log: console.log, save: write });
+  const missing = drafts.filter((d) => !items.some((i) => i.id === d.id));
+  if (missing.length) console.warn(`提示：${missing.length} 项没有旧条目且被过滤，未写入锁定清单：${missing.map((m) => m.id).join('、')}`);
+  write(items);
   console.log(`锁定清单已写入 ${lockPath}（${items.length} 项）`);
 }
 

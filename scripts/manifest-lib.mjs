@@ -51,6 +51,7 @@ export const itemFields = z.object({
   entries: z.array(entrySchema).min(1).optional(),
   executable: z.boolean().optional(),
   exec: relPath.optional(),
+  optional: z.boolean().optional(),
   license: z.string().optional(),
 }).strict();
 

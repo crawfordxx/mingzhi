@@ -39,6 +39,7 @@ function nodeItems() {
     dest: 'runtime/node',
     unpack,
     strip: 1,
+    exec: `runtime/node/${platform === 'win32-x64' ? 'node.exe' : 'bin/node'}`,
     urls: [`https://npmmirror.com/mirrors/node/v${NODE_VERSION}/${file}`, `https://nodejs.org/dist/v${NODE_VERSION}/${file}`],
     license: 'MIT（Node.js）',
   }));
@@ -135,8 +136,14 @@ function modelItems() {
 }
 
 /** google/fonts 的 raw 链接在 jsDelivr 上有同路径镜像（国内可直连）；其余字体只有 GitHub 源 */
+// 两处都固定到提交，不引用分支名：上游挪文件或改内容后，已发布的清单依然下得到
+const GOOGLE_FONTS_COMMIT = '1d0e46c7933245c8180fe83e47917961c913bbdb';
 const GOOGLE_FONTS_RAW = 'https://raw.githubusercontent.com/google/fonts/main/';
-const fontUrls = (url) => (url.startsWith(GOOGLE_FONTS_RAW) ? [`https://cdn.jsdelivr.net/gh/google/fonts@main/${url.slice(GOOGLE_FONTS_RAW.length)}`, url] : [url]);
+function fontUrls(url) {
+  if (!url.startsWith(GOOGLE_FONTS_RAW)) return [url];
+  const path = url.slice(GOOGLE_FONTS_RAW.length);
+  return [`https://cdn.jsdelivr.net/gh/google/fonts@${GOOGLE_FONTS_COMMIT}/${path}`, `https://raw.githubusercontent.com/google/fonts/${GOOGLE_FONTS_COMMIT}/${path}`];
+}
 
 function assetItems() {
   const music = readAssets('music.json');
@@ -145,6 +152,7 @@ function assetItems() {
     id: `music-${key}`,
     kind: 'asset',
     platform: 'any',
+    optional: true, // 没有配乐也能出片（降级为不配乐），下载失败不阻塞启动
     sha256: zip.sha256,
     dest: 'data/assets/music',
     unpack: 'zip',
@@ -157,6 +165,7 @@ function assetItems() {
     id: `font-${f.id}`,
     kind: 'asset',
     platform: 'any',
+    optional: true, // 没有这些字体时降级为系统字体，下载失败不阻塞启动
     sha256: f.sha256,
     dest: f.zipEntry ? 'data/assets/fonts' : `data/assets/fonts/${f.file}`,
     ...(f.zipEntry ? { unpack: 'zip', entries: [{ entry: f.zipEntry, dest: `data/assets/fonts/${f.file}` }] } : {}),

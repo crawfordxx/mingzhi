@@ -14,6 +14,7 @@
       ],
       "unpack": "tar.gz",
       "strip": 1,
+      "exec": "runtime/node/bin/node",
       "license": "MIT（Node.js）"
     },
     {
@@ -29,6 +30,7 @@
       ],
       "unpack": "tar.gz",
       "strip": 1,
+      "exec": "runtime/node/bin/node",
       "license": "MIT（Node.js）"
     },
     {
@@ -44,6 +46,7 @@
       ],
       "unpack": "zip",
       "strip": 1,
+      "exec": "runtime/node/node.exe",
       "license": "MIT（Node.js）"
     },
     {
@@ -272,6 +275,7 @@
           "transcode": "mp3"
         }
       ],
+      "optional": true,
       "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
     },
     {
@@ -322,6 +326,7 @@
           "transcode": "mp3"
         }
       ],
+      "optional": true,
       "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
     },
     {
@@ -372,6 +377,7 @@
           "transcode": "mp3"
         }
       ],
+      "optional": true,
       "license": "CC0 1.0（HoliznaCC0，OpenGameArt）"
     },
     {
@@ -382,9 +388,10 @@
       "size": 17772300,
       "dest": "data/assets/fonts/NotoSansSC-VF.ttf",
       "urls": [
-        "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
-        "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+        "https://cdn.jsdelivr.net/gh/google/fonts@1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+        "https://raw.githubusercontent.com/google/fonts/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
       ],
+      "optional": true,
       "license": "SIL OFL 1.1"
     },
     {
@@ -395,9 +402,10 @@
       "size": 25125512,
       "dest": "data/assets/fonts/NotoSerifSC-VF.ttf",
       "urls": [
-        "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf",
-        "https://raw.githubusercontent.com/google/fonts/main/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf"
+        "https://cdn.jsdelivr.net/gh/google/fonts@1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf",
+        "https://raw.githubusercontent.com/google/fonts/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf"
       ],
+      "optional": true,
       "license": "SIL OFL 1.1"
     },
     {
@@ -408,9 +416,10 @@
       "size": 1514968,
       "dest": "data/assets/fonts/ZCOOLKuaiLe-Regular.ttf",
       "urls": [
-        "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf",
-        "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf"
+        "https://cdn.jsdelivr.net/gh/google/fonts@1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf",
+        "https://raw.githubusercontent.com/google/fonts/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf"
       ],
+      "optional": true,
       "license": "SIL OFL 1.1"
     },
     {
@@ -421,9 +430,10 @@
       "size": 8328684,
       "dest": "data/assets/fonts/ZCOOLQingKeHuangYou-Regular.ttf",
       "urls": [
-        "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf",
-        "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf"
+        "https://cdn.jsdelivr.net/gh/google/fonts@1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf",
+        "https://raw.githubusercontent.com/google/fonts/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl/zcoolqingkehuangyou/ZCOOLQingKeHuangYou-Regular.ttf"
       ],
+      "optional": true,
       "license": "SIL OFL 1.1"
     },
     {
@@ -436,6 +446,7 @@
       "urls": [
         "https://github.com/lxgw/LxgwWenKai/releases/download/v1.522/LXGWWenKai-Medium.ttf"
       ],
+      "optional": true,
       "license": "SIL OFL 1.1"
     },
     {
@@ -455,6 +466,7 @@
           "dest": "data/assets/fonts/SmileySans-Oblique.ttf"
         }
       ],
+      "optional": true,
       "license": "SIL OFL 1.1"
     }
   ]

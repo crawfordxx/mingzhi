@@ -46,6 +46,7 @@
         },
         "executable": { "type": "boolean", "description": "安装后对 dest 设置可执行位（macOS；Windows 忽略）" },
         "exec": { "$ref": "#/$defs/relPath", "description": "安装后的可执行文件路径（必须在 dest 目录内）。Chrome Headless Shell 用它：启动器据此设置服务的环境变量 MINGZHI_CHROME；macOS 上启动器对它设可执行位；Windows 带 .exe" },
+        "optional": { "type": "boolean", "description": "true = 下载或安装失败不阻塞启动（配乐、字体等素材：缺失时产品降级出片），启动器可在后台补下" },
         "urls": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "uri", "pattern": "^https://" }, "description": "按优先级排列，国内镜像在前" },
         "license": { "type": "string", "description": "许可说明，供「关于」页展示" }
       }
