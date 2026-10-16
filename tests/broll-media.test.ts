@@ -19,6 +19,17 @@ describe('generateImage', () => {
     expect(String(inputs[0].prompt)).toContain('no text');
     expect(res.cost).toBe(0.2);
   });
+
+  it('提示词套统一影调模板并带禁用词（中英文）', async () => {
+    const inputs: TaskInput[] = [];
+    const dir = mkdtempSync(join(tmpdir(), 'mz-gi-'));
+    await generateImage(fakeTask(inputs), 'a contract on a desk', join(dir, 'a.jpg'), async (_u, d) => writeFileSync(d, 'x'));
+    const prompt = String(inputs[0].prompt);
+    expect(prompt.startsWith('a contract on a desk')).toBe(true);
+    expect(prompt).toContain('editorial photography, soft window light, warm neutral palette, 50mm, shallow depth of field, matte film look, subtle grain, no text');
+    for (const word of ['hologram', 'robot', 'neon', 'glowing', '全息', '机器人', '霓虹', '发光']) expect(prompt).toContain(word);
+    expect(prompt).toContain('no watermark');
+  });
 });
 
 describe('generateVideo', () => {

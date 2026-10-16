@@ -8,7 +8,11 @@ export const VIDEO_MODEL = 'KVideo2.0-Mini';
 
 /** Seedance 约 139 秒出片，排队时可能更久，给 25 分钟 */
 const VIDEO_TIMEOUT_MS = 25 * 60_000;
-const NO_TEXT_SUFFIX = ', no text, no watermark, no logos';
+/** 统一影调模板：让所有生成画面像同一个摄影师拍的 */
+export const STYLE_TEMPLATE = ', editorial photography, soft window light, warm neutral palette, 50mm, shallow depth of field, matte film look, subtle grain, no text';
+/** 禁用词：全息、机器人、霓虹、发光这类「AI 科技感」套路 */
+export const AVOID_TERMS = ', avoid hologram, robot, neon, glowing (避免全息、机器人、霓虹、发光)';
+const NO_TEXT_SUFFIX = `${STYLE_TEMPLATE}${AVOID_TERMS}, no watermark, no logos`;
 
 export type Download = (url: string, dest: string) => Promise<void>;
 
