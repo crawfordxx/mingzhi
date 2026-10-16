@@ -3,6 +3,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, ren
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { captionAt, captionSec, grainOn, shotAt, underlayAt, visualShots, type PersonTransform } from './layout.js';
+import { cardCarry } from './card-carry.js';
 import { renderAudioTrack, renderVideoSegment, withBundle, type SegmentRenderOptions } from './render.js';
 import { transformAt } from '../../render/layers/PersonLayer.js';
 import { DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
@@ -33,6 +34,7 @@ export function segmentBounds(shots: Shot[], durationSec: number): FrameRange[] 
  * - 该帧显示的字幕文字（跨镜头边界的字幕会同时进入两段）
  * - 画面按画面时间轴（visualShots）判断：全屏插入的 J-cut 前 2 帧仍是上一个镜头的画面（字幕也按字幕时钟取切点前那句）；
  *   镜头的版式与素材字段（文件、焦点、Ken Burns、时长）随镜头进入指纹；画中画退出过渡里垫底的上一镜素材也计入
+ * - 卡片交叉过渡：镜头开头 0.3 秒里仍在淡出的上一张卡（镜头与淡出进度）也计入
  */
 function frameFingerprints(props: Omit<TalkProps, 'shots'>, shots: Shot[], range: FrameRange): { shots: unknown[]; frames: string[] } {
   const vis = visualShots(shots);
@@ -40,11 +42,14 @@ function frameFingerprints(props: Omit<TalkProps, 'shots'>, shots: Shot[], range
   const secs = frameSecs(range);
   const hits = secs.map((sec) => shotAt(vis, sec)?.index ?? -1);
   const unders = secs.map((sec) => underlayAt(vis, sec)?.index ?? -1);
-  const seen = [...new Set([...hits, ...unders].filter((i) => i >= 0))];
+  const carries = secs.map((sec) => cardCarry(vis, sec));
+  const seen = [...new Set([...hits, ...unders, ...carries.map((c) => c?.index ?? -1)].filter((i) => i >= 0))];
   const frames = secs.map((sec, k) => {
     const t = transformAt(vis, sec, full);
     const under = unders[k] < 0 || unders[k] === hits[k] ? '' : `|u${seen.indexOf(unders[k])}`;
-    return `${hits[k] < 0 ? '-' : seen.indexOf(hits[k])}|${captionAt(props.captions, captionSec(shots, sec))?.text ?? ''}|${t.scale}|${t.x}|${t.y}${clipStamp(t)}${under}`;
+    const c = carries[k];
+    const carry = c ? `|c${seen.indexOf(c.index)}:${c.t.toFixed(4)}` : '';
+    return `${hits[k] < 0 ? '-' : seen.indexOf(hits[k])}|${captionAt(props.captions, captionSec(shots, sec))?.text ?? ''}|${t.scale}|${t.x}|${t.y}${clipStamp(t)}${under}${carry}`;
   });
   return { shots: seen.map((i) => ({ shot: vis[i], last: i === shots.length - 1 })), frames };
 }
@@ -118,10 +123,10 @@ function shotMedia(shot: Shot | undefined): string[] {
   return [p.image, p.video, shot?.broll?.file].filter((v): v is string => typeof v === 'string');
 }
 
-/** 本段帧区间里实际出现的镜头序号（按画面时间轴；各层每帧只画当前镜头与画中画退出时垫底的上一镜，所以只有这些镜头的素材会进画面） */
+/** 本段帧区间里实际出现的镜头序号（按画面时间轴；各层每帧只画当前镜头、画中画退出时垫底的上一镜与交叉过渡里淡出的上一张卡，所以只有这些镜头的素材会进画面） */
 function shotsInRange(shots: Shot[], range: FrameRange): number[] {
   const vis = visualShots(shots);
-  const idx = frameSecs(range).flatMap((sec) => [shotAt(vis, sec)?.index ?? -1, underlayAt(vis, sec)?.index ?? -1]);
+  const idx = frameSecs(range).flatMap((sec) => [shotAt(vis, sec)?.index ?? -1, underlayAt(vis, sec)?.index ?? -1, cardCarry(vis, sec)?.index ?? -1]);
   return [...new Set(idx.filter((i) => i >= 0))];
 }
 

@@ -38,7 +38,8 @@ describe('本版改动 = 与父版本逐镜头内容比较（I2）', () => {
     f.reset();
     const v3 = await runNextVersion(f.ctx, f.spaceId, 2, [{ type: 'replaceCard', shotIndex: k, card: original } as EditOp], '换回去');
     expect(f.calls.segments).toEqual([]); // 命中 v1 留下的分段缓存
-    expect(v3.changedShots).toEqual([k]);
+    // 下一镜头开头 0.3 秒里这张卡还在交叉淡出，所以它的画面也变了
+    expect(v3.changedShots).toEqual([k, k + 1]);
     expect(f.calls.qaOnly).toEqual([[k]]);
     expect(v3.shotHashes).toEqual(metaOf(f, 1).shotHashes);
   });
@@ -68,7 +69,8 @@ describe('本版改动 = 与父版本逐镜头内容比较（I2）', () => {
     f.store.updateVersion(f.spaceId, 1, { shotHashes: undefined });
     const k = splitShots(stateOf(f, 1))[0];
     const meta = await runNextVersion(f.ctx, f.spaceId, 1, [card(k, '新标题')], '换卡片');
-    expect(meta.changedShots).toEqual([k]);
+    // 实际重渲的段：本镜头 + 卡片交叉淡出覆盖到的下一镜头
+    expect(meta.changedShots).toEqual([k, k + 1]);
   });
 
   it('版本花费写入前取整到 0.0001 元', async () => {

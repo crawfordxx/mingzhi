@@ -17,9 +17,14 @@ import { estimateChipsHeight } from '../render/templates/Chips.js';
 import { STRIKE_END, strikeStarts } from '../render/templates/StrikeList.js';
 import { clickTimes } from '../render/templates/Toggles.js';
 import { ctaClickTimes, ctaColor } from '../render/templates/Cta.js';
-import { CardLayer, cardExit } from '../render/layers/CardLayer.js';
+import { CardLayer } from '../render/layers/CardLayer.js';
+import { CARD_XFADE_SEC, cardCarry } from '../src/compose/card-carry.js';
 import { estimateHookHeight } from '../render/templates/Hook.js';
 import { shotStartFrame } from '../render/templates/ShotVideo.js';
+import { itemTimes, litIndex } from '../render/templates/parts.js';
+import { BLANK_MAX, estimateBlank } from '../render/templates/coverage.js';
+import { hookKeyword } from '../render/templates/HookGraphic.js';
+import { titleLines, titlePx } from '../render/templates/Title.js';
 
 export const SAMPLES: CardSpec[] = [
   { template: 'hook', props: { index: 1, total: 3, kicker: '这 3 句话都出自 GitHub 近 3.5 万星的《高性价比人生指南》', headline: '吃抗氧化补剂的人死亡率反而略高', highlight: ['略高'], stat: { value: '78 项试验', label: '近 30 万人' } } },
@@ -89,10 +94,11 @@ const SAMPLES_B: CardSpec[] = [
   // 视频素材：2 秒 30fps 的测试片，镜头比它长时循环
   { template: 'photo', props: { video: 'broll/test.mp4', label: '动起来的画面', sublabel: '镜头比素材长时循环播放' } },
   { template: 'hook', props: { index: 1, total: 1, headline: '视频做钩子卡的底', highlight: ['钩子卡'], video: 'broll/test.mp4' } },
+  { template: 'flow', props: { crumb: 'FDE', title: '和客户一起迭代', steps: [{ label: '定义问题' }, { label: '快速交付', note: '1.0 版本马上就有' }, { label: '验证结果' }], loop: true, reveal: [0, 0.4, 0.8] } },
 ];
 
 describe('卡片模板 B 组', () => {
-  it('A、B 两组样例覆盖全部 12 个模板', () => {
+  it('A、B 两组样例覆盖全部模板', () => {
     expect(new Set([...SAMPLES, ...SAMPLES_B].map((s) => s.template))).toEqual(new Set(TEMPLATE_IDS));
   });
   it.each(SAMPLES_B.map((s) => [s.template, s] as const))('%s 能渲染出静帧', async (_id, card) => {
@@ -123,7 +129,7 @@ describe('按镜头时长收拢节奏与版面估算', () => {
     const groups = [0, 1].map(() => ({ label: '十二个字的组名文本测试用', items: (['yes', 'no', 'maybe', 'yes', 'no'] as const).map(item) }));
     const est = estimateChipsHeight(groups);
     expect(est).toBeGreaterThan(SAFE_H);
-    expect(est * fitScale(est)).toBeLessThanOrEqual(SAFE_H);
+    expect(est * fitScale(est, SAFE_H, 0.55)).toBeLessThanOrEqual(SAFE_H + 1e-6);
     const small = estimateChipsHeight([{ label: '帮别人', items: [item('yes'), item('yes')] }]);
     expect(fitScale(small)).toBe(1);
   });
@@ -177,10 +183,27 @@ describe('终审修复：CTA 节奏、末镜头不淡出、字宽与钩子估高
     const tiny = ctaClickTimes(3, 0.8);
     expect(tiny[2] + 0.24).toBeLessThanOrEqual(0.8 + 1e-9);
   });
-  it('末镜头（片尾的 cta）不做出场淡出；其他镜头最后 0.25 秒淡出', () => {
-    expect(cardExit(10, 9.95, true)).toBe(0);
-    expect(cardExit(10, 9.95, false)).toBeGreaterThan(0.5);
-    expect(cardExit(10, 5, false)).toBe(0);
+  it('交叉过渡：上一张卡延续到下一镜头开头 0.3 秒淡出（重叠 ≥ 0.15 秒）；镜头结束前不淡出；下一镜头是全屏插入或画中画时硬切', () => {
+    const B = { file: 'broll/a.jpg', kind: 'photo' as const, focal: { x: 0.5, y: 0.5 } };
+    const shots = [
+      { start: 0, end: 2, layout: 'split' as const, card: SAMPLES[1] },
+      { start: 2, end: 4, layout: 'split' as const, card: SAMPLES[2] },
+      { start: 4, end: 6, layout: 'broll' as const, broll: B },
+      { start: 6, end: 8, layout: 'full' as const },
+      { start: 8, end: 10, layout: 'split' as const, card: SAMPLES[1] },
+      { start: 10, end: 12, layout: 'full' as const },
+    ];
+    expect(CARD_XFADE_SEC).toBeGreaterThanOrEqual(0.15);
+    expect(cardCarry(shots, 1.99)).toBeNull();
+    expect(cardCarry(shots, 2)).toEqual({ index: 0, t: 0 });
+    expect(cardCarry(shots, 2.15)?.t).toBeCloseTo(0.5);
+    expect(cardCarry(shots, 2 + CARD_XFADE_SEC)).toBeNull();
+    expect(cardCarry(shots, 4.1)).toBeNull();
+    expect(cardCarry(shots, 6.1)).toBeNull();
+    expect(cardCarry(shots, 10.1)).toEqual({ index: 4, t: expect.any(Number) });
+    expect(CardLayer({ shots, sec: 2.1 })).not.toBeNull();
+    expect(CardLayer({ shots, sec: 10.1 })).not.toBeNull();
+    expect(CardLayer({ shots, sec: 10.5 })).toBeNull();
   });
   it('字宽：W/M 约 0.9em，其他大写 0.7em，数字 0.6em，小写 0.55em', () => {
     expect(textEm('WM')).toBeCloseTo(1.8);
@@ -209,5 +232,31 @@ describe('视频底的镜头起点', () => {
     // 浮点秒数：local = 7.0 - 3.0 的结果带误差，仍取整回第 90 帧
     expect(shotStartFrame(210, 7.0 - 3.0, 30)).toBe(90);
     expect(shotStartFrame(100, 10 / 30 + 1e-9, 30)).toBe(90);
+  });
+});
+
+describe('版面：卡片撑满、字号放大、空白率', () => {
+  it('纸面上各模板样例的空白率估算 ≤ 35%', () => {
+    for (const card of [...SAMPLES, ...SAMPLES_B]) expect(estimateBlank(card)).toBeLessThanOrEqual(BLANK_MAX);
+  });
+  it('标题卡：宁可折成两行也用大字号（≥ 80px），均衡断行', () => {
+    expect(titlePx('FDE vs 传统驻场工程师')).toBeGreaterThanOrEqual(80);
+    expect(titleLines('FDE vs 传统驻场工程师')).toHaveLength(2);
+    expect(titlePx('一'.repeat(60))).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe('持续演进与钩子兜底', () => {
+  it('itemTimes：reveal 条数对得上按它，否则按默认节奏；litIndex 取已出现的最后一条', () => {
+    expect(itemTimes([0, 1.5, 3], 3, (i) => i * 0.1)).toEqual([0, 1.5, 3]);
+    expect(itemTimes([0, 1.5], 3, (i) => i * 0.1)).toEqual([0, 0.1, 0.2]);
+    expect(itemTimes(undefined, 2, () => 0.5)).toEqual([0.5, 0.5]);
+    expect(litIndex([0, 1.5, 3], 2)).toBe(1);
+    expect(litIndex([0.2, 1], 0.1)).toBe(-1);
+  });
+  it('钩子图形兜底的关键词：高亮词 → 数据值 → 标题前 4 个字', () => {
+    expect(hookKeyword({ index: 1, total: 1, headline: 'FDE 基本定性了', highlight: ['定性'] })).toBe('定性');
+    expect(hookKeyword({ index: 1, total: 1, headline: 'FDE 基本定性了', highlight: [], stat: { value: '3.5 万', label: '星' } })).toBe('3.5 万');
+    expect(hookKeyword({ index: 1, total: 1, headline: '岗位基本定性了', highlight: [] })).toBe('岗位基本');
   });
 });

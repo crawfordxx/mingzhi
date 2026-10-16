@@ -13,7 +13,7 @@ const SLACK = 0.02;
 /** 时间再紧也至少留这么久给打字（秒） */
 const MIN_TYPE_SEC = 0.3;
 
-const WIN_H = 640;
+const WIN_H = 660;
 const PAD_X = 40;
 const BODY_W = CONTENT_W - PAD_X * 2;
 const HEADER_H = 92;
@@ -21,7 +21,7 @@ const LINE_HEIGHT = 1.5;
 const LINE_GAP_EM = 0.55;
 /** 用户输入与回答之间多空一点 */
 const PROMPT_GAP_EM = 1;
-const MAX_PX = 32;
+const MAX_PX = 38;
 const MIN_PX = 22;
 const PROMPT = '> ';
 const DOTS = ['#FF5F57', '#FEBC2E', '#28C840'];
@@ -81,7 +81,7 @@ export const Terminal: React.FC<TemplateProps<'terminal'>> = ({ props, local, du
   return (
     <SafeArea>
       <Reveal p={springAt(local, 0, fps)} dy={20}>
-        <div style={{ height: WIN_H, background: THEME.terminal, borderRadius: 22, boxShadow: '0 28px 64px rgba(20, 16, 12, 0.30)', overflow: 'hidden' }}>
+        <div style={{ height: WIN_H, background: THEME.terminal, borderRadius: 22, boxShadow: '0 16px 36px rgba(20, 16, 12, 0.24)', overflow: 'hidden' }}>
           <Header title={props.title ?? 'Claude Code'} />
           <div style={{ padding: `4px ${PAD_X}px`, fontFamily: MONO_CJK, fontSize: px, lineHeight: LINE_HEIGHT, wordBreak: 'break-all' }}>
             {props.lines.map((line, i) => (i > 0 && typed[i] === 0 ? null : (

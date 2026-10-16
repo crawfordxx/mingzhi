@@ -23,8 +23,8 @@ const normalizeStoryboard = (raw: unknown, durationSec: number, images: string[]
 const title = (t: string) => ({ template: 'title', props: { title: t } });
 
 describe('CardSpecSchema', () => {
-  it('12 个模板 id', () => {
-    expect(TEMPLATE_IDS).toHaveLength(12);
+  it('13 个模板 id（含流程图 flow）', () => {
+    expect(TEMPLATE_IDS).toHaveLength(13);
   });
   it('按 template 校验各自的 props；未知模板或缺字段不通过', () => {
     expect(CardSpecSchema.safeParse(title('你好')).success).toBe(true);

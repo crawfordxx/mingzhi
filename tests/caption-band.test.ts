@@ -10,6 +10,7 @@ import { loadConfig } from '../src/config.js';
 import { run, runBuffer } from '../src/media/exec.js';
 import { CANVAS, CardSpecSchema, type CardSpec } from '../src/storyboard/schema.js';
 import { THEME } from '../render/theme.js';
+import { hookKeyword } from '../render/templates/HookGraphic.js';
 
 /** 已装好浏览器才跑：onBrowserDownload 直接抛错，没有浏览器时 ensureBrowser 失败而不是去下载 */
 const chromeAvailable = process.env.MINGZHI_SKIP_RENDER_TESTS === '1' ? false : await ensureBrowser({
@@ -42,11 +43,12 @@ const MAX_CARDS: Record<string, CardSpec> = {
   browser: { template: 'browser', props: { url: 'x'.repeat(80), title: c(60) } },
   photo: { template: 'photo', props: { image: 'img.png', label: c(24), sublabel: c(60) } },
 };
-/** 带固定底的模板用「同样的底、几乎没有内容」的渲染作参照；其余模板的参照是卡片区米色底 */
-const BACKDROP_REFS: Partial<Record<CardSpec['template'], CardSpec>> = {
-  hook: { template: 'hook', props: { index: 1, total: 3, headline: '测', highlight: [] } },
-  photo: { template: 'photo', props: { image: 'img.png' } },
-};
+/** 带固定底的模板用「同样的底、几乎没有内容」的渲染作参照；其余模板的参照是卡片区米色底。钩子没有素材时底图里的大号关键词随卡片取，参照用同一个关键词 */
+function backdropRef(card: CardSpec): CardSpec | null {
+  if (card.template === 'hook') return { template: 'hook', props: { index: card.props.index, total: card.props.total, headline: '测', highlight: [hookKeyword(card.props)] } };
+  if (card.template === 'photo') return { template: 'photo', props: { image: 'img.png' } };
+  return null;
+}
 
 const hex = (h: string): number[] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 
@@ -78,17 +80,16 @@ describe.skipIf(!chromeAvailable)('字幕带守卫（需要本机 Chrome Headles
     await run(loadConfig({}).ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1080x1080', '-frames:v', '1', join(dir, 'img.png')]);
     const stage = hex(THEME.stage);
     const intrusions = await withBundle(dir, async (serveUrl) => {
-      const refs = new Map<string, Buffer>();
-      for (const [t, card] of Object.entries(BACKDROP_REFS)) refs.set(t, await bandPixels(serveUrl, dir, `ref-${t}`, card));
       const found: Record<string, { x: number; y: number }> = {};
       for (const [name, card] of Object.entries(MAX_CARDS)) {
         const px = await bandPixels(serveUrl, dir, name, card);
-        const refPx = refs.get(card.template);
+        const ref = backdropRef(card);
+        const refPx = ref ? await bandPixels(serveUrl, dir, `ref-${name}`, ref) : null;
         const hit = firstIntrusion(px, refPx ? (i) => refPx[i] : (i) => stage[i % 3]);
         if (hit) found[name] = hit;
       }
       return found;
     });
-    expect(intrusions).toEqual({});
+    expect(intrusions, JSON.stringify(intrusions)).toEqual({});
   }, 300_000);
 });

@@ -1,6 +1,8 @@
 import type { Mood } from '../assets/catalog.js';
 import { unifyListNumbering } from './numbering.js';
 import { visualLayout } from '../compose/layout.js';
+import { applyStoryboardRules } from './rules.js';
+import { revealToLocal } from './reveal.js';
 import { CANVAS, CoverTitleSchema, DEFAULT_MOOD, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, MOODS, ShotSchema, type CardSpec, type CoverTitle, type Shot, type Storyboard } from './schema.js';
 
 export interface NormalizeResult {
@@ -11,6 +13,8 @@ export interface NormalizeResult {
   demoted: number;
   /** 因超过 MAX_SHOT_SEC 被截短的带卡片镜头数 */
   capped: number;
+  /** 模型分镜违反的多样性规则（已按规则修正，见 rules.ts）；只在 fromModel 时检查 */
+  ruleFixes?: string[];
 }
 
 const MAX_HOOKS = 3;
@@ -229,8 +233,11 @@ function readExtras(raw: unknown): Pick<Storyboard, 'bgm' | 'coverTitle'> {
   return { bgm: readMood(raw), ...(coverTitle ? { coverTitle } : {}) };
 }
 
-/** 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜；同一组列表卡的编号统一（要么都编号要么都不编号） */
-export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[]): NormalizeResult {
+/**
+ * 模型分镜 → 合法、连续、覆盖 [0, 片长] 的分镜；同一组列表卡的编号统一（要么都编号要么都不编号）。
+ * fromModel：输入是模型刚给的分镜时，再按多样性规则修正（rules.ts），reveal 从成片秒数换算成镜头内秒数；已归一化的分镜再整理时不要传
+ */
+export function normalizeStoryboard(raw: unknown, durationSec: number, availableImages: string[], opts: { fromModel?: boolean } = {}): NormalizeResult {
   if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error(`分镜归一化失败：片长无效（${durationSec}）`);
   const items = (raw as { shots?: unknown } | null)?.shots;
   const extras = readExtras(raw);
@@ -241,13 +248,16 @@ export function normalizeStoryboard(raw: unknown, durationSec: number, available
   const usable = valid.flatMap((s) => { const c = sanitizeShot(s, images); return c ? [c] : []; });
   const { placed, dropped: overlapDropped } = clampAndResolve(usable, durationSec);
   const { shots: capped, capped: cappedCount } = capLongShots(extendCta(placed, durationSec));
-  const merged = mergePlain(applyPlacementRules(mergeShort(fillGaps(capped, durationSec))));
-  const shots = unifyListNumbering(snapToFrames(ensureCtaRoom(merged), durationSec));
+  const placedRules = applyPlacementRules(mergeShort(fillGaps(capped, durationSec)));
+  const ruled = opts.fromModel ? applyStoryboardRules(placedRules, durationSec) : { shots: placedRules, fixes: [] };
+  const snapped = unifyListNumbering(snapToFrames(ensureCtaRoom(mergePlain(ruled.shots)), durationSec));
+  const shots = opts.fromModel ? revealToLocal(snapped) : snapped;
 
   return {
     storyboard: { shots, ...extras },
     dropped: items.length - usable.length + overlapDropped,
     demoted: countCards(placed) - countCards(shots),
     capped: cappedCount,
+    ...(opts.fromModel ? { ruleFixes: ruled.fixes } : {}),
   };
 }

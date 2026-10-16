@@ -6,7 +6,7 @@ import { CONTENT_W, CardFrame, EXIT_SEC, Reveal, SafeArea, clampLines, fitFontSi
 
 const PAD_X = 44;
 const INNER_W = CONTENT_W - PAD_X * 2;
-const ROW_H = 116;
+const ROW_H = 132;
 const TRACK_W = 100;
 const TRACK_H = 60;
 const KNOB = 52;
@@ -56,10 +56,10 @@ export const Toggles: React.FC<TemplateProps<'toggles'>> = ({ props, local, dur 
   const cursor = clicks.length ? cursorAt(local, { x: clicks[0].x + CURSOR_FROM.x, y: clicks[0].y + CURSOR_FROM.y }, clicks) : null;
   return (
     <SafeArea>
-      <CardFrame padding={`30px ${PAD_X}px 36px`}>
+      <CardFrame fill padding={`36px ${PAD_X}px 40px`}>
         {props.title ? (
           <Reveal p={springAt(local, 0.05, fps)} dy={12}>
-            <div style={{ fontSize: fitFontSize(props.title, INNER_W, 26, 20), fontWeight: 600, color: THEME.sub, paddingBottom: 22, borderBottom: DIVIDER, whiteSpace: 'nowrap' }}>{props.title}</div>
+            <div style={{ fontSize: fitFontSize(props.title, INNER_W, 30, 22), fontWeight: 600, color: THEME.sub, paddingBottom: 22, borderBottom: DIVIDER, whiteSpace: 'nowrap' }}>{props.title}</div>
           </Reveal>
         ) : null}
         <div style={{ position: 'relative' }}>
@@ -69,7 +69,7 @@ export const Toggles: React.FC<TemplateProps<'toggles'>> = ({ props, local, dur 
             return (
               <Reveal key={i} p={springAt(local, 0.1 + i * 0.07, fps)} dx={-30} dy={0}>
                 <div style={{ height: ROW_H, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, borderTop: i > 0 ? DIVIDER : 'none' }}>
-                  <div style={{ fontSize: fitFontSize(r.label, INNER_W - TRACK_W - 24, 38, 26), fontWeight: 700, whiteSpace: 'nowrap' }}>{r.label}</div>
+                  <div style={{ fontSize: fitFontSize(r.label, INNER_W - TRACK_W - 24, 46, 28), fontWeight: 700, whiteSpace: 'nowrap' }}>{r.label}</div>
                   <div style={{ transform: `scale(${interpolate(p, [0, 0.5, 1], [1, 0.94, 1], { extrapolateRight: 'clamp' })})` }}><Switch p={p} /></div>
                 </div>
               </Reveal>
@@ -79,7 +79,7 @@ export const Toggles: React.FC<TemplateProps<'toggles'>> = ({ props, local, dur 
         </div>
         {props.footnote ? (
           <Reveal p={springAt(local, 0.2 + props.rows.length * 0.07, fps)} dy={10}>
-            <div style={{ marginTop: 18, fontSize: fitFontSize(props.footnote, INNER_W, 27, 20, 2), fontWeight: 600, lineHeight: 1.4, color: THEME.redText, ...clampLines(2) }}>{props.footnote}</div>
+            <div style={{ marginTop: 18, fontSize: fitFontSize(props.footnote, INNER_W, 31, 22, 2), fontWeight: 600, lineHeight: 1.4, color: THEME.redText, ...clampLines(2) }}>{props.footnote}</div>
           </Reveal>
         ) : null}
       </CardFrame>

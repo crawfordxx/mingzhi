@@ -40,9 +40,16 @@ describe('shotHash', () => {
     expect(hashAll({ ...BASE })).toEqual(base);
     expect(hashAll({ ...BASE, sfx: [{ sec: 1, sfx: 'click', volume: 1 }], bgm: { file: 'a.mp3', keys: [], durationSec: 1 } })).toEqual(base);
   });
-  it('改卡片内容只影响该镜头', () => {
+  it('改卡片内容只影响该镜头与紧随其后的镜头（交叉过渡：上一张卡在下一镜头开头 0.3 秒里淡出）', () => {
     const base = hashAll(BASE);
     const next = hashAll({ ...BASE, shots: [SHOTS[0], { ...SHOTS[1], card: title('乙改') }, SHOTS[2]] });
+    expect(next.map((h, i) => h === base[i])).toEqual([true, false, false]);
+  });
+  it('交叉过渡：下一镜头是画中画（素材铺满、硬切）时，上一张卡改动不影响它', () => {
+    const B = { file: 'broll/a.jpg', kind: 'photo' as const, focal: { x: 0.5, y: 0.5 } };
+    const shots: Shot[] = [SHOTS[0], SHOTS[1], { start: 2, end: 3, layout: 'pip', broll: B }];
+    const base = hashAll({ ...BASE, shots });
+    const next = hashAll({ ...BASE, shots: [SHOTS[0], { ...SHOTS[1], card: title('乙改') }, shots[2]] });
     expect(next.map((h, i) => h === base[i])).toEqual([true, false, true]);
   });
   it('字幕：只影响文字落在本段帧范围内的镜头；跨镜头边界的字幕两段都变', () => {
@@ -107,18 +114,18 @@ describe('盐值（素材与渲染代码指纹）', () => {
     write('fonts/f.ttf', 'font-v1');
   });
 
-  it('B-roll 图片内容变：只有画面里出现这张图的镜头变（相邻镜头不显示它，不变）；mtime 变而内容不变则不变', async () => {
+  it('B-roll 图片内容变：只有画面里出现这张图的镜头变（本镜头与交叉淡出里还显示它的下一镜头；前一镜头不显示它，不变）；mtime 变而内容不变则不变', async () => {
     const base = await hashes();
     write('broll/a.png', 'img-v1', 1_800_000_000);
     expect(changed(await hashes(), base)).toEqual([false, false, false, false]);
     write('broll/a.png', 'img-v2');
-    expect(changed(await hashes(), base)).toEqual([false, true, false, false]);
+    expect(changed(await hashes(), base)).toEqual([false, true, true, false]);
     write('broll/a.png', 'img-v1');
   });
   it('图片同名同大小同 mtime 但内容不同也能识别', async () => {
     const base = await hashes();
     write('broll/a.png', 'img-XX');
-    expect(changed(await hashes(), base)).toEqual([false, true, false, false]);
+    expect(changed(await hashes(), base)).toEqual([false, true, true, false]);
     write('broll/a.png', 'img-v1');
   });
   it('镜头边界不在整帧上、段首的帧还属于前一个镜头时，前一个镜头的素材也进本段指纹', async () => {
@@ -128,10 +135,10 @@ describe('盐值（素材与渲染代码指纹）', () => {
     const sl = await salts(odd, 'c');
     expect(sl.map((x) => x.includes('broll/a.png'))).toEqual([false, true, true, false]);
   });
-  it('换掉一个镜头的卡片（新卡片带图）：前后镜头的哈希不变（v1→v2 差异标记误报）', async () => {
+  it('换掉一个镜头的卡片（新卡片带图）：前一镜头的哈希不变，后一镜头因交叉淡出（开头 0.3 秒还显示这张卡）而变', async () => {
     const base = await hashes();
     const next: TalkProps = { ...props, shots: SHOTS4.map((s, i) => (i === 2 ? { ...s, card: photo('broll/a.png') } : s)) };
-    expect(changed(await hashes(next), base)).toEqual([false, false, true, false]);
+    expect(changed(await hashes(next), base)).toEqual([false, false, true, true]);
   });
   it('人像文件内容变：所有镜头变', async () => {
     const base = await hashes();
@@ -282,12 +289,11 @@ describe('renderSegmented（真实 Remotion 渲染）', () => {
     }
   }, 300_000);
 
-  it('改第 2 个镜头的卡片标题：只重渲 1，复用 0 与 2', async () => {
+  it('改第 2 个镜头的卡片标题：重渲 1 与紧随其后的 2（开头 0.3 秒里这张卡还在交叉淡出），复用 0', async () => {
     const props = { ...BASE, shots: [SHOTS[0], { ...SHOTS[1], card: title('乙改') }, SHOTS[2]] };
     const r = await renderSegmented({ workDir, cacheDir, props, output, ffmpeg: cfg.ffmpeg });
-    expect(r).toMatchObject({ rendered: [1], reused: [0, 2] });
-    // 内容哈希：只有第 2 个镜头和上一次不同
-    expect(r.hashes.map((h, i) => h === firstHashes[i])).toEqual([true, false, true]);
+    expect(r).toMatchObject({ rendered: [1, 2], reused: [0] });
+    expect(r.hashes.map((h, i) => h === firstHashes[i])).toEqual([true, false, false]);
     expect(await frames(output)).toBe(90);
     expect((await probe(output, cfg)).hasAudio).toBe(true);
     expect(existsSync(join(workDir, 'audio.m4a'))).toBe(true);

@@ -56,7 +56,8 @@ describe.skipIf(!hasModels())('版本运行器端到端（真实小样片）', (
     const before = sha(v1Final);
     const k = state.storyboard.shots.findIndex((s) => s.card?.props && (s.card.props as { title?: string }).title === '第二张');
     const v2 = await runNextVersion(ctx, space.id, 1, [{ type: 'replaceCard', shotIndex: k, card: { template: 'title', props: { title: '换过了' } } }], '换卡片');
-    expect(v2.changedShots).toEqual([k]);
+    // 本镜头与下一镜头（这张卡在它开头 0.3 秒里交叉淡出）
+    expect(v2.changedShots).toEqual([k, k + 1]);
     expect(sha(v1Final)).toBe(before);
     const out = await probe(join(store.versionDir(space.id, 2), FINAL_FILE), ctx.cfg);
     expect(Math.abs(out.durationSec - info.durationSec)).toBeLessThan(0.05);

@@ -7,6 +7,7 @@ import { Chips } from './Chips.js';
 import { CompareBars } from './CompareBars.js';
 import { Cta } from './Cta.js';
 import { EvidenceList } from './EvidenceList.js';
+import { Flow } from './Flow.js';
 import { Hook, HookBackdrop } from './Hook.js';
 import { Photo, PhotoBackdrop } from './Photo.js';
 import { StrikeList } from './StrikeList.js';
@@ -14,7 +15,7 @@ import { Terminal } from './Terminal.js';
 import { Title } from './Title.js';
 import { Toggles } from './Toggles.js';
 
-/** 每个模板 id 对应接收该模板 props 的组件（编译期保证 12 个都登记） */
+/** 每个模板 id 对应接收该模板 props 的组件（编译期保证全部都登记） */
 type Registry = { [K in TemplateId]: React.FC<TemplateProps<K>> };
 /** 任意模板的组件（运行时按 card.template 取出后使用） */
 type AnyTemplate = React.FC<TemplateProps<TemplateId>>;
@@ -33,6 +34,7 @@ export const TEMPLATES: Registry = {
   browser: Browser,
   photo: Photo,
   cta: Cta,
+  flow: Flow,
 };
 
 /** 铺满卡片区、不随卡片进出场移动的底（例如钩子卡的黑底与配图），避免相邻镜头之间底色闪烁 */

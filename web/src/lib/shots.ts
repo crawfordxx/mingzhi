@@ -3,7 +3,7 @@ import type { ShotState } from '../api';
 
 const CARD_NAME: Record<string, string> = {
   hook: '钩子卡', title: '标题卡', bigNumber: '数字卡', chips: '标签卡', compareBars: '对比条卡', evidenceList: '证据清单卡',
-  terminal: '终端卡', toggles: '开关卡', strikeList: '划线清单卡', browser: '网页截图', photo: '图片卡', cta: '三连CTA',
+  terminal: '终端卡', toggles: '开关卡', strikeList: '划线清单卡', browser: '网页截图', photo: '图片卡', cta: '三连CTA', flow: '流程卡',
 };
 
 export interface ShotLike { layout: 'split' | 'full'; template?: string; card?: ShotState['card'] }

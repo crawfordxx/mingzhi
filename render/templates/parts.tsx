@@ -84,7 +84,7 @@ export const Reveal: React.FC<{ p: number; dx?: number; dy?: number; from?: numb
 
 /**
  * 卡片画在什么底上：paper 米色卡片区（默认）；image 分屏上半屏的素材图上（内容贴安全区底部、压在渐变暗部，白卡变磨砂玻璃）；
- * float 人物全屏上的顶部浮层（贴顶、白卡变磨砂玻璃）。玻璃卡内部重新回到 paper（深色字照常可读）
+ * float 人物全屏上的浮层（胸前下三分之一，贴底、白卡变磨砂玻璃）。玻璃卡内部重新回到 paper（深色字照常可读）
  */
 export type Surface = 'paper' | 'image' | 'float';
 export const SurfaceContext = React.createContext<Surface>('paper');
@@ -95,26 +95,35 @@ export const GLASS: React.CSSProperties = {
   boxShadow: '0 24px 64px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.12), inset 0 0 0 1.5px rgba(255, 255, 255, 0.55)',
 };
 
-/** 安全区容器：纸面与浮层时内容贴安全区顶部排（下方留给字幕），图上时贴底部排；scale < 1 时以贴边为基准整体缩小；glass 时在图上/浮层里给无卡框的模板套一层玻璃卡 */
+/**
+ * 安全区容器：纸面上内容在安全区里垂直居中，带 fill 的卡框（CardFrame fill）撑满安全区（上半屏空白率 ≤ 35%）；
+ * 浮层与图上时贴安全区底部排（浮层是胸前的下三分之一字条，图上压在渐变暗部）。scale < 1 时整体缩小，纸面上缩小后仍撑满安全区；
+ * glass 时在图上/浮层里给无卡框的模板套一层玻璃卡
+ */
 export const SafeArea: React.FC<{ scale?: number; glass?: boolean; children: React.ReactNode }> = ({ scale = 1, glass = false, children }) => {
   const surface = React.useContext(SurfaceContext);
-  const bottom = surface === 'image';
-  const body = glass && surface !== 'paper'
+  const bottom = surface === 'image' || surface === 'float';
+  const paper = surface === 'paper';
+  const body = glass && !paper
     ? <div style={{ ...GLASS, borderRadius: THEME.radius, padding: '40px 44px 44px' }}><SurfaceContext.Provider value="paper">{children}</SurfaceContext.Provider></div>
     : children;
+  const inner: React.CSSProperties = paper
+    ? { height: SAFE_H / scale, display: 'flex', flexDirection: 'column', justifyContent: 'center', transform: `scale(${scale})`, transformOrigin: 'top center' }
+    : { transform: `scale(${scale})`, transformOrigin: bottom ? 'bottom center' : 'top center' };
   return (
     <div style={{ position: 'absolute', left: SAFE.side, right: SAFE.side, top: SAFE.top, height: SAFE_H, display: 'flex', flexDirection: 'column', justifyContent: bottom ? 'flex-end' : 'flex-start', fontFamily: THEME.font, color: THEME.ink }}>
-      <div style={{ transform: `scale(${scale})`, transformOrigin: bottom ? 'bottom center' : 'top center' }}>{body}</div>
+      <div style={inner}>{body}</div>
     </div>
   );
 };
 
-/** 白色圆角卡片；在图上或浮层里变成磨砂玻璃卡 */
-export const CardFrame: React.FC<{ padding?: string; style?: React.CSSProperties; children: React.ReactNode }> = ({ padding = '44px 48px', style, children }) => {
+/** 白色圆角卡片；在图上或浮层里变成磨砂玻璃卡。fill：纸面上撑满安全区、内容垂直居中（图上与浮层仍按内容高度） */
+export const CardFrame: React.FC<{ padding?: string; fill?: boolean; style?: React.CSSProperties; children: React.ReactNode }> = ({ padding = '44px 48px', fill = false, style, children }) => {
   const surface = React.useContext(SurfaceContext);
   const skin: React.CSSProperties = surface === 'paper' ? { background: THEME.card, boxShadow: THEME.shadow } : GLASS;
+  const stretch: React.CSSProperties = fill && surface === 'paper' ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' } : {};
   return (
-    <div style={{ ...skin, borderRadius: THEME.radius, padding, ...style }}>
+    <div style={{ ...skin, borderRadius: THEME.radius, padding, ...stretch, ...style }}>
       <SurfaceContext.Provider value="paper">{children}</SurfaceContext.Provider>
     </div>
   );
@@ -145,3 +154,15 @@ export const Badge: React.FC<{ text: string; color: string; size?: number; width
 
 /** 多行截断（估算字号的兜底，保证不溢出） */
 export const clampLines = (lines: number): React.CSSProperties => ({ display: '-webkit-box', WebkitLineClamp: lines, WebkitBoxOrient: 'vertical', overflow: 'hidden' });
+
+// ---------- 持续演进 ----------
+
+/** 条目出现的时刻（镜头内秒数）：reveal 条数对得上就按它（随字幕逐条出现），否则按模板默认节奏 */
+export function itemTimes(reveal: readonly number[] | undefined, n: number, fallback: (i: number) => number): number[] {
+  return reveal && reveal.length === n ? [...reveal] : Array.from({ length: n }, (_, i) => fallback(i));
+}
+
+/** 当前点亮的条目：已出现的最后一条（都没出现时为 -1） */
+export function litIndex(times: readonly number[], local: number): number {
+  return times.reduce((last, t, i) => (local >= t ? i : last), -1);
+}

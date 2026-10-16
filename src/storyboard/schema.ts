@@ -13,13 +13,17 @@ export const MIN_SHOT_SEC = 1;
 export const MAX_SHOT_SEC = 8;
 export const HOOK_WINDOW_SEC = 15;
 
-export const TEMPLATE_IDS = ['hook', 'title', 'bigNumber', 'chips', 'compareBars', 'evidenceList', 'terminal', 'toggles', 'strikeList', 'browser', 'photo', 'cta'] as const;
+export const TEMPLATE_IDS = ['hook', 'title', 'bigNumber', 'chips', 'compareBars', 'evidenceList', 'terminal', 'toggles', 'strikeList', 'browser', 'photo', 'cta', 'flow'] as const;
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
 
 const text = z.string().trim().min(1).max(60);
 const short = z.string().trim().min(1).max(24);
 /** 徽章、标签、选项等短词，最长 12 字 */
 const chip = z.string().trim().min(1).max(12);
+/** 持续演进：各条目依次出现的时刻（镜头内秒数，归一化后；模型输出的是成片时间轴上的秒数，由归一化换算） */
+const reveal = z.array(z.number().finite().min(0)).min(1).max(5).optional();
+/** 证据清单徽章：「证据」「来源」只给带数据或出处的行，普通观点用「要点」 */
+export const BADGES = ['成本', '收益', '证据', '来源', '要点'] as const;
 
 /** 素材需求：分镜只写“要什么”，由后续步骤去截图、生图或生视频 */
 const screenshotNeed = z.object({ source: z.literal('screenshot'), url: z.string().trim().url().regex(/^https?:\/\//).optional(), query: z.string().trim().min(2).max(60).optional() });
@@ -38,18 +42,19 @@ const BrowserVisual = screenshotNeed.refine(hasTarget, TARGET_MSG);
 const card = <T extends TemplateId, P extends z.ZodTypeAny>(template: T, props: P) => z.object({ template: z.literal(template), props });
 
 export const CardSpecSchema = z.discriminatedUnion('template', [
-  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(chip).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional(), video: z.string().optional(), visual: HookVisual.optional() })),
+  card('hook', z.object({ index: z.number().int().min(1).max(3), total: z.number().int().min(1).max(3), headline: text, highlight: z.array(chip).max(3), kicker: text.optional(), stat: z.object({ value: short, label: short }).optional(), image: z.string().optional(), video: z.string().optional(), visual: HookVisual.optional(), source: short.optional() })),
   card('title', z.object({ title: text, subtitle: text.optional(), crumb: short.optional() })),
   card('bigNumber', z.object({ value: z.string().trim().min(1).max(10), unit: short.optional(), label: text, chips: z.array(chip).max(18).optional(), highlight: z.array(chip).max(6).optional() })),
   card('chips', z.object({ groups: z.array(z.object({ label: chip, items: z.array(z.object({ text: chip, mark: z.enum(['yes', 'no', 'maybe']) })).min(1).max(5) })).min(1).max(2) })),
-  card('compareBars', z.object({ crumb: short.optional(), items: z.array(z.object({ name: chip, note: short.optional(), value: z.number().min(0).max(1), annotation: chip.optional(), tone: z.enum(['bad', 'warn', 'good']) })).min(1).max(3), verdict: chip.optional() })),
-  card('evidenceList', z.object({ crumb: short.optional(), title: text, rows: z.array(z.object({ badge: z.enum(['成本', '收益', '证据', '来源']), text })).min(1).max(5), highlight: z.array(z.number().int().min(0).max(4)).max(5).optional(), tags: z.array(chip).max(3).optional() })),
+  card('compareBars', z.object({ crumb: short.optional(), items: z.array(z.object({ name: chip, note: short.optional(), value: z.number().min(0).max(1), annotation: chip.optional(), tone: z.enum(['bad', 'warn', 'good']) })).min(1).max(3), verdict: chip.optional(), reveal })),
+  card('evidenceList', z.object({ crumb: short.optional(), title: text, rows: z.array(z.object({ badge: z.enum(BADGES), text })).min(1).max(5), highlight: z.array(z.number().int().min(0).max(4)).max(5).optional(), tags: z.array(chip).max(3).optional(), reveal })),
   card('terminal', z.object({ title: short.optional(), lines: z.array(z.string().trim().min(1).max(40)).min(1).max(6) })),
   card('toggles', z.object({ title: short.optional(), rows: z.array(z.object({ label: chip, on: z.boolean() })).min(1).max(4), footnote: text.optional() })),
-  card('strikeList', z.object({ title: short.optional(), items: z.array(chip).min(1).max(5) })),
+  card('strikeList', z.object({ title: short.optional(), items: z.array(chip).min(1).max(5), reveal })),
   card('browser', z.object({ url: z.string().trim().min(1).max(80), title: text.optional(), image: z.string().optional(), visual: BrowserVisual.optional() })),
   card('photo', z.object({ image: z.string().min(1).optional(), video: z.string().min(1).optional(), visual: PhotoVisual.optional(), label: short.optional(), sublabel: text.optional() })),
   card('cta', z.object({ actions: z.array(z.string().trim().min(1).max(6)).min(1).max(3) })),
+  card('flow', z.object({ crumb: short.optional(), title: short.optional(), steps: z.array(z.object({ label: chip, note: short.optional() })).min(2).max(5), loop: z.boolean().optional(), reveal })),
 ]);
 export type CardSpec = z.infer<typeof CardSpecSchema>;
 

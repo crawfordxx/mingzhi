@@ -3,7 +3,7 @@ import { Img, interpolate, staticFile, useVideoConfig } from 'remotion';
 import { THEME } from '../theme.js';
 import { CONTENT_W, CardFrame, Reveal, SafeArea, clampLines, easeAt, fitFontSize, springAt, type TemplateProps } from './parts.js';
 
-const WIN_H = 640;
+const WIN_H = 700;
 const PAD_X = 30;
 const BAR_W = CONTENT_W - PAD_X * 2;
 const URL_H = 66;
