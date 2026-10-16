@@ -1,10 +1,10 @@
 /**
  * 开发用假数据层（vite 开发服务里 ?mock=1，或构建时 VITE_MOCK=1）：内存里模拟 Task 6 的接口（形状与 task-6-report.md 一致），带一点网络延迟。
  * 语义与真实服务对齐：background:null 才清除、undefined 键忽略；没有口播时 estimate 400；只收视频。
- * 参数：key=1 视为已配置 key；inputs=N 预置 N 段口播。图片只用油画、预设背景与封面示例，不含真人照片。
+ * 参数：key=1 视为已配置 key；inputs=N 预置 N 段口播；update=1 模拟 GitHub 上有新版本。图片只用油画、预设背景与封面示例，不含真人照片。
  * 字幕样式预览图由后端渲染（Task 6），这里 preview 留空，界面用 CSS 文字样式占位。
  */
-import type { Api, Estimate, KeyInfo, Options, SettingsPatch, Space, SpaceSettings, Status, UploadOpts } from './api';
+import type { Api, Estimate, KeyInfo, Options, Prefs, SettingsPatch, Space, SpaceSettings, Status, UpdateInfo, UploadOpts } from './api';
 import { ApiError } from './api';
 import { probeDuration } from './lib/media';
 import { withRuns } from './mock-runs';
@@ -79,7 +79,13 @@ function mockEstimate(sec: number, s: SpaceSettings): Estimate {
 }
 
 /** 假服务的内存状态（相当于后端的数据目录） */
-interface MockState { keyConfigured: boolean; spaces: Space[]; durations: Map<string, number> }
+interface MockState { keyConfigured: boolean; spaces: Space[]; durations: Map<string, number>; update?: UpdateInfo; prefs: Prefs }
+
+const MOCK_UPDATE: UpdateInfo = {
+  version: '0.2.0',
+  url: 'https://github.com/crawfordxx/mingzhi/releases/tag/v0.2.0',
+  notes: '- 新增 4 种封面风格\n- 换背景时人物边缘更干净\n- 修复：Windows 上导出目录含空格时失败',
+};
 
 const VIDEO_RE = /\.(mp4|mov|m4v|mkv|webm|avi)$/i;
 
@@ -105,7 +111,8 @@ function keyMethods(st: MockState): Pick<Api, 'status' | 'options' | 'getKey' | 
   return {
     async status(): Promise<Status> {
       await wait(80);
-      return { version: '0.1.0', keyConfigured: st.keyConfigured, modelsReady: true, assetsReady: true, ffmpegReady: true };
+      const update = st.update && st.prefs.checkUpdates ? { update: st.update } : {};
+      return { version: '0.1.0', keyConfigured: st.keyConfigured, modelsReady: true, assetsReady: true, ffmpegReady: true, ...update };
     },
     async options() { await wait(60); return clone(OPTIONS); },
     async getKey() { await wait(60); return keyInfo(); },
@@ -193,12 +200,24 @@ function mediaMethods(st: MockState, { find, replace }: Finder): Pick<Api, 'uplo
   };
 }
 
+/** 全局偏好、心跳与退出 */
+function appMethods(st: MockState): Pick<Api, 'ping' | 'prefs' | 'setPrefs' | 'shutdown'> {
+  return {
+    async ping() { /* 假数据层没有空闲退出 */ },
+    async prefs() { await wait(60); return { ...st.prefs }; },
+    async setPrefs(patch) { await wait(120); st.prefs = { ...st.prefs, ...patch }; return { ...st.prefs }; },
+    async shutdown() { await wait(400); },
+  };
+}
+
 export function createMockApi(params: URLSearchParams): Api {
   const preset = Number(params.get('inputs') ?? 0);
   const spaces = seedSpaces(Number.isFinite(preset) ? preset : 0);
   const durations = new Map(spaces[0].inputs.map((name, i) => [name, [222, 96, 140][i % 3]]));
-  const st: MockState = { keyConfigured: params.get('key') === '1', spaces, durations };
+  const st: MockState = {
+    keyConfigured: params.get('key') === '1', spaces, durations, prefs: { checkUpdates: true }, ...(params.get('update') === '1' ? { update: MOCK_UPDATE } : {}),
+  };
   const f = finder(st);
-  const base = { ...keyMethods(st), ...crudMethods(st, f), ...mediaMethods(st, f) } as Api;
+  const base = { ...keyMethods(st), ...crudMethods(st, f), ...mediaMethods(st, f), ...appMethods(st) } as Api;
   return withStock(withRuns(base, f, spaces));
 }

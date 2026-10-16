@@ -8,11 +8,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "vitest run --exclude \"tests/{compose,templates,caption-band,cover,segments,runner-e2e,broll-process,layouts-render,outro-render,storyboard-render,qa-film-render,grain-render,card-wipe-render,cta-hook-render}.test.ts\" && vitest run tests/compose.test.ts tests/templates.test.ts tests/caption-band.test.ts tests/cover.test.ts tests/segments.test.ts tests/runner-e2e.test.ts tests/broll-process.test.ts tests/layouts-render.test.ts tests/outro-render.test.ts tests/storyboard-render.test.ts tests/qa-film-render.test.ts tests/grain-render.test.ts tests/card-wipe-render.test.ts tests/cta-hook-render.test.ts --no-file-parallelism",
+    "test": "vitest run && vitest run -c vitest.serial.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "fetch-models": "node scripts/fetch-models.mjs",
     "fetch-assets": "node scripts/fetch-assets.mjs",
     "make-fixture": "bash scripts/make-fixture.sh",
+    "third-party-notices": "node scripts/third-party-notices.mjs",
     "mingzhi": "tsx src/cli.ts",
     "serve": "tsx src/server/index.ts",
     "build:web": "vite build web",
@@ -29,6 +30,7 @@
     "react-dom": "18.3.1",
     "remotion": "4.0.531",
     "sherpa-onnx-node": "1.13.8",
+    "tsx": "4.19.2",
     "zod": "3.23.8"
   },
   "devDependencies": {
@@ -40,7 +42,6 @@
     "@vitejs/plugin-react": "4.7.0",
     "motion": "11.18.2",
     "playwright": "1.48.2",
-    "tsx": "4.19.2",
     "typescript": "5.6.3",
     "vite": "5.4.21",
     "vitest": "2.1.8"

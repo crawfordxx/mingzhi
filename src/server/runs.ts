@@ -6,6 +6,8 @@ import { defaultRunnerCtx, type AppCtx } from './context.js';
 import { HttpError } from './http.js';
 import { requireKey } from './keys.js';
 
+const STOP_POLL_MS = 25;
+
 export type RunAction = { kind: 'first' } | { kind: 'next'; parent: number; ops: EditOp[]; summary: string };
 export interface RunState { state: 'queued' | 'running'; version: number }
 
@@ -17,6 +19,7 @@ export class RunManager {
   private pending = new Map<string, { version: number; action: RunAction }>();
   private queue: JobQueue;
   private app!: AppCtx;
+  private stopping = false;
 
   constructor(bus: AppCtx['bus']) {
     this.queue = new JobQueue((job, signal) => this.execute(job, signal), bus);
@@ -28,6 +31,7 @@ export class RunManager {
 
   /** 入队；返回新版本号（运行器按 max(n)+1 创建）与排队位置 */
   async submit(spaceId: string, action: RunAction): Promise<{ version: number; ahead: number }> {
+    if (this.stopping) throw new HttpError(503, '明知AI剪辑正在退出，不再接受新任务');
     await requireKey(this.app);
     if (this.pending.has(spaceId)) throw new HttpError(409, '这个项目已有任务在排队或运行，请等它结束或先取消');
     const space = this.app.store.get(spaceId);
@@ -57,6 +61,22 @@ export class RunManager {
     if (!p || !this.queue.cancel(spaceId)) return false;
     if (this.queue.current()?.spaceId !== spaceId) this.pending.delete(spaceId);
     return true;
+  }
+
+  /** 有任务排队或运行中 */
+  busy(): boolean {
+    return this.pending.size > 0;
+  }
+
+  /**
+   * 退出前结束所有任务：不再接受新任务，排队的移出、运行中的发取消信号，
+   * 最多等 waitMs 让运行器收尾（把版本记为失败、写盘）；超时就不等了，下次启动时会把没收尾的版本记为中断。
+   */
+  async stopAll(waitMs: number): Promise<void> {
+    this.stopping = true;
+    for (const spaceId of [...this.pending.keys()]) this.cancel(spaceId);
+    const until = Date.now() + waitMs;
+    while (this.queue.current() && Date.now() < until) await new Promise((r) => setTimeout(r, STOP_POLL_MS));
   }
 
   private async execute(job: Job, signal: AbortSignal): Promise<void> {

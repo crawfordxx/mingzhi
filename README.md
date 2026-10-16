@@ -137,16 +137,60 @@
   <img src="docs/readme/flow.webp" alt="拖进口播 → 选背景字幕封面 → 开始出片 → 一句话修改 → 对比导出" width="100%">
 </picture>
 
-> [!TIP]
-> **一键启动器正在做。** 做好之后下载安装包双击就能用，不用装 Node、不用敲命令。在那之前，请按下面的步骤从源码运行。
+### 下载与首次运行
 
-### 1. 准备
+不用装 Node、不用敲命令：
+
+1. **下载启动器**：到 [Releases][releases] 下载最新版。macOS 下载 `Mingzhi-macos.zip`（Apple 芯片与 Intel 通用），解压后双击里面的「明知AI剪辑.command」；Windows 双击 `Mingzhi.exe`。第一次打开会被系统拦一下，放行方法见下面的[首次打开](#首次打开)。
+2. **出现一个终端（命令行）窗口，浏览器同时打开进度页**。这个窗口就是明知AI剪辑本身，用的时候别关。
+3. **首次下载运行环境与本地模型**：Node 运行时、ffmpeg、渲染用的 Chrome、语音识别与抠像模型和应用本体。macOS Apple 芯片约 **490 MB**、Intel 约 **510 MB**，Windows 约 **530 MB**；配乐与字体随后在后台补齐，不耽误开始用。全部断点续传、逐个校验 sha256，网断了点「重试」会接着下。
+4. **下载完自动跳到工作台**，粘贴[可想 AI][kexiang] 的 key（注册不需要邀请码）就能出片。
+
+之后再双击，几秒内直接打开工作台。
+
+**退出**：关掉那个终端窗口，或在工作台右上角的齿轮 →「退出明知AI剪辑」（有任务在跑时会提示将被中断）。只关浏览器的话，服务会在后台等着，没有页面打开、也没有任务满 2 小时后自己退出。
+
+<details>
+<summary><b>国内网络：镜像与 GitHub 代理前缀</b></summary>
+
+<br>
+
+- 默认「国内镜像优先」：Node 和 Chrome 走 npmmirror，模型和字体优先走 jsDelivr，失败时自动换下一个地址。人在海外或开着全局代理时，在进度页右上角「下载设置」里改成「官方源优先」。
+- 少数文件只在 GitHub 上。直连不稳时，可以在「下载设置」里填一个**你信任的** GitHub 代理前缀（只收 `https://` 地址），下载地址会变成「前缀 + 原地址」，失败时仍回到直连。我们不内置任何第三方代理。
+- 启动器会用系统代理（macOS 的系统代理设置，或 `HTTPS_PROXY` 环境变量）。暂不支持 SOCKS 代理。
+</details>
+
+<details>
+<summary><b>数据放在哪、怎么卸载</b></summary>
+
+<br>
+
+| | macOS | Windows |
+| --- | --- | --- |
+| 应用目录 | `~/Library/Application Support/Mingzhi` | `%LOCALAPPDATA%\Mingzhi` |
+
+应用目录里：`runtime/` 是 Node 与 Chrome，`app/<版本>/` 是应用本体，`data/` 是你的项目（`data/spaces/`）、模型（`data/models/`）、配乐字体（`data/assets/`）、ffmpeg（`data/bin/`）与渲染缓存（`data/cache/remotion/`，首次出片后约 170 MB，可随时删除，下次渲染会重建；升级后旧版本的缓存会自动清掉）。`data/data-version` 记录用过这份数据的最高版本（新版启动器成功起来之后才更新）：如果你不小心打开了旧版启动器，它会提示「请使用最新版启动器」并退出，不会改动你的数据。安装后一共约 **1.1 GB**（应用本体约 250 MB，Node 与 Chrome 约 380 MB，模型、ffmpeg、配乐与字体约 480 MB）。导出的成片和封面在 `下载/明知AI剪辑/`。可想 AI 的 key 在 macOS 上存于钥匙串（条目名 `mingzhi`），Windows 上加密存在 `data/` 里。
+
+**卸载**：先退出，删掉启动器，再删掉上面的应用目录（项目会一起删掉，「下载」里导出的成片不受影响）。macOS 上可以再到「钥匙串访问」里删掉名为 `mingzhi` 的条目。
+</details>
+
+### 更新
+
+有新版本时，工作台右上角会出现「有新版本 v0.x」，点开能看到更新说明，点「去下载」打开 Release 页面。下载新的启动器双击即可：通常只需补下新的应用本体（约 50–60 MB），模型等没变的组件不会重下，项目和设置都保留。
+
+升级后，工作台起来之后启动器会在后台自动清理旧版本：`app/` 下只保留当前版本，更旧的版本文件夹和不再使用的旧版 Chrome（`runtime/chrome-headless-shell/<旧版本>/`）会被删除，渲染缓存（`data/cache/remotion/`）里旧版本留下的那份也会在下次渲染前清掉。只清理这几处、名称是版本号的文件夹，不会动 `data/` 里的项目、模型和设置。不支持回退到旧版本：旧版启动器看到数据已被新版用过，会提示「请使用最新版启动器」。
+
+检查更新每天最多一次，只向 GitHub 发一个匿名请求，不带任何标识；会使用 `HTTPS_PROXY` 环境变量或 macOS 的系统代理。没查到（比如当时网络不通）也不会提示，当天不再重试；不想要可以在齿轮 →「检查更新」里关掉。也可以随时自己去 [Releases][releases] 看。
+
+### 从源码运行
+
+#### 1. 准备
 
 - [Node.js 22][node] 或更高，以及 [pnpm][pnpm]
 - ffmpeg 与 ffprobe（优先用 `~/.mingzhi/bin/` 里的，也可以用环境变量 `MINGZHI_FFMPEG`、`MINGZHI_FFPROBE` 指定）
 - 一个[可想 AI][kexiang] 账号（注册不需要邀请码），在控制台创建 key
 
-### 2. 安装并启动
+#### 2. 安装并启动
 
 ```bash
 git clone https://github.com/crawfordxx/mingzhi.git && cd mingzhi
@@ -157,12 +201,12 @@ pnpm build:web      # 构建工作台网页
 pnpm serve          # 启动本机服务，默认 http://127.0.0.1:4321
 ```
 
-浏览器打开终端里打印的地址（端口被占用时会顺延）。第一次打开会让你粘贴可想 AI 的 key，先校验、通过才保存。
+浏览器打开终端里打印的地址（端口被占用时会顺延）。第一次打开会让你粘贴可想 AI 的 key，先校验、通过才保存。服务在没有页面打开、也没有任务满 2 小时后会自己退出（与启动器版一致），再运行 `pnpm serve` 即可。
 
 > [!WARNING]
 > 模型和素材从 GitHub Releases 与上游站点下载，在中国大陆的部分网络下会失败；首次渲染还会下载约 94 MB 的 Chrome Headless Shell。需要代理时，在命令前加 `NODE_USE_ENV_PROXY=1`（Node 22.21 及以上），让 Node 使用 `HTTPS_PROXY` 等环境变量。所有下载都校验 sha256，中断后重跑会跳过已下载的文件。
 
-### 3. 出片
+### 出片
 
 1. **拖进口播**：一段或多段（mp4 / mov / mkv 等，单个不超过 4 GB），多段会按内容排好顺序再拼。
 2. **选背景、字幕样式、封面风格**：右边预览会实时示意；底部能拖动本项目的花费上限，旁边是预估花费和明细。
@@ -202,6 +246,36 @@ pnpm mingzhi edit <口播视频.mp4> [-o 输出.mp4] [--work 工作目录] [--bg
 
 </details>
 
+## 首次打开
+
+Windows 版暂时没有代码签名；macOS 的启动入口「明知AI剪辑.command」是脚本，本来就无法签名。所以**第一次打开会被系统拦一下**。这是系统对「没见过的新程序」的通用提示，放行一次之后，以后双击就直接打开。
+
+两个系统的用法一样：**会出现一个终端 / 命令行窗口，浏览器自动打开工作台；关闭这个窗口即可退出**（窗口里按 Ctrl+C 也行）。
+
+<!-- 截图位置：docs/readme/first-open-macos.webp（系统设置 → 隐私与安全性里的「仍要打开」）、docs/readme/first-open-windows.webp（SmartScreen 的「更多信息」与「仍要运行」）。截图里不要出现个人账号与路径。 -->
+
+#### macOS
+
+1. 下载 `Mingzhi-macos.zip`，双击解压，得到文件夹「明知AI剪辑」，里面有「明知AI剪辑.command」。
+2. 双击「明知AI剪辑.command」。如果系统提示无法打开、无法验证开发者：
+   - **macOS 14 及更早**：**右键**点它 →「打开」，在弹出的对话框里再点「打开」。
+   - **macOS 15（Sequoia）及更新**：先点「完成」，打开「系统设置 → 隐私与安全性」，往下滑到「安全性」，找到「已阻止使用“明知AI剪辑.command”」，点右边的「仍要打开」，输入开机密码，再点一次「打开」。
+3. 弹出终端窗口，几秒后浏览器自动打开工作台。关闭终端窗口（如果终端问是否终止进程，选「终止」）即退出。
+
+如果提示**文件「已损坏」**：打开「终端」，输入 `xattr -dr com.apple.quarantine `（末尾有一个空格），把解压出来的「明知AI剪辑」文件夹拖进终端窗口，回车；然后重新双击。
+
+「明知AI剪辑.command」启动时，只会为同一文件夹里的 `mingzhi-launcher` 和它自己去掉「来自网络」的隔离标记，而且会先校验启动器的 sha256 与发布时一致（不一致就不处理、不运行），不会动文件夹里的其它文件。脚本内容就是仓库里的 `launcher/macos/start.command`，可以自己看。
+
+已公证的版本里，启动器本身不会再被拦；「.command」脚本因为无法签名，仍然是上面的放行方式。
+
+#### Windows
+
+1. 下载 `Mingzhi.exe`，双击运行。
+2. 出现蓝色的「Windows 已保护你的电脑」时，点窗口里的「**更多信息**」，再点出现的「**仍要运行**」。
+3. 弹出一个命令行窗口，几秒后浏览器自动打开工作台。关闭这个窗口即退出。
+
+浏览器下载时若提示「不常见的下载」：Edge 点下载条右边的「…」→「保留」→「仍然保留」；Chrome 在下载列表里点「保留」。
+
 ## 花费
 
 软件免费，模型调用按量付费，直接从你的可想 AI 余额里扣，我们不经手。两条 15 秒样片的首版账单：
@@ -226,14 +300,14 @@ pnpm mingzhi edit <口播视频.mp4> [-o 输出.mp4] [--work 工作目录] [--bg
 - **口播音频不出本机。** 语音识别用本地模型（SenseVoice），抠像也在本机跑。
 - **大模型只拿到文字。** 剪口误、字幕校对、分镜只发送识别出的文字。
 - **人脸不上传给生图模型。** 封面会把 6 帧缩略图拼图发给读图模型挑人物帧、再把生成的封面发回去核对标题；生图只收到文字提示词，并要求画面里没有人，人物是本机抠像后合成上去的。卡片自检发送的是卡片截图。
-- **默认不收集任何数据**，没有统计、没有上报。服务只监听 `127.0.0.1`，并校验来源，别的网页调不动它。
+- **默认不收集任何数据**，没有统计、没有上报。唯一的自动联网查询是每天一次向 GitHub 查最新版本号（匿名，不带任何标识），可以在设置里关掉。服务只监听 `127.0.0.1`，并校验来源，别的网页调不动它。
 - **key 存在系统钥匙串**（macOS 钥匙串；Windows 用 DPAPI 加密），钥匙串不可用时才退回本机数据目录。也可以只用环境变量 `MINGZHI_KX_KEY`，不落盘。
 
 ## 最低配置
 
 - **处理器**：Apple M1，或 8 核 x86。抠像和渲染都在本机，样片在 Apple 芯片上抠像约 10–13 帧/秒。
 - **内存**：16 GB。
-- **磁盘**：约 500 MB 起（模型 243 MB、配乐与字体 128 MB、渲染用的 Chrome 约 94 MB），另加每个项目的中间文件。
+- **磁盘**：启动器版安装后约 1.1 GB（应用本体 250 MB、Node 与 Chrome 380 MB、模型 / ffmpeg / 配乐与字体 480 MB），首次出片后再加约 170 MB 渲染缓存，另加每个项目的中间文件。从源码运行约 500 MB 起（模型 243 MB、配乐与字体 128 MB、渲染用的 Chrome 约 94 MB）。
 - **网络**：能访问可想 AI；首次安装还要能下载模型与素材。
 
 ## 常见问题
@@ -292,18 +366,44 @@ README 里的图片由 `scripts/readme/` 生成：真实工作台截图 + HTML �
 | 模型 | 经[可想 AI][kexiang]：GPT-5.6、Gemini 3.5 Flash、GPT Image 2、Seedance |
 | 成片检查 | ffmpeg ebur128 响度与真峰值、黑帧检测、字幕安全区、WCAG 对比度 |
 
+## 发布
+
+推送 `v<版本>` 标签（与 `package.json` 的 `version` 一致）或在 Actions 页手动运行「发布」工作流：macOS（Apple 芯片、Intel）与 Windows 各自打应用本体包、编译启动器并做解包与渲染烟测，最后创建**草稿** Release，检查无误后手动发布。
+
+> [!NOTE]
+> 启动器从本仓库的 GitHub Releases 下载应用本体包。**仓库公开后，Release 里的文件才能被匿名下载**；私有仓库或草稿 Release 的下载地址会返回 404。
+
 ## 许可证
 
 [MIT][license]
 
 **Remotion**：个人、非营利组织和不超过 3 人的公司可免费使用；**超过 3 人的公司需要购买 [Remotion 公司许可证][remotion-license]**。
 
-第三方素材都不随仓库分发（音效除外），运行时从上游下载：
+本仓库的代码是 MIT。下面这些第三方组件各有各的许可；启动器版会在首次运行时下载其中一部分，进度页「关于」列的就是这几项。所有许可全文都在对应上游，素材类的全文另见 [crawfordxx/mingzhi-assets][assets-repo] 的 `licenses/`。
 
-- 配乐：HoliznaCC0 的作品，CC0 1.0，来自 [OpenGameArt][oga]（`pnpm fetch-assets`）
-- 音效：[Kenney][kenney] 的 Interface Sounds，CC0，已放在 `assets/sfx/`
-- 字体：SIL OFL 1.1（Noto Sans SC、Noto Serif SC、LXGW WenKai、得意黑 Smiley Sans、ZCOOL KuaiLe 等）（`pnpm fetch-assets`）
-- 抠像模型：[RobustVideoMatting][rvm]，代码与权重为 GPL-3.0（`pnpm fetch-models`）
+**运行环境（启动器首次运行时下载，不随仓库分发）**
+
+- **FFmpeg / FFprobe**：GPL-3.0-or-later。用的是静态构建（含 x264、x265、libass），由 [eugeneware/ffmpeg-static][ffmpeg-static] 的 b6.1.1 发布页打包，二进制分别来自 osxexperts.net（macOS Apple 芯片）、evermeet.cx（macOS Intel）和 gyan.dev essentials（Windows）。对应源码：FFmpeg 6.1.1 见 [ffmpeg.org/releases][ffmpeg-src]，x264、x265 和 libass 的源码在各自上游；构建细节见上面三个构建来源。需要对应源码也可以在本仓库提 Issue 索取。启动器只是把它下载到你电脑上，以独立程序调用，不链接进本程序。
+- **Chrome Headless Shell**（渲染用）：来自 [Chrome for Testing][cft]，Chromium 的 BSD-3-Clause，内含的第三方组件各有许可，全文在包内的 `LICENSE.headless_shell`（安装后位于 `runtime/chrome-headless-shell/<版本>/` 下）。
+- **Node.js**：MIT，内含的第三方组件许可见其安装包里的 `LICENSE`（安装后位于 `runtime/node/`）。
+- **Remotion**：见上面，超过 3 人的公司需要购买商用许可。应用本体里带着 Remotion。
+
+**模型（启动器首次运行时下载）**
+
+- **SenseVoice**（语音识别）：[FunASR Model Open Source License][funasr-license]，来自 [FunAudioLLM/SenseVoice][sensevoice]，用的是 sherpa-onnx 转换的 int8 版本（[Hugging Face 上的转换版][sensevoice-hf]，固定到具体提交）。许可允许使用、复制、修改和分享，但要求保留来源与作者署名、遵守许可里的其它条款，使用前请读全文。模型体积较大，启动器直接从上游下载，不经过 mingzhi-assets。
+- **Silero VAD**（人声检测）：MIT，来自 [snakers4/silero-vad][silero]。
+- **RobustVideoMatting**（抠像）：代码与权重均为 GPL-3.0。启动器版的权重从 [crawfordxx/mingzhi-assets][assets-repo] 下载（原样再分发，附 GPL-3.0 全文），对应源码即上游仓库 [PeterL1n/RobustVideoMatting][rvm]。
+
+**素材**
+
+- **配乐**：HoliznaCC0 的作品，CC0 1.0，来自 [OpenGameArt][oga]；启动器版的 19 首 MP3 由 [crawfordxx/mingzhi-assets][assets-repo] 提供（用 ffmpeg 从原始压缩包转码，同样是 CC0）。
+- **字体**：SIL OFL 1.1（Noto Sans SC、Noto Serif SC、霞鹜文楷 LXGW WenKai、得意黑 Smiley Sans、站酷快乐体和站酷庆科黄油体）。其中 Noto Sans SC、得意黑、两款站酷字体来自 mingzhi-assets，Noto Serif SC 和霞鹜文楷直接取自上游（文件超过 jsDelivr 的 20 MB 限制）。字体原样使用，没有改动。
+- **界面音效**：[Kenney][kenney] 的 Interface Sounds，CC0，在仓库的 `assets/sfx/`。发布片（`promo/`）的音效是 Kenney CC0 加代码合成，没有用其它音效库的素材。
+- 启动器进度页自己用的 IBM Plex 字体：SIL OFL 1.1（全文见 `launcher/assets/OFL-IBM-Plex.txt`）。
+
+**启动器自带的第三方 Rust 库**（rustls、ring、ureq、zip、tar、xz2、zstd 等，静态链接进启动器二进制）：许可清单见每个 Release 里的 `THIRD_PARTY_NOTICES.md`，由 `pnpm third-party-notices` 从 `Cargo.lock` 生成。
+
+启动器版的素材（RVM 权重、字体、配乐）取自 [crawfordxx/mingzhi-assets][assets-repo]；从源码运行时则由 `pnpm fetch-assets`、`pnpm fetch-models` 直接从上游下载，来源和许可相同。
 
 <br>
 
@@ -317,12 +417,21 @@ README 里的图片由 `scripts/readme/` 生成：真实工作台截图 + HTML �
 [node]: https://nodejs.org
 [pnpm]: https://pnpm.io
 [kexiang]: https://kexiangai.com
+[releases]: https://github.com/crawfordxx/mingzhi/releases
 [remotion]: https://www.remotion.dev
 [remotion-license]: https://www.remotion.dev/license
 [rvm]: https://github.com/PeterL1n/RobustVideoMatting
 [sherpa]: https://github.com/k2-fsa/sherpa-onnx
 [oga]: https://opengameart.org
 [kenney]: https://kenney.nl
+[assets-repo]: https://github.com/crawfordxx/mingzhi-assets
+[ffmpeg-static]: https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1
+[ffmpeg-src]: https://ffmpeg.org/releases/
+[cft]: https://googlechromelabs.github.io/chrome-for-testing/
+[funasr-license]: https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE
+[sensevoice]: https://github.com/FunAudioLLM/SenseVoice
+[sensevoice-hf]: https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
+[silero]: https://github.com/snakers4/silero-vad
 [badge-license]: https://img.shields.io/badge/license-MIT-014DF9?style=flat-square
 [badge-node]: https://img.shields.io/badge/node-%E2%89%A522-1f1f22?style=flat-square
 [badge-asr]: https://img.shields.io/badge/%E8%AF%AD%E9%9F%B3%E8%AF%86%E5%88%AB-%E6%9C%AC%E6%9C%BA-5c81d6?style=flat-square

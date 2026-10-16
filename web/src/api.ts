@@ -112,7 +112,12 @@ export interface Status {
   ffmpegReady: boolean;
   /** 服务以假模型模式启动（仅测试） */
   fake?: boolean;
+  /** GitHub Releases 上有比当前新的正式版时才有（服务端每天最多查一次） */
+  update?: UpdateInfo;
 }
+export interface UpdateInfo { version: string; url: string; notes: string }
+/** 工作台全局偏好（不属于某个项目） */
+export interface Prefs { checkUpdates: boolean }
 export type KeySource = 'env' | 'keychain' | 'file';
 export interface KeyInfo { configured: boolean; source?: KeySource; masked?: string }
 
@@ -171,6 +176,12 @@ export interface Api {
   markCredit(id: string, n: number, file: string, action: CreditMark): Promise<void>;
   /** 订阅某个版本的事件：先补历史再推实时；断线自动重连（onStatus 报告在线与否）；返回取消订阅 */
   events(id: string, version: number, sink: EventSink, onStatus?: (online: boolean) => void): () => void;
+  /** 页面开着时定时调用：服务据此知道还有浏览器在用（否则空闲 2 小时自动退出） */
+  ping(): Promise<void>;
+  prefs(): Promise<Prefs>;
+  setPrefs(patch: Partial<Prefs>): Promise<Prefs>;
+  /** 退出明知AI剪辑：服务结束任务后退出，启动器随之退出 */
+  shutdown(): Promise<void>;
 }
 
 export class ApiError extends Error {
@@ -274,6 +285,10 @@ export function createHttpApi(): Api {
     credits: (id, n) => json(`/api/spaces/${enc(id)}/versions/${n}/credits`),
     markCredit: (id, n, file, action) => json(`/api/spaces/${enc(id)}/versions/${n}/credits/${enc(file)}/${action}`, { method: 'POST' }),
     events: (id, version, sink, onStatus) => openEvents(`/api/spaces/${enc(id)}/events?version=${version}`, sink, onStatus),
+    ping: () => json('/api/ping'),
+    prefs: () => json('/api/prefs'),
+    setPrefs: (patch) => json('/api/prefs', { method: 'PATCH', body: JSON.stringify(patch) }),
+    shutdown: () => json('/api/shutdown', { method: 'POST' }),
   };
 }
 

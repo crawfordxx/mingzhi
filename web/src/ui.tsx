@@ -44,6 +44,13 @@ export const Ico = {
   chevL: <svg viewBox="0 0 16 16" {...stroke} strokeWidth={1.8}><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>,
   chevR: <svg viewBox="0 0 16 16" {...stroke} strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" /></svg>,
   lock: <svg viewBox="0 0 16 16" {...stroke}><rect x="3.5" y="7" width="9" height="6.5" rx="1.6" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" /></svg>,
+  gear: (
+    <svg viewBox="0 0 16 16" {...stroke} strokeWidth={1.4}>
+      <circle cx="8" cy="8" r="2.1" />
+      <path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6" />
+      <circle cx="8" cy="8" r="4.6" />
+    </svg>
+  ),
 };
 
 export const Lights = ({ size }: { size?: number }) => (

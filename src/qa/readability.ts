@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { renderStill, selectComposition } from '@remotion/renderer';
 import { throwIfCancelled } from '../cancel.js';
+import { browserOptions } from '../compose/browser.js';
 import { withBundle } from '../compose/render.js';
 import { runBuffer } from '../media/exec.js';
 import { CANVAS, type Broll, type Shot, type Storyboard } from '../storyboard/schema.js';
@@ -99,9 +100,9 @@ async function stillRgb(ffmpeg: string, png: string): Promise<Uint8Array> {
 async function renderShot(serveUrl: string, shot: Shot, hideText: boolean, output: string, palette?: Palette): Promise<void> {
   const dur = shot.end - shot.start;
   const inputProps = { card: shot.card, dur, shot, hideText, ...(palette ? { palette } : {}) };
-  const composition = await selectComposition({ serveUrl, id: 'CardStill', inputProps });
+  const composition = await selectComposition({ ...browserOptions(), serveUrl, id: 'CardStill', inputProps });
   const frame = Math.max(0, Math.min(Math.round(dur * CANVAS.fps) - 1, Math.round((dur - SAMPLE_BEFORE_END_SEC) * CANVAS.fps)));
-  await renderStill({ composition, serveUrl, inputProps, output, frame, imageFormat: 'png' });
+  await renderStill({ ...browserOptions(), composition, serveUrl, inputProps, output, frame, imageFormat: 'png' });
 }
 
 interface Env { serveUrl: string; tmp: string; ffmpeg: string; palette?: Palette }

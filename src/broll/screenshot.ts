@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ensureBrowser } from '@remotion/renderer';
+import { browserOptions } from '../compose/browser.js';
 import { isPublicHttpUrl } from './search.js';
 
 const DEFAULT_WIDTH = 1080;
@@ -85,7 +86,7 @@ function runBrowser(browserPath: string, args: string[], timeoutMs: number): Pro
 }
 
 async function resolveBrowserPath(): Promise<string> {
-  const status = await ensureBrowser();
+  const status = await ensureBrowser(browserOptions());
   if (status.type === 'no-browser' || status.type === 'version-mismatch') throw new Error('未找到可用的无头浏览器（Chrome Headless Shell）');
   return status.path;
 }

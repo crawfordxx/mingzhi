@@ -1,7 +1,4 @@
-import { readFileSync } from 'node:fs';
 import { isFakeMode } from './fake.js';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { musicReady, fontsReady } from '../assets/catalog.js';
 import { PRESETS } from '../background/presets.js';
 import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
@@ -18,18 +15,11 @@ import { creditRoutes } from './routes-credits.js';
 import { runRoutes } from './routes-runs.js';
 import { spaceRoutes } from './routes-spaces.js';
 import { stockRoutes } from './routes-stock.js';
+import { readPrefs, writePrefs } from './prefs.js';
 import { DEFAULT_SETTINGS } from './spaces.js';
+import { appVersion } from './update.js';
 
 const MAX_KEY_CHARS = 300;
-const PACKAGE_JSON = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
-
-const appVersion = (): string => {
-  try {
-    return (JSON.parse(readFileSync(PACKAGE_JSON, 'utf8')) as { version?: string }).version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-};
 
 /** 只缓存成功：用户装好 ffmpeg 后不必重启服务 */
 let ffmpegOk = false;
@@ -40,6 +30,8 @@ async function ffmpegReady(app: AppCtx): Promise<boolean> {
 
 async function status(app: AppCtx): Promise<Record<string, unknown>> {
   const { cfg } = app;
+  void app.updates?.poke(); // 到时间才真去查（每天最多一次），不等结果
+  const update = app.updates?.available();
   return {
     version: appVersion(),
     keyConfigured: (await activeKey(app)) !== null,
@@ -48,6 +40,8 @@ async function status(app: AppCtx): Promise<Record<string, unknown>> {
     ffmpegReady: await ffmpegReady(app),
     // 假模型模式（MINGZHI_FAKE_LLM=1，仅测试用）：界面公告条据此显示标识
     ...(isFakeMode() ? { fake: true } : {}),
+    // 有新版本时：{ version, url（Release 页面）, notes }
+    ...(update ? { update } : {}),
   };
 }
 
@@ -97,6 +91,19 @@ export function buildRoutes(app: AppCtx): Route[] {
       sendNoContent(c.res);
     }),
     ...stockRoutes(app),
+    // 工作台页面开着时定时 ping，服务据此判断有没有浏览器在用（空闲退出）
+    route('GET', 'api/ping', (c) => sendNoContent(c.res)),
+    route('GET', 'api/prefs', (c) => sendJson(c.res, 200, readPrefs(app.cfg.dataDir))),
+    route('PATCH', 'api/prefs', async (c) => {
+      const prefs = writePrefs(app.cfg.dataDir, await readJsonBody(c.req));
+      if (prefs.checkUpdates) void app.updates?.poke();
+      sendJson(c.res, 200, prefs);
+    }),
+    // 退出明知AI剪辑：先回 202，响应发出后再优雅停止并以 0 退出（启动器看到 0 就跟着退出）
+    route('POST', 'api/shutdown', (c) => {
+      c.res.once('finish', app.requestShutdown);
+      sendJson(c.res, 202, { ok: true });
+    }),
     ...spaceRoutes(app),
     ...runRoutes(app),
     ...creditRoutes(app),

@@ -1,0 +1,32 @@
+//! 明知AI剪辑 启动器：清单、下载（续传/校验/镜像）、解包、安装状态，
+//! 以及进度页（server + ui.html）与启动工作台（app + run）。
+
+pub mod app;
+pub mod browser;
+pub mod catalog;
+pub mod dataver;
+pub mod download;
+pub mod errmap;
+pub mod error;
+pub mod flow;
+pub mod fsx;
+pub mod hash;
+pub mod install;
+pub mod instance;
+pub mod manifest;
+pub mod notify;
+pub mod paths;
+pub mod progress;
+pub mod proxy;
+pub mod prune;
+pub mod run;
+pub mod sched;
+pub mod server;
+pub mod settings;
+pub mod signal;
+pub mod single;
+pub mod state;
+pub mod sysinfo;
+pub mod unpack;
+pub mod version;
+pub mod winjob;

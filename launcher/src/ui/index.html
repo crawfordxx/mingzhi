@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明知AI剪辑 · 准备中</title>
+<!--
+  启动器进度页（G1 · ego 原味浅色）。token 照抄 web/src/theme.css；
+  构图：油画画框作底 + 白色 macOS 浮窗（安装器）+ 深色终端窗（实时日志）+ 侧边浮窗（设置 / 关于）。
+  数据：每秒轮询 /api/state；命令 POST /api/retry|restart|settings（带 X-Mingzhi 头）。
+-->
+<link rel="stylesheet" href="/assets/ui.css">
+</head>
+<body>
+<div class="bar"><span>明知AI剪辑 <span class="it">(MIT)</span> 开源免费，识别在本机完成，音频不出本机</span><span class="pill" id="ver">v—</span></div>
+
+<main class="stage" id="stage">
+  <div class="art" aria-hidden="true"></div>
+
+  <section class="win main" id="main" aria-labelledby="h1">
+    <div class="titlebar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><div class="tt" id="tt">明知AI剪辑 — 准备工作台</div></div>
+    <div class="hero">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 1024 1024"><rect width="1024" height="1024" rx="232" fill="#014DF9"/><g transform="translate(0,1024) scale(0.1,-0.1)" fill="#FAFAFA" fill-rule="evenodd"><path d="M7055 8131 c-74 -13 -144 -32 -535 -148 -195 -58 -409 -121 -475 -139 -66 -19 -194 -57 -285 -84 -91 -27 -313 -92 -495 -145 -730 -214 -1607 -474 -2205 -656 -184 -56 -357 -107 -384 -115 -390 -106 -691 -464 -746 -886 -7 -57 -10 -564 -8 -1618 l3 -1535 24 -49 c89 -178 327 -216 459 -72 43 47 56 79 102 246 80 293 638 1898 705 2030 94 183 342 230 482 91 37 -37 49 -60 353 -696 197 -411 715 -1444 795 -1585 36 -63 86 -136 112 -162 167 -170 470 -133 570 70 l28 57 0 1490 c0 1692 -8 1536 87 1640 82 90 102 96 554 172 393 66 403 67 475 55 132 -22 241 -91 309 -196 81 -123 74 13 80 -1611 l5 -1450 28 -88 c62 -199 172 -352 327 -452 329 -215 759 -144 969 159 92 133 94 255 7 357 -63 74 -60 -39 -45 1897 17 2202 18 2358 1 2444 -91 484 -413 833 -879 954 -107 28 -321 41 -418 25z m486 -782 c65 -31 130 -94 162 -159 34 -70 32 -216 -5 -285 -63 -119 -164 -180 -298 -180 -77 1 -91 4 -148 34 -213 115 -241 397 -55 550 92 76 232 92 344 40z M7447 7220 c-77 -61 -34 -180 65 -180 56 0 98 43 98 100 0 84 -97 132 -163 80z"/></g></svg>
+        <span class="ripple"></span>
+      </div>
+      <div class="headline swap" id="headline" aria-live="polite">
+        <h1 id="h1">正在打开明知AI剪辑</h1>
+        <p class="sub" id="sub">稍等片刻。</p>
+      </div>
+    </div>
+
+    <div class="meter" id="meter">
+      <div class="meter-row">
+        <div class="big" aria-hidden="true">
+          <span class="num" id="num">0</span><span class="pct">%</span>
+          <svg class="check" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32"/><path d="M19 33 l9 9 L46 23"/></svg>
+        </div>
+        <div class="stats" id="stats"></div>
+      </div>
+      <div class="track" role="progressbar" aria-label="总进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="track"><div class="fill" id="fill"></div></div>
+    </div>
+
+    <div class="alert" id="alert" role="alert">
+      <span class="ic" aria-hidden="true">!</span>
+      <div class="alert-body">
+        <h2 id="a-title"></h2>
+        <p id="a-hint"></p>
+        <div class="acts">
+          <button class="btn btn-k" id="a-main"></button>
+          <button class="btn btn-g" data-open="settings">下载设置</button>
+          <button class="more" id="a-more" aria-expanded="false" aria-controls="a-detail">详细信息</button>
+        </div>
+        <pre id="a-detail" hidden></pre>
+      </div>
+    </div>
+
+    <div class="list" id="list"></div>
+
+    <div class="foot">
+      <div class="note" id="note"></div>
+      <button class="btn btn-g btn-s" data-open="settings">下载设置</button>
+      <button class="btn btn-g btn-s" data-open="about">关于</button>
+    </div>
+  </section>
+
+  <section class="win term" id="term" aria-label="安装日志">
+    <div class="titlebar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><div class="tt">mingzhi — setup — 80×24</div></div>
+    <div class="screen" id="screen" aria-live="off"></div>
+  </section>
+
+  <section class="win side" id="settings" role="dialog" aria-modal="false" aria-labelledby="s-h" hidden>
+    <div class="titlebar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><div class="tt">设置</div></div>
+    <button class="close" data-close aria-label="关闭"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <div class="body">
+      <h3 id="s-h">从哪儿下载 <span class="it">(可随时修改)</span></h3>
+      <p class="lead">改完马上生效：正在下载的项会在下一次重试时换用新设置。</p>
+      <div class="field">
+        <span class="lbl">下载源</span>
+        <div class="seg" role="group" aria-label="下载源">
+          <button type="button" data-mirror="cn" aria-pressed="true">国内镜像优先</button>
+          <button type="button" data-mirror="global" aria-pressed="false">官方源优先</button>
+        </div>
+        <p class="help">在国内选「国内镜像优先」更快；人在海外或开着全局代理时，选「官方源优先」。</p>
+      </div>
+      <div class="field">
+        <label for="prefix">GitHub 代理前缀</label>
+        <input class="input" id="prefix" placeholder="https://你信任的代理地址/" spellcheck="false" autocomplete="off" inputmode="url">
+        <p class="err" id="prefix-err"></p>
+        <p class="help">有几个模型和字体只放在 GitHub 上。国内直连不稳时，可以填一个你信任的代理前缀，下载地址会变成「前缀 + 原地址」，失败时仍会回到直连。留空就是直连。</p>
+      </div>
+      <div class="acts">
+        <button class="btn btn-k" id="save">保存</button>
+        <button class="btn btn-g" data-close>取消</button>
+        <span class="saved" id="saved">已保存，马上生效</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="win side" id="about" role="dialog" aria-modal="false" aria-labelledby="ab-h" hidden>
+    <div class="titlebar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><div class="tt">关于</div></div>
+    <button class="close" data-close aria-label="关闭"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <div class="body">
+      <h3 id="ab-h">明知AI剪辑 <span class="it" id="ab-ver"></span></h3>
+      <p class="lead">开源的口播 AI 剪辑工作台。下面是会装到你电脑上的组件和它们的许可。</p>
+      <div class="lic" id="lic"></div>
+      <p class="gpl"><b>关于 FFmpeg 的 GPL 许可：</b>这里用的 FFmpeg 是第三方按 GPL-3.0 发布的静态版本（含 x264 / x265 / libass）。明知AI剪辑只把它当独立程序调用，没有修改或链接它的代码；它的源码可在 ffmpeg.org 与各构建站点获取。</p>
+      <p class="privacy">全部在本机运行：音频不上传，默认不收集任何数据。</p>
+    </div>
+  </section>
+</main>
+
+<script src="/assets/ui.js"></script>
+</body>
+</html>

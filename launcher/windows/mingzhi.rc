@@ -1,0 +1,37 @@
+// 启动器的 Windows 资源：图标（资源管理器、任务栏、窗口标题）与「属性 → 详细信息」里的版本信息。
+// 由 build.rs 经 embed-resource 在 windows 目标上嵌入。
+// 版本号与 package.json、launcher/Cargo.toml 保持一致（tests/launcher-assets.test.ts 会核对）。
+#pragma code_page(65001)
+
+// 第一个图标资源，资源管理器用它作 exe 图标
+1 ICON "mingzhi.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L // VOS_NT_WINDOWS32
+FILETYPE 0x1L // VFT_APP
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        // 0804 = 简体中文，04B0 = Unicode
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName", "明知AI剪辑 开源项目"
+            VALUE "FileDescription", "明知AI剪辑"
+            VALUE "FileVersion", "0.1.0"
+            VALUE "InternalName", "Mingzhi"
+            VALUE "LegalCopyright", "MIT License"
+            VALUE "OriginalFilename", "Mingzhi.exe"
+            VALUE "ProductName", "明知AI剪辑"
+            VALUE "ProductVersion", "0.1.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 0x04B0
+    END
+END

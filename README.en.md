@@ -140,16 +140,60 @@ Every run also makes **two covers, 3:4 and 4:3**, in one of 10 styles. The speak
   <img src="docs/readme/flow-en.webp" alt="Drop the talk → pick the look → make the cut → say what to change → compare and export" width="100%">
 </picture>
 
-> [!TIP]
-> **A one-click launcher is in the works.** Download, double-click, done: no Node, no terminal. Until then, run from source as below.
+### Download and first run
 
-### 1. Prerequisites
+No Node, no commands to type:
+
+1. **Download the launcher** from [Releases][releases]. On macOS download `Mingzhi-macos.zip` (Apple silicon and Intel in one), unzip it and double-click "明知AI剪辑.command" inside; on Windows double-click `Mingzhi.exe`. The system blocks it the first time; see [First launch](#first-launch) for how to let it through.
+2. **A terminal (command-line) window appears and your browser opens a progress page.** That window *is* Mingzhi; keep it open while you work.
+3. **The first run downloads the runtime and local models**: the Node runtime, ffmpeg, Chrome for rendering, the speech and matting models, and the app itself. About **490 MB** on Apple silicon, **510 MB** on Intel Macs and **530 MB** on Windows; music and fonts are filled in afterwards in the background, so you can start right away. Every download resumes where it stopped and is checked against a sha256; if the network drops, click "Retry" to pick up from there.
+4. **When it is done the page jumps to the workbench.** Paste your [Kexiang AI][kexiang] key (no invite code needed) and make a cut.
+
+After that, a double-click opens the workbench within a few seconds.
+
+**Quitting**: close that terminal window, or use the gear at the top right of the workbench → "退出明知AI剪辑" (quit; it warns you if a job would be interrupted). If you only close the browser, the server waits in the background and quits by itself after 2 hours with no page open and no job running.
+
+<details>
+<summary><b>Networks in mainland China: mirrors and a GitHub proxy prefix</b></summary>
+
+<br>
+
+- By default mirrors in China come first: Node and Chrome from npmmirror, models and fonts from jsDelivr, falling back to the next address on failure. If you are abroad or behind a global proxy, switch to "official sources first" under "Download settings" at the top right of the progress page.
+- A few files live only on GitHub. If GitHub is flaky for you, enter a GitHub proxy prefix **you trust** in "Download settings" (`https://` only); downloads then go to "prefix + original URL" and still fall back to the direct link. No third-party proxy is built in.
+- The launcher uses the system proxy (the macOS proxy settings, or the `HTTPS_PROXY` environment variable). SOCKS proxies are not supported yet.
+</details>
+
+<details>
+<summary><b>Where your data lives, and uninstalling</b></summary>
+
+<br>
+
+| | macOS | Windows |
+| --- | --- | --- |
+| App folder | `~/Library/Application Support/Mingzhi` | `%LOCALAPPDATA%\Mingzhi` |
+
+Inside: `runtime/` holds Node and Chrome, `app/<version>/` the app itself, and `data/` your projects (`data/spaces/`), models (`data/models/`), music and fonts (`data/assets/`), ffmpeg (`data/bin/`) and the render cache (`data/cache/remotion/`, about 170 MB after the first render; safe to delete, it is rebuilt on the next render; caches left by old versions are cleaned up automatically). `data/data-version` records the highest version that has used this data (updated only after the new launcher has started successfully): if you open an older launcher by mistake, it says "请使用最新版启动器" (use the latest launcher) and exits without touching your data. The whole installation takes about **1.1 GB** (app about 250 MB, Node and Chrome about 380 MB, models, ffmpeg, music and fonts about 480 MB). Exported videos and covers go to `Downloads/明知AI剪辑/`. Your Kexiang key is kept in the macOS Keychain (item `mingzhi`); on Windows it is stored encrypted under `data/`.
+
+**Uninstall**: quit, delete the launcher, then delete the app folder above (this deletes your projects too; exports in Downloads are untouched). On macOS you can also remove the `mingzhi` item in Keychain Access.
+</details>
+
+### Updating
+
+When a new version is out, the top right of the workbench shows "有新版本 v0.x" (new version). Click it for the release notes, then "去下载" (download) to open the Release page. Download the new launcher and double-click it: usually it only needs the new app (about 50–60 MB); components that did not change, such as the models, are not downloaded again, and your projects and settings stay.
+
+After an upgrade, once the workbench is up the launcher cleans up old versions in the background: `app/` keeps only the current version; older version folders and Chrome versions no longer in use (`runtime/chrome-headless-shell/<old version>/`) are deleted, and the copy of the render cache (`data/cache/remotion/`) left by an old version is removed before the next render. It only touches those places, and only folders named like a version number; the projects, models and settings in `data/` are never touched. Rolling back to an older version is not supported: an older launcher sees that the data has been used by a newer version and says "请使用最新版启动器" (use the latest launcher).
+
+The check runs at most once a day and sends a single anonymous request to GitHub, with nothing that identifies you; it uses the `HTTPS_PROXY` environment variable or the macOS system proxy. If it fails (for example, no network at the time) you simply see nothing, and it does not retry that day; turn it off under the gear → "检查更新" (check for updates). You can always look at [Releases][releases] yourself.
+
+### Run from source
+
+#### 1. Prerequisites
 
 - [Node.js 22][node] or newer, and [pnpm][pnpm]
 - ffmpeg and ffprobe (`~/.mingzhi/bin/` is preferred; or point `MINGZHI_FFMPEG` / `MINGZHI_FFPROBE` at your own)
 - A [Kexiang AI][kexiang] account (no invite code needed) and a key from its console
 
-### 2. Install and start
+#### 2. Install and start
 
 ```bash
 git clone https://github.com/crawfordxx/mingzhi.git && cd mingzhi
@@ -160,12 +204,12 @@ pnpm build:web      # build the workbench page
 pnpm serve          # start the local server, default http://127.0.0.1:4321
 ```
 
-Open the address printed in the terminal (the port moves up if it is taken). On first visit the page asks for your Kexiang key, checks it, and only saves it if it works.
+Open the address printed in the terminal (the port moves up if it is taken). On first visit the page asks for your Kexiang key, checks it, and only saves it if it works. The server quits by itself after 2 hours with no page open and no job running (same as the launcher build); just run `pnpm serve` again.
 
 > [!WARNING]
 > Models and assets come from GitHub Releases and upstream sites, which can fail on some networks in mainland China; the first render also downloads Chrome Headless Shell (about 94 MB). Behind a proxy, prefix commands with `NODE_USE_ENV_PROXY=1` (Node 22.21+) so Node honours `HTTPS_PROXY` and friends. Every download is checked against a sha256, and re-running skips what is already there.
 
-### 3. Make a cut
+### Make a cut
 
 1. **Drop the talk**: one clip or several (mp4 / mov / mkv and more, up to 4 GB each); several clips are put in order by content and joined.
 2. **Pick background, caption style and cover style**: the preview follows along; the footer has the project's spending cap, the estimate and a breakdown.
@@ -205,6 +249,36 @@ Background presets: `study`, `studio`, `cafe`, `night-window`, `tech-dark`, `jap
 
 </details>
 
+## First launch
+
+The launcher has no code signature on Windows, and on macOS the entry point "明知AI剪辑.command" is a script, which cannot be signed. So **the system will stop you the first time you open it**. This is the generic warning for software the system hasn't seen before. Allow it once and later launches open straight away.
+
+Both systems work the same way: **a Terminal / command-line window appears and the browser opens the workbench by itself; close that window to quit** (Ctrl+C in the window works too).
+
+<!-- Screenshots go here: docs/readme/first-open-macos.webp (the "Open Anyway" button in System Settings → Privacy & Security) and docs/readme/first-open-windows.webp (SmartScreen "More info" and "Run anyway"). Keep personal accounts and paths out of the shots. -->
+
+#### macOS
+
+1. Download `Mingzhi-macos.zip` and double-click it to unzip. You get a folder "明知AI剪辑" containing "明知AI剪辑.command".
+2. Double-click "明知AI剪辑.command". If the system says it can't be opened or the developer can't be verified:
+   - **macOS 14 and earlier**: **right-click** it → Open, then click Open in the dialog.
+   - **macOS 15 (Sequoia) and later**: click Done, open System Settings → Privacy & Security, scroll to Security, find "“明知AI剪辑.command” was blocked", click **Open Anyway** next to it, enter your login password, then click Open.
+3. A Terminal window appears, and a few seconds later the browser opens the workbench. Close the Terminal window to quit (if Terminal asks whether to terminate the process, choose Terminate).
+
+If it says the file **"is damaged"**: open Terminal, type `xattr -dr com.apple.quarantine ` (with a trailing space), drag the unzipped "明知AI剪辑" folder into the Terminal window, press Return, then double-click again.
+
+When "明知AI剪辑.command" starts, it only removes the "downloaded from the internet" quarantine flag from `mingzhi-launcher` in the same folder and from itself, and it first checks that the launcher's sha256 matches the value recorded at release time (if not, it changes nothing and does not run it). It never touches any other file in the folder. The script is `launcher/macos/start.command` in this repository if you want to read it.
+
+In a notarized build the launcher binary itself is no longer blocked; the ".command" script cannot be signed, so it still needs the steps above.
+
+#### Windows
+
+1. Download `Mingzhi.exe` and double-click it.
+2. When the blue "Windows protected your PC" window appears, click **More info**, then **Run anyway**.
+3. A command-line window appears, and a few seconds later the browser opens the workbench. Close that window to quit.
+
+If the browser warns that the download isn't commonly downloaded: in Edge, click "…" on the download bar → Keep → Keep anyway; in Chrome, click Keep in the downloads list.
+
 ## Cost
 
 The software is free. Model calls are pay-as-you-go, charged straight to your Kexiang AI balance; we never touch the money. First-version bills for the two 15-second takes:
@@ -229,14 +303,14 @@ The software is free. Model calls are pay-as-you-go, charged straight to your Ke
 - **Your audio never leaves the machine.** Speech recognition (SenseVoice) and matting run locally.
 - **LLMs only see text.** Cutting, caption polish and the storyboard get the recognised text only.
 - **No faces go to the image model.** For covers, a 6-frame contact sheet goes to a vision model to pick a frame, and the generated cover goes back to it to check the title; the image model only gets a text prompt asking for no people, and the speaker is composited locally. The card self-check sends screenshots of the cards.
-- **No data collection by default**: no analytics, no telemetry. The server listens on `127.0.0.1` only and checks the request origin, so other web pages cannot drive it.
+- **No data collection by default**: no analytics, no telemetry. The only automatic network query is a once-a-day anonymous check of the latest version number on GitHub, which you can turn off in settings. The server listens on `127.0.0.1` only and checks the request origin, so other web pages cannot drive it.
 - **Your key lives in the system keychain** (macOS Keychain; DPAPI-encrypted on Windows), falling back to the local data directory only if the keychain is unavailable. Or keep it in the `MINGZHI_KX_KEY` environment variable and never write it to disk.
 
 ## Minimum specs
 
 - **CPU**: Apple M1, or an 8-core x86. Matting and rendering run locally; the sample takes matted at about 10–13 fps on Apple silicon.
 - **Memory**: 16 GB.
-- **Disk**: about 500 MB to start (models 243 MB, music and fonts 128 MB, Chrome for rendering about 94 MB), plus intermediate files per project.
+- **Disk**: the launcher install takes about 1.1 GB (app 250 MB, Node and Chrome 380 MB, models / ffmpeg / music and fonts 480 MB), plus about 170 MB of render cache after the first render, plus intermediate files per project. Running from source takes about 500 MB to start (models 243 MB, music and fonts 128 MB, Chrome for rendering about 94 MB).
 - **Network**: access to Kexiang AI, and to the model and asset downloads on first install.
 
 ## FAQ
@@ -295,18 +369,44 @@ The images in this README are generated by `scripts/readme/`: real workbench scr
 | Models | Through [Kexiang AI][kexiang]: GPT-5.6, Gemini 3.5 Flash, GPT Image 2, Seedance |
 | Final checks | ffmpeg ebur128 loudness and true peak, black-frame detection, caption safe area, WCAG contrast |
 
+## Releasing
+
+Push a `v<version>` tag (matching `version` in `package.json`) or run the "发布" workflow from the Actions tab. macOS (Apple silicon and Intel) and Windows each build the app bundle and the launcher and run an unpack-and-render smoke test; the workflow then creates a **draft** Release for you to review and publish.
+
+> [!NOTE]
+> The launcher downloads the app bundle from this repository's GitHub Releases. **Release files can only be downloaded anonymously once the repository is public**; download URLs of a private repository or a draft Release return 404.
+
 ## License
 
 [MIT][license]
 
 **Remotion**: free for individuals, non-profits and companies of up to 3 people; **companies with more than 3 people need a [Remotion company license][remotion-license]**.
 
-Third-party assets are not shipped with the repo (except the sound effects); they are downloaded from upstream at setup:
+The code in this repository is MIT. The third-party components below have their own licenses; the launcher downloads some of them on first run, and the launcher's "About" panel lists the same items. Full license texts live upstream; for the assets they are also in [crawfordxx/mingzhi-assets][assets-repo] under `licenses/`.
 
-- Music: tracks by HoliznaCC0, CC0 1.0, from [OpenGameArt][oga] (`pnpm fetch-assets`)
-- Sound effects: [Kenney][kenney]'s Interface Sounds, CC0, included under `assets/sfx/`
-- Fonts: SIL OFL 1.1 (Noto Sans SC, Noto Serif SC, LXGW WenKai, Smiley Sans, ZCOOL KuaiLe, ...) (`pnpm fetch-assets`)
-- Matting model: [RobustVideoMatting][rvm], code and weights GPL-3.0 (`pnpm fetch-models`)
+**Runtime (downloaded by the launcher on first run, not shipped in this repo)**
+
+- **FFmpeg / FFprobe**: GPL-3.0-or-later. Static builds (with x264, x265, libass), packaged by the b6.1.1 release of [eugeneware/ffmpeg-static][ffmpeg-static]; the binaries come from osxexperts.net (macOS Apple silicon), evermeet.cx (macOS Intel) and gyan.dev essentials (Windows). Corresponding source: FFmpeg 6.1.1 at [ffmpeg.org/releases][ffmpeg-src]; the sources of x264, x265 and libass are at their own upstreams; build details are with the three build providers above. You can also ask for the corresponding source by opening an issue here. The launcher only downloads these to your machine and runs them as separate programs; they are not linked into this software.
+- **Chrome Headless Shell** (for rendering): from [Chrome for Testing][cft]; Chromium's BSD-3-Clause, with bundled third-party components under their own licenses (full text in `LICENSE.headless_shell` inside the package, installed under `runtime/chrome-headless-shell/<version>/`).
+- **Node.js**: MIT; the licenses of its bundled third-party components are in the `LICENSE` of the Node package (installed under `runtime/node/`).
+- **Remotion**: see above; companies with more than 3 people need a commercial license. The app package contains Remotion.
+
+**Models (downloaded by the launcher on first run)**
+
+- **SenseVoice** (speech recognition): [FunASR Model Open Source License][funasr-license], from [FunAudioLLM/SenseVoice][sensevoice], using the int8 conversion by sherpa-onnx ([the converted model on Hugging Face][sensevoice-hf], pinned to a specific commit). The license allows use, copying, modification and sharing, but requires keeping the source and author attribution and following its other terms; please read the full text before use. The model is large, so the launcher downloads it straight from upstream, not through mingzhi-assets.
+- **Silero VAD** (voice activity detection): MIT, from [snakers4/silero-vad][silero].
+- **RobustVideoMatting** (matting): code and weights are GPL-3.0. The launcher downloads the weights from [crawfordxx/mingzhi-assets][assets-repo] (redistributed unchanged, with the GPL-3.0 text); the corresponding source is the upstream repository [PeterL1n/RobustVideoMatting][rvm].
+
+**Assets**
+
+- **Music**: tracks by HoliznaCC0, CC0 1.0, from [OpenGameArt][oga]. The launcher's 19 MP3s come from [crawfordxx/mingzhi-assets][assets-repo] (transcoded with ffmpeg from the original archives, still CC0).
+- **Fonts**: SIL OFL 1.1 (Noto Sans SC, Noto Serif SC, LXGW WenKai, Smiley Sans, ZCOOL KuaiLe and ZCOOL QingKe HuangYou). Noto Sans SC, Smiley Sans and the two ZCOOL fonts come from mingzhi-assets; Noto Serif SC and LXGW WenKai are fetched straight from upstream (their files exceed jsDelivr's 20 MB limit). Fonts are used unmodified.
+- **UI sound effects**: [Kenney][kenney]'s Interface Sounds, CC0, in `assets/sfx/`. The sound effects of the promo film (`promo/`) are Kenney CC0 plus sounds synthesized in code; nothing from other sound libraries.
+- The IBM Plex fonts used by the launcher's own progress page: SIL OFL 1.1 (full text in `launcher/assets/OFL-IBM-Plex.txt`).
+
+**Rust crates linked into the launcher** (rustls, ring, ureq, zip, tar, xz2, zstd and others, statically linked into the launcher binary): the license list is `THIRD_PARTY_NOTICES.md` attached to every Release, generated from `Cargo.lock` by `pnpm third-party-notices`.
+
+The launcher gets its assets (RVM weights, fonts, music) from [crawfordxx/mingzhi-assets][assets-repo]; running from source, `pnpm fetch-assets` and `pnpm fetch-models` download from the upstream sites instead, with the same sources and licenses.
 
 <br>
 
@@ -320,12 +420,21 @@ Third-party assets are not shipped with the repo (except the sound effects); the
 [node]: https://nodejs.org
 [pnpm]: https://pnpm.io
 [kexiang]: https://kexiangai.com
+[releases]: https://github.com/crawfordxx/mingzhi/releases
 [remotion]: https://www.remotion.dev
 [remotion-license]: https://www.remotion.dev/license
 [rvm]: https://github.com/PeterL1n/RobustVideoMatting
 [sherpa]: https://github.com/k2-fsa/sherpa-onnx
 [oga]: https://opengameart.org
 [kenney]: https://kenney.nl
+[assets-repo]: https://github.com/crawfordxx/mingzhi-assets
+[ffmpeg-static]: https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1
+[ffmpeg-src]: https://ffmpeg.org/releases/
+[cft]: https://googlechromelabs.github.io/chrome-for-testing/
+[funasr-license]: https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE
+[sensevoice]: https://github.com/FunAudioLLM/SenseVoice
+[sensevoice-hf]: https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
+[silero]: https://github.com/snakers4/silero-vad
 [badge-license]: https://img.shields.io/badge/license-MIT-014DF9?style=flat-square
 [badge-node]: https://img.shields.io/badge/node-%E2%89%A522-1f1f22?style=flat-square
 [badge-asr]: https://img.shields.io/badge/speech%20recognition-on%20device-5c81d6?style=flat-square

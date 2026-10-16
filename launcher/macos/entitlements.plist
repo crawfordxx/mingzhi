@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- hardened runtime 的权限：启动器一项都不需要，所以是空的。
+     启动器是纯 Rust 程序（无 JIT、不加载第三方动态库、不读 dyld 环境变量）；
+     它下载并启动的 Node 与 Chrome 是独立的子进程，不受启动器的 hardened runtime 约束。
+     以后若给启动器加了需要豁免的能力，只在这里加对应的一项，并写清原因。 -->
+<plist version="1.0">
+<dict/>
+</plist>
