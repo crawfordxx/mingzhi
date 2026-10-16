@@ -7,6 +7,7 @@ import { parseProbe } from '../media/probe.js';
 import { planCrop, type CropPlan, type Downgrade, type Point, type Size } from './crop.js';
 import { needsWb, wbFilter, wbGains } from './grade.js';
 import { CUT_SCORE, parseFrameStats, pickSegment, type FrameStat, type Segment } from './segment.js';
+import { verifyOutput } from './verify.js';
 
 /** 项目统一 LUT（scripts/make-lut.mjs 生成，随仓库提供） */
 export const PROJECT_LUT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'lut', 'mingzhi-warm.cube');
@@ -36,6 +37,14 @@ export interface ProcessContext {
   /** 人物背景的平均色（0–1）；传入时素材向它做白平衡微调 */
   whiteBalance?: { r: number; g: number; b: number };
 }
+/** 素材本身不可用（如内部剪辑点过密选不出平稳段）：调用方应换下一条候选，而不是重试 */
+export class UnusableAssetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnusableAssetError';
+  }
+}
+
 export interface ProcessResult { file: string; durationSec?: number; modified: string[]; downgrade?: Downgrade }
 
 /** untagged：视频没标色彩矩阵（按 HD 惯例当 bt709 读，与浏览器播放一致；ffmpeg 默认会按 bt601 读偏色） */
@@ -77,7 +86,27 @@ function geometryFilters(src: SourceInfo, plan: CropPlan): { filters: string[]; 
   };
 }
 
-const seekArgs = (seg?: Segment): string[] => (seg ? ['-ss', seg.start.toFixed(3), '-t', seg.sourceSec.toFixed(3)] : []);
+/** 取段方式：args 放在 -i 前（输入端跳转，快），filters 放在滤镜链最前（逐帧解码裁剪，慢但不依赖关键帧索引） */
+interface Cut { args: string[]; filters: string[] }
+const NO_CUT: Cut = { args: [], filters: [] };
+
+/** 输入端跳转后能否读到画面：单关键帧的 mpegts 等素材跳转后会读空，这时改用 trim 滤镜 */
+async function inputSeekWorks(ffmpeg: string, file: string, seg: Segment): Promise<boolean> {
+  if (seg.start < 0.001) return true;
+  try {
+    const buf = await runBuffer(ffmpeg, ['-v', 'error', '-ss', seg.start.toFixed(3), '-i', file, '-frames:v', '1', '-vf', 'scale=2:2', '-f', 'rawvideo', '-pix_fmt', 'gray', '-']);
+    return buf.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function cutFor(ffmpeg: string, file: string, seg: Segment): Promise<Cut> {
+  const start = seg.start.toFixed(3), dur = seg.sourceSec.toFixed(3);
+  return (await inputSeekWorks(ffmpeg, file, seg))
+    ? { args: ['-ss', start, '-t', dur], filters: [] }
+    : { args: [], filters: [`trim=start=${start}:duration=${dur}`, 'setpts=PTS-STARTPTS'] };
+}
 
 /** 选段分析：缩小后逐帧打印帧差与剪辑点分数 */
 async function analyzeVideo(ffmpeg: string, file: string): Promise<FrameStat[]> {
@@ -87,10 +116,12 @@ async function analyzeVideo(ffmpeg: string, file: string): Promise<FrameStat[]> 
 }
 
 /** 套完几何与 LUT 后的平均色：视频每秒取 2 帧，各缩成 1 像素再平均 */
-async function measureMean(ffmpeg: string, file: string, chain: string[], cwd: string, seg?: Segment): Promise<Rgb> {
-  const vf = [...chain, ...(seg ? ['fps=2'] : []), 'scale=1:1:flags=area'].join(',');
-  const args = ['-v', 'error', ...seekArgs(seg), '-i', file, '-vf', vf, ...(seg ? [] : ['-frames:v', '1']), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'];
-  return meanRgb(await runBuffer(ffmpeg, args, { cwd }));
+async function measureMean(ffmpeg: string, file: string, chain: string[], cwd: string, cut?: Cut): Promise<Rgb> {
+  const vf = [...(cut?.filters ?? []), ...chain, ...(cut ? ['fps=2'] : []), 'scale=1:1:flags=area'].join(',');
+  const args = ['-v', 'error', ...(cut?.args ?? []), '-i', file, '-vf', vf, ...(cut ? [] : ['-frames:v', '1']), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'];
+  const buf = await runBuffer(ffmpeg, args, { cwd });
+  if (buf.length < 3) throw new Error('量平均色时没读到画面');
+  return meanRgb(buf);
 }
 
 function lutFilter(lut: string): string {
@@ -99,20 +130,21 @@ function lutFilter(lut: string): string {
   return `lut3d=file=${name}:interp=tetrahedral`;
 }
 
-/** 输出先写临时文件（保留扩展名让 ffmpeg 认格式），成功后改名 */
-async function encodeTo(out: string, encode: (tmp: string) => Promise<void>): Promise<void> {
+/** 输出先写临时文件（保留扩展名让 ffmpeg 认格式），校验合格后改名；不合格删掉临时文件并抛错 */
+async function encodeTo(out: string, encode: (tmp: string) => Promise<void>, verify: (tmp: string) => Promise<void>): Promise<void> {
   const ext = extname(out);
   const tmp = `${out.slice(0, out.length - ext.length)}.part${ext}`;
   try {
     await encode(tmp);
+    await verify(tmp);
     renameSync(tmp, out);
   } finally {
     rmSync(tmp, { force: true });
   }
 }
 
-const videoArgs = (file: string, vf: string, seg: Segment, out: string): string[] => [
-  '-v', 'error', '-y', ...seekArgs(seg), '-i', file, '-an', '-vf', vf, '-frames:v', String(Math.round(seg.outSec * OUT_FPS)),
+const videoArgs = (file: string, vf: string, seg: Segment, cut: Cut, out: string): string[] => [
+  '-v', 'error', '-y', ...cut.args, '-i', file, '-an', '-sn', '-dn', '-vf', vf, '-frames:v', String(Math.round(seg.outSec * OUT_FPS)),
   '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
   '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-movflags', '+faststart', out,
 ];
@@ -139,29 +171,40 @@ export async function processAsset(input: ProcessInput, out: string, ctx: Proces
   try {
     return await processOnce(input, out, ctx);
   } catch (err) {
-    throw new Error(`素材加工失败（${basename(input.file)}）：${err instanceof Error ? err.message : String(err)}`);
+    const message = `素材加工失败（${basename(input.file)}）：${err instanceof Error ? err.message : String(err)}`;
+    throw err instanceof UnusableAssetError ? new UnusableAssetError(message) : new Error(message);
   }
+}
+
+/** 视频：分析选段；选不出可用段抛 UnusableAssetError */
+async function chooseSegment(ctx: ProcessContext, file: string, src: SourceInfo, wantSec?: number): Promise<{ seg: Segment; cut: Cut }> {
+  const picked = pickSegment(await analyzeVideo(ctx.ffmpeg, file), { fps: src.fps, durationSec: Math.min(src.durationSec, ANALYZE_MAX_SEC), wantSec });
+  if ('unusable' in picked) throw new UnusableAssetError(picked.unusable);
+  return { seg: picked, cut: await cutFor(ctx.ffmpeg, file, picked) };
 }
 
 async function processOnce(input: ProcessInput, out: string, ctx: ProcessContext): Promise<ProcessResult> {
   const file = resolve(input.file);
   const cwd = dirname(resolve(ctx.lut));
-  const src = await probeSource(file, input, ffprobeOf(ctx));
+  const ffprobe = ffprobeOf(ctx);
+  const src = await probeSource(file, input, ffprobe);
   const plan = planCrop(src, input.focal, input.target);
   const geo = geometryFilters(src, plan);
-  const seg = input.kind === 'video'
-    ? pickSegment(await analyzeVideo(ctx.ffmpeg, file), { fps: src.fps, durationSec: Math.min(src.durationSec, ANALYZE_MAX_SEC), wantSec: input.wantSec })
-    : undefined;
+  const video = input.kind === 'video' ? await chooseSegment(ctx, file, src, input.wantSec) : undefined;
   const graded = [...geo.filters, lutFilter(ctx.lut)];
   const ref = ctx.whiteBalance;
-  const gains = ref ? wbGains(await measureMean(ctx.ffmpeg, file, graded, cwd, seg), [ref.r, ref.g, ref.b]) : undefined;
+  const gains = ref ? wbGains(await measureMean(ctx.ffmpeg, file, graded, cwd, video?.cut), [ref.r, ref.g, ref.b]) : undefined;
   const wb = gains && needsWb(gains) ? [wbFilter(gains)] : [];
-  const timing = seg ? timingFilters(src, seg) : { filters: [], modified: [] };
-  const vf = [...graded, ...wb, ...timing.filters].join(',');
-  await encodeTo(resolve(out), (tmp) => run(ctx.ffmpeg, seg ? videoArgs(file, vf, seg, tmp) : photoArgs(file, vf, tmp), { cwd }).then(() => undefined));
+  const timing = video ? timingFilters(src, video.seg) : { filters: [], modified: [] };
+  const vf = [...(video?.cut ?? NO_CUT).filters, ...graded, ...wb, ...timing.filters].join(',');
+  await encodeTo(
+    resolve(out),
+    (tmp) => run(ctx.ffmpeg, video ? videoArgs(file, vf, video.seg, video.cut, tmp) : photoArgs(file, vf, tmp), { cwd }).then(() => undefined),
+    (tmp) => verifyOutput(ffprobe, tmp, { size: plan.output, ...(video ? { outSec: video.seg.outSec } : {}) }),
+  );
   return {
     file: out,
-    ...(seg ? { durationSec: seg.outSec } : {}),
+    ...(video ? { durationSec: video.seg.outSec } : {}),
     modified: [...geo.modified, ...timing.modified, 'lut', ...(wb.length ? ['wb'] : [])],
     ...(plan.downgrade ? { downgrade: plan.downgrade } : {}),
   };

@@ -17,6 +17,10 @@ export const CUT_SCORE = 10;
 export const MIN_OUT_SEC = 2;
 export const MAX_OUT_SEC = 4;
 const DEFAULT_OUT_SEC = 3;
+/** 输出短于这个时长视为没有可用平稳段（再短的 B-roll 一闪而过，只会显得碎） */
+export const MIN_USABLE_SEC = 1.5;
+/** 选不出可用段时的结果：原因写给调用方，换下一条候选 */
+export interface Unusable { unusable: string }
 /** 剪辑点两侧各让开的时长：转场、溶解、压缩残影常拖一两帧 */
 const CUT_MARGIN_SEC = 0.2;
 /** 平稳度代价里运动均值的权重：主要看帧差的波动（抖、急摇），其次才是运动量本身 */
@@ -76,9 +80,10 @@ function bestInShot(stats: FrameStat[], shot: Range, len: number): { start: numb
 /**
  * 选段：避开素材内部剪辑点，在放得下的镜头里选运动最平稳的一段；
  * 输出时长取 wantSec（夹在 2–4 秒，默认 3），60fps 素材源片段取一半（升格后时长不变）。
- * 没有镜头放得下时退而取最长的镜头整段（不超过所需长度），输出相应变短。
+ * 没有镜头放得下时退而取最长的镜头（不超过所需长度），输出相应变短；
+ * 最长镜头的输出也不足 MIN_USABLE_SEC（或让开剪辑点后一个镜头都不剩）时返回 unusable，绝不把剪辑点放回输出。
  */
-export function pickSegment(stats: FrameStat[], opts: { fps: number; durationSec: number; wantSec?: number }): Segment {
+export function pickSegment(stats: FrameStat[], opts: { fps: number; durationSec: number; wantSec?: number }): Segment | Unusable {
   const speed = speedFor(opts.fps);
   const outSec = Math.min(MAX_OUT_SEC, Math.max(MIN_OUT_SEC, opts.wantSec ?? DEFAULT_OUT_SEC));
   const len = outSec * speed;
@@ -88,7 +93,10 @@ export function pickSegment(stats: FrameStat[], opts: { fps: number; durationSec
     const best = picks.reduce((a, b) => (b.cost < a.cost - 1e-9 ? b : a));
     return { start: best.start, sourceSec: len, outSec, speed };
   }
-  const longest = shots.length > 0 ? shots.reduce((a, b) => (b.to - b.from > a.to - a.from ? b : a)) : { from: 0, to: opts.durationSec };
+  const tooChoppy: Unusable = { unusable: `素材剪辑点过密，找不到 ≥${MIN_USABLE_SEC} 秒的连续镜头` };
+  if (shots.length === 0) return tooChoppy;
+  const longest = shots.reduce((a, b) => (b.to - b.from > a.to - a.from ? b : a));
   const sourceSec = Math.min(len, longest.to - longest.from);
+  if (sourceSec / speed < MIN_USABLE_SEC - 1e-6) return tooChoppy;
   return { start: longest.from, sourceSec, outSec: sourceSec / speed, speed };
 }

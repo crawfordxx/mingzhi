@@ -46,6 +46,7 @@ function pipPlan(src: Size, target: Size): CropPlan {
  * 再不行降级为 pip。返回源画面里的裁框与输出尺寸。
  */
 export function planCrop(src: Size, focal: Point, target: Size): CropPlan {
+  if (!Number.isFinite(focal.x) || !Number.isFinite(focal.y)) throw new Error(`主体位置 focal 不是有效数字：${JSON.stringify(focal)}`);
   const full = thirdsCrop(src, focal, target.width / target.height);
   if (covers(full, target)) return { crop: full, output: target };
   if (target.height > target.width) {

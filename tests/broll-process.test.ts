@@ -1,13 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { run, runBuffer } from '../src/media/exec.js';
 import { planCrop, thirdsCrop } from '../src/broll/crop.js';
-import { CUT_SCORE, parseFrameStats, pickSegment, speedFor, type FrameStat } from '../src/broll/segment.js';
+import { CUT_SCORE, MIN_USABLE_SEC, parseFrameStats, pickSegment, speedFor, type FrameStat, type Segment } from '../src/broll/segment.js';
 import { WB_MAX, WB_MIN, wbGains } from '../src/broll/grade.js';
-import { PROJECT_LUT, processAsset } from '../src/broll/process.js';
+import { PROJECT_LUT, UnusableAssetError, processAsset } from '../src/broll/process.js';
+import { verifyOutput } from '../src/broll/verify.js';
 import { grainNoise } from '../render/layers/GrainLayer.js';
 import { renderGrainStills } from './fixtures/grain/render.js';
 
@@ -55,11 +56,24 @@ describe('智能裁切', () => {
     expect(plan.downgrade).toBeUndefined();
     expect(plan.output).toEqual({ width: 540, height: 960 });
   });
-  it('横屏 1080p 做全屏竖屏 1080×1920：降级为 split（能盖住上半屏），不硬放大', () => {
-    const plan = planCrop({ width: 3840, height: 1080 }, { x: 0.5, y: 0.5 }, { width: 1080, height: 1920 });
+  it('生产尺寸：横屏 1080p 做全屏竖屏 1080×1920 降级为 split（裁框宽 606 < 864），不硬放大', () => {
+    const plan = planCrop({ width: 1920, height: 1080 }, { x: 0.5, y: 0.5 }, { width: 1080, height: 1920 });
     expect(plan.downgrade).toBe('split');
     expect(plan.output).toEqual({ width: 1080, height: 960 });
     expect(plan.crop.width / plan.crop.height).toBeCloseTo(1080 / 960, 2);
+  });
+  it('生产尺寸：4K 横屏、1080p 竖屏都能铺满 1080×1920，不降级', () => {
+    expect(planCrop({ width: 3840, height: 2160 }, { x: 0.3, y: 0.5 }, { width: 1080, height: 1920 })).toMatchObject({ output: { width: 1080, height: 1920 } });
+    expect(planCrop({ width: 3840, height: 2160 }, { x: 0.3, y: 0.5 }, { width: 1080, height: 1920 }).downgrade).toBeUndefined();
+    expect(planCrop({ width: 1080, height: 1920 }, { x: 0.5, y: 0.5 }, { width: 1080, height: 1920 }).downgrade).toBeUndefined();
+  });
+  it('超宽全景：竖屏盖不住但上半屏盖得住，降级为 split', () => {
+    const plan = planCrop({ width: 3840, height: 1080 }, { x: 0.5, y: 0.5 }, { width: 1080, height: 1920 });
+    expect(plan.downgrade).toBe('split');
+    expect(plan.crop.width / plan.crop.height).toBeCloseTo(1080 / 960, 2);
+  });
+  it('focal 不是有限数：明确报错', () => {
+    expect(() => planCrop({ width: 1920, height: 1080 }, { x: Number.NaN, y: 0.5 }, { width: 1080, height: 1920 })).toThrow(/focal/);
   });
   it('小图连半屏都盖不住：降级为 pip，保持原比例且不放大', () => {
     const plan = planCrop({ width: 640, height: 480 }, { x: 0.5, y: 0.5 }, { width: 1080, height: 1920 });
@@ -90,7 +104,7 @@ describe('视频选段', () => {
     const stats = [...flat(0, 2, fps), ...flat(2, 4, fps, 2), ...shaky, ...flat(6, 10, fps, 1.5)];
     const cutAt = Math.round(2 * fps);
     stats[cutAt] = { ...stats[cutAt], score: CUT_SCORE + 20 };
-    const seg = pickSegment(stats, { fps, durationSec: 10 });
+    const seg = pickSegment(stats, { fps, durationSec: 10 }) as Segment;
     expect(seg.outSec).toBe(3);
     expect(seg.speed).toBe(1);
     const end = seg.start + seg.sourceSec;
@@ -100,14 +114,27 @@ describe('视频选段', () => {
   it('60fps：源片段取输出时长的一半；期望时长夹在 2–4 秒', () => {
     const stats = flat(0, 8, 60);
     expect(pickSegment(stats, { fps: 60, durationSec: 8, wantSec: 3 })).toMatchObject({ speed: 0.5, sourceSec: 1.5, outSec: 3 });
-    expect(pickSegment(stats, { fps: 60, durationSec: 8, wantSec: 9 }).outSec).toBe(4);
-    expect(pickSegment(stats, { fps: 60, durationSec: 8, wantSec: 1 }).outSec).toBe(2);
+    expect(pickSegment(stats, { fps: 60, durationSec: 8, wantSec: 9 })).toMatchObject({ outSec: 4 });
+    expect(pickSegment(stats, { fps: 60, durationSec: 8, wantSec: 1 })).toMatchObject({ outSec: 2 });
   });
   it('素材比期望短：整段可用部分全取，输出相应变短', () => {
-    const seg = pickSegment(flat(0, 1.6, 30), { fps: 30, durationSec: 1.6 });
+    const seg = pickSegment(flat(0, 1.6, 30), { fps: 30, durationSec: 1.6 }) as Segment;
     expect(seg.start).toBe(0);
     expect(seg.sourceSec).toBeCloseTo(1.6, 1);
     expect(seg.outSec).toBeCloseTo(1.6, 1);
+  });
+  const choppy = (every: number): FrameStat[] => flat(0, 10, 30).map((f, i) => ({ ...f, score: i > 0 && i % Math.round(every * 30) === 0 ? CUT_SCORE + 30 : 0 }));
+  it('每 0.5 秒一个剪辑点：没有可用平稳段，返回 unusable，不产出碎片', () => {
+    const seg = pickSegment(choppy(0.5), { fps: 30, durationSec: 10 });
+    expect(seg).toEqual({ unusable: expect.stringMatching(/剪辑点过密/) });
+  });
+  it('每 0.2 秒一个剪辑点：返回 unusable，不把剪辑点放回输出', () => {
+    expect(pickSegment(choppy(0.2), { fps: 30, durationSec: 10 })).toEqual({ unusable: expect.stringMatching(/剪辑点过密/) });
+  });
+  it(`镜头最长不足 ${MIN_USABLE_SEC} 秒输出时长：unusable；刚好够则可用`, () => {
+    expect('unusable' in pickSegment(flat(0, 1.2, 30), { fps: 30, durationSec: 1.2 })).toBe(true);
+    const ok = pickSegment(flat(0, 1.6, 30), { fps: 30, durationSec: 1.6 }) as Segment;
+    expect(ok.outSec).toBeGreaterThanOrEqual(MIN_USABLE_SEC);
   });
   it('分析结果为空：不会把整条素材当成一段', () => {
     expect(pickSegment([], { fps: 30, durationSec: 40 })).toMatchObject({ start: 0, sourceSec: 3, outSec: 3 });
@@ -136,7 +163,7 @@ describe('项目 LUT', () => {
     const patches = [[255, 0, 0], [0, 200, 0], [0, 0, 255], [255, 255, 255], [0, 0, 0], [40, 40, 40], [220, 220, 220], [128, 128, 128], [217, 166, 140]];
     const input = join(dir, 'patches.rgb');
     writeFileSync(input, Buffer.from(patches.flat()));
-    const out = await runBuffer(cfg.ffmpeg, ['-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${patches.length}x1`, '-i', input, '-vf', `lut3d=file=${PROJECT_LUT}:interp=tetrahedral`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+    const out = await runBuffer(cfg.ffmpeg, ['-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${patches.length}x1`, '-i', input, '-vf', `lut3d=file=${basename(PROJECT_LUT)}:interp=tetrahedral`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { cwd: dirname(PROJECT_LUT) });
     const px = (i: number): number[] => [out[i * 3], out[i * 3 + 1], out[i * 3 + 2]];
     const spread = (c: number[]): number => Math.max(...c) - Math.min(...c);
     for (let i = 0; i < 3; i += 1) expect(spread(px(i))).toBeLessThan(spread(patches[i]) * 0.75);
@@ -193,6 +220,45 @@ describe('processAsset：真实 ffmpeg 处理小样', () => {
     expect(res.modified).toEqual(expect.arrayContaining(['crop', 'lut']));
     expect(await probeOut(out)).toMatchObject({ width: 1080, height: 1920 });
   });
+  it('生产尺寸：4K 横屏视频裁成 1080×1920 全屏，不降级', async () => {
+    const src = join(dir, 'uhd.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=3840x2160:r=30:d=3', '-c:v', 'libx264', '-preset', 'ultrafast', src]);
+    const out = join(dir, 'uhd-out.mp4');
+    const res = await processAsset({ file: src, kind: 'video', focal: { x: 0.6, y: 0.5 }, target: { width: 1080, height: 1920 }, wantSec: 2 }, out, ctx);
+    expect(res.downgrade).toBeUndefined();
+    expect(await probeOut(out)).toMatchObject({ width: 1080, height: 1920, codec: 'h264' });
+  }, 120_000);
+  it('剪辑点过密的视频：抛 UnusableAssetError，不留输出文件', async () => {
+    const src = join(dir, 'choppy.mp4');
+    const colors = ['red', 'blue', 'green', 'white', 'black', 'yellow', 'purple', 'orange'];
+    const inputs = colors.flatMap((c) => ['-f', 'lavfi', '-i', `color=c=${c}:s=320x240:r=30:d=0.5`]);
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', ...inputs, '-filter_complex', `${colors.map((_, i) => `[${i}]`).join('')}concat=n=${colors.length}:v=1:a=0[v]`, '-map', '[v]', '-c:v', 'libx264', '-preset', 'ultrafast', src]);
+    const out = join(dir, 'choppy-out.mp4');
+    await expect(processAsset({ file: src, kind: 'video', focal: { x: 0.5, y: 0.5 }, target: { width: 240, height: 240 } }, out, ctx)).rejects.toBeInstanceOf(UnusableAssetError);
+    expect(existsSync(out)).toBe(false);
+  });
+  it('单关键帧 mpegts（起始时间 6.4 秒，输入端跳转会读空）：仍产出完整视频', async () => {
+    const src = join(dir, 'onekey.ts');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'smptehdbars=s=640x360:r=30:d=1.2', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30:d=4',
+      '-filter_complex', '[0][1]concat=n=2:v=1:a=0[v]', '-map', '[v]', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '1000', '-output_ts_offset', '5', '-f', 'mpegts', src]);
+    const out = join(dir, 'onekey-out.mp4');
+    const res = await processAsset({ file: src, kind: 'video', focal: { x: 0.5, y: 0.5 }, target: { width: 320, height: 180 }, wantSec: 2 }, out, ctx);
+    const { stdout } = await run(cfg.ffprobe, ['-v', 'error', '-count_packets', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', out]);
+    expect(Number(stdout.trim())).toBe(60);
+    expect(res.durationSec).toBe(2);
+  }, 120_000);
+  it('产物校验：输出为空、帧数不足、尺寸不符都报错', async () => {
+    const src = join(dir, 'onekey2.ts');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30:d=4', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '1000', '-output_ts_offset', '5', '-f', 'mpegts', src]);
+    const empty = join(dir, 'empty.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-ss', '1', '-t', '2', '-i', src, '-frames:v', '60', '-c:v', 'libx264', empty]);
+    await expect(verifyOutput(cfg.ffprobe, empty, { outSec: 2 })).rejects.toThrow(/输出为空|没有视频/);
+    const short = join(dir, 'short.mp4');
+    await run(cfg.ffmpeg, ['-v', 'error', '-y', '-i', src, '-frames:v', '30', '-c:v', 'libx264', short]);
+    await expect(verifyOutput(cfg.ffprobe, short, { outSec: 2 })).rejects.toThrow(/帧数/);
+    await expect(verifyOutput(cfg.ffprobe, short, { outSec: 1 })).resolves.toBeUndefined();
+    await expect(verifyOutput(cfg.ffprobe, short, { size: { width: 320, height: 180 } })).rejects.toThrow(/尺寸/);
+  }, 120_000);
   it('坏文件：报错带上素材文件名', async () => {
     const bad = join(dir, 'broken.mp4');
     writeFileSync(bad, 'not a video');
