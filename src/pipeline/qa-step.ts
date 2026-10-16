@@ -9,6 +9,7 @@ import { hardChecks as realHardChecks, type HardCheck } from '../qa/hard.js';
 import { defaultPalette } from '../qa/palette.js';
 import { qaCards as realQaCards, type CardQaEntry, type QaCardsOptions } from '../qa/visual.js';
 import { CANVAS, type Storyboard } from '../storyboard/schema.js';
+import { captionCenterY, visualLayout } from '../compose/layout.js';
 import type { ProjectFile, ProjectPatch } from './project.js';
 
 /** 自检结果：卡片视觉自检报告与成片硬检查（跳过自检时两者都为空） */
@@ -38,10 +39,10 @@ export const hardSummary = (hard: HardCheck[]): string => {
 export const qaSummary = (qa: PipelineQa): string =>
   `${cardsSummary(qa.cards)} · ${qa.hard.length === 0 ? '成片检查未完成' : `成片检查 ${qa.hard.length - failing(qa.hard).length}/${qa.hard.length} 通过`}`;
 
-/** 成片里字幕实际用到的竖向中心：分屏镜头压在分界线上，全屏镜头用字幕层的常量 */
+/** 成片里字幕实际用到的竖向中心：分屏镜头压在分界线上，其余版式（全屏、全屏插入、画中画、浮层）用字幕层的常量 */
 export function captionCentersOf(storyboard: Storyboard): number[] {
-  const layouts = new Set(storyboard.shots.map((s) => s.layout));
-  return [...(layouts.has('split') ? [CANVAS.seam] : []), ...(layouts.has('full') ? [FULL_CAPTION_Y] : [])];
+  const ys = new Set(storyboard.shots.map((s) => captionCenterY(visualLayout(s))));
+  return [CANVAS.seam, FULL_CAPTION_Y].filter((y) => ys.has(y));
 }
 
 export interface QaCardsContext {

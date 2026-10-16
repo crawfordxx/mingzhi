@@ -1,10 +1,9 @@
 import React from 'react';
 import { Img, staticFile } from 'remotion';
-import { captionAt, shotAt } from '../../src/compose/layout.js';
+import { captionAt, captionCenterY, shotAt, visualLayout } from '../../src/compose/layout.js';
 import type { Shot } from '../../src/storyboard/schema.js';
 import type { TimedCaption } from '../../src/captions/lines.js';
-import { CANVAS } from '../../src/storyboard/schema.js';
-import { CAPTION_SIDE_MARGIN, CAPTION_STYLES, FULL_CAPTION_Y, fitCaptionSize, splitHighlight, type CaptionStyle, type CaptionStyleId } from '../../src/captions/styles.js';
+import { CAPTION_SIDE_MARGIN, CAPTION_STYLES, fitCaptionSize, splitHighlight, type CaptionStyle, type CaptionStyleId } from '../../src/captions/styles.js';
 import { THEME } from '../theme.js';
 import { useCaptionFont } from '../fonts.js';
 
@@ -21,11 +20,12 @@ export const CaptionText: React.FC<{ text: string; style: CaptionStyle }> = ({ t
   );
 };
 
+/** 字幕按声音时间显示；位置跟随画面版式（shots 为画面时间轴：J-cut 的前 2 帧仍按上一个镜头的位置） */
 export const CaptionLayer: React.FC<{ captions: TimedCaption[]; shots: Shot[]; sec: number; styleId: CaptionStyleId }> = ({ captions, shots, sec, styleId }) => {
   const cap = captionAt(captions, sec);
   if (!cap) return null;
-  const layout = shotAt(shots, sec)?.shot.layout ?? 'full';
-  const centerY = layout === 'split' ? CANVAS.seam : FULL_CAPTION_Y;
+  const shot = shotAt(shots, sec)?.shot;
+  const centerY = captionCenterY(shot ? visualLayout(shot) : 'full');
   return (
     <div style={{ position: 'absolute', left: CAPTION_SIDE_MARGIN, right: CAPTION_SIDE_MARGIN, top: centerY, transform: 'translateY(-50%)', textAlign: 'center' }}>
       <CaptionText text={cap.text} style={CAPTION_STYLES[styleId]} />

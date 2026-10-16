@@ -82,23 +82,51 @@ export const Reveal: React.FC<{ p: number; dx?: number; dy?: number; from?: numb
 
 // ---------- 共用小部件 ----------
 
-/** 安全区容器：内容贴安全区顶部排（下方留给字幕）；scale < 1 时以顶边为基准整体缩小 */
-export const SafeArea: React.FC<{ scale?: number; children: React.ReactNode }> = ({ scale = 1, children }) => (
-  <div style={{ position: 'absolute', left: SAFE.side, right: SAFE.side, top: SAFE.top, height: SAFE_H, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', fontFamily: THEME.font, color: THEME.ink }}>
-    <div style={{ transform: `scale(${scale})`, transformOrigin: 'top center' }}>{children}</div>
-  </div>
-);
+/**
+ * 卡片画在什么底上：paper 米色卡片区（默认）；image 分屏上半屏的素材图上（内容贴安全区底部、压在渐变暗部，白卡变磨砂玻璃）；
+ * float 人物全屏上的顶部浮层（贴顶、白卡变磨砂玻璃）。玻璃卡内部重新回到 paper（深色字照常可读）
+ */
+export type Surface = 'paper' | 'image' | 'float';
+export const SurfaceContext = React.createContext<Surface>('paper');
 
-/** 白色圆角卡片 */
-export const CardFrame: React.FC<{ padding?: string; style?: React.CSSProperties; children: React.ReactNode }> = ({ padding = '44px 48px', style, children }) => (
-  <div style={{ background: THEME.card, borderRadius: THEME.radius, boxShadow: THEME.shadow, padding, ...style }}>{children}</div>
-);
+/** 磨砂玻璃卡：浅暖白半透明 + 背景模糊 + 内描边高光 + 深一点的投影（压在图像或人物上） */
+export const GLASS: React.CSSProperties = {
+  background: 'rgba(250, 248, 244, 0.8)', backdropFilter: 'blur(28px) saturate(1.3)', WebkitBackdropFilter: 'blur(28px) saturate(1.3)',
+  boxShadow: '0 24px 64px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.12), inset 0 0 0 1.5px rgba(255, 255, 255, 0.55)',
+};
 
-/** 面包屑：橙点 + 小字 */
-export const Crumb: React.FC<{ text: string; size?: number; maxWidth?: number; color?: string }> = ({ text, size = 26, maxWidth = CONTENT_W, color = THEME.sub }) => {
+/** 安全区容器：纸面与浮层时内容贴安全区顶部排（下方留给字幕），图上时贴底部排；scale < 1 时以贴边为基准整体缩小；glass 时在图上/浮层里给无卡框的模板套一层玻璃卡 */
+export const SafeArea: React.FC<{ scale?: number; glass?: boolean; children: React.ReactNode }> = ({ scale = 1, glass = false, children }) => {
+  const surface = React.useContext(SurfaceContext);
+  const bottom = surface === 'image';
+  const body = glass && surface !== 'paper'
+    ? <div style={{ ...GLASS, borderRadius: THEME.radius, padding: '40px 44px 44px' }}><SurfaceContext.Provider value="paper">{children}</SurfaceContext.Provider></div>
+    : children;
+  return (
+    <div style={{ position: 'absolute', left: SAFE.side, right: SAFE.side, top: SAFE.top, height: SAFE_H, display: 'flex', flexDirection: 'column', justifyContent: bottom ? 'flex-end' : 'flex-start', fontFamily: THEME.font, color: THEME.ink }}>
+      <div style={{ transform: `scale(${scale})`, transformOrigin: bottom ? 'bottom center' : 'top center' }}>{body}</div>
+    </div>
+  );
+};
+
+/** 白色圆角卡片；在图上或浮层里变成磨砂玻璃卡 */
+export const CardFrame: React.FC<{ padding?: string; style?: React.CSSProperties; children: React.ReactNode }> = ({ padding = '44px 48px', style, children }) => {
+  const surface = React.useContext(SurfaceContext);
+  const skin: React.CSSProperties = surface === 'paper' ? { background: THEME.card, boxShadow: THEME.shadow } : GLASS;
+  return (
+    <div style={{ ...skin, borderRadius: THEME.radius, padding, ...style }}>
+      <SurfaceContext.Provider value="paper">{children}</SurfaceContext.Provider>
+    </div>
+  );
+};
+
+/** 面包屑：橙点 + 小字；直接压在图上或人物上时字改为近白（不给 color 时） */
+export const Crumb: React.FC<{ text: string; size?: number; maxWidth?: number; color?: string }> = ({ text, size = 26, maxWidth = CONTENT_W, color }) => {
+  const surface = React.useContext(SurfaceContext);
+  const ink = color ?? (surface === 'paper' ? THEME.sub : 'rgba(255, 255, 255, 0.92)');
   const px = fitFontSize(text, maxWidth - 30, size, 18);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: px, fontWeight: 600, color, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: px, fontWeight: 600, color: ink, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
       <span style={{ width: 11, height: 11, borderRadius: 6, background: THEME.crumbDot, flex: 'none' }} />
       <span>{text}</span>
     </div>

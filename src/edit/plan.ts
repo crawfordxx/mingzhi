@@ -33,7 +33,7 @@ const SYSTEM_PROMPT = `你是口播短视频的修改助手。用户在工作台
 - {"type":"setCoverStyle","id":"封面风格id"}（只重做封面）
 - {"type":"setBgm","bgm":"none | auto | chill | tech | upbeat | 曲目id"}
 - {"type":"replaceCard","shotIndex":镜头序号,"card":{"template":"模板名","props":{…}}}
-- {"type":"setLayout","shotIndex":镜头序号,"layout":"split|full"}（改全屏会去掉卡片）
+- {"type":"setLayout","shotIndex":镜头序号,"layout":"split|full|broll|pip|overlay"}（split 上卡下人；full 人物全屏，会去掉卡片；broll 素材全屏插入、pip 素材全屏加人物小窗，都只能用于标了「带素材」的镜头，会去掉卡片；overlay 人物全屏加顶部浮层卡，要有卡片或素材；cta 只能 full）
 - {"type":"regenerateVisual","shotIndex":镜头序号,"visual":{"source":"screenshot|generate|video",…}}（hook 可 generate/video，photo 可 screenshot/generate，browser 只能 screenshot；生图与视频提示词用英文）
 - {"type":"editCaption","index":字幕序号,"text":"新文字"}
 - {"type":"pace","direction":"tighter|looser"}（整体剪得更紧凑 / 更宽松）

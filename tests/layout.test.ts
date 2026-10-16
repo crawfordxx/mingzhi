@@ -55,3 +55,148 @@ describe('blendTransform / captionAt / shotAt', () => {
     expect(shotAt(shots, 9)).toBeNull();
   });
 });
+
+// ---------- P7：新版式（broll / pip / overlay）、J-cut、Ken Burns ----------
+import { CANVAS, ShotSchema, type Broll, type Shot } from '../src/storyboard/schema.js';
+import { FULL_CAPTION_Y } from '../src/captions/styles.js';
+import { J_CUT_FRAMES, KB_PUSH, PIP, captionCenterY, kenBurnsAt, kenBurnsRects, visualLayout, visualShots, type Rect } from '../src/compose/layout.js';
+
+const BROLL: Broll = { file: 'broll/a.jpg', kind: 'photo', focal: { x: 0.5, y: 0.5 } };
+const inside = (r: Rect): boolean => r.x >= -1e-9 && r.y >= -1e-9 && r.x + r.w <= 1 + 1e-9 && r.y + r.h <= 1 + 1e-9;
+const center = (r: Rect): { x: number; y: number } => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+const dist = (a: { x: number; y: number }, b: { x: number; y: number }): number => Math.hypot(a.x - b.x, a.y - b.y);
+
+describe('分镜模式：新版式与 broll 字段', () => {
+  it('旧数据（无 broll、split/full）照常通过且不多出字段', () => {
+    const p = ShotSchema.safeParse({ start: 0, end: 2, layout: 'split', card: { template: 'title', props: { title: '标题' } } });
+    expect(p.success && !('broll' in p.data)).toBe(true);
+  });
+  it('broll/pip/overlay 与 broll 字段（含 Ken Burns 裁框）可通过', () => {
+    for (const layout of ['broll', 'pip', 'overlay'] as const) {
+      expect(ShotSchema.safeParse({ start: 0, end: 2, layout, broll: { ...BROLL, kenBurns: { from: { x: 0, y: 0, w: 1, h: 1 }, to: { x: 0.05, y: 0.05, w: 0.9, h: 0.9 } } } }).success).toBe(true);
+    }
+  });
+  it('焦点越界、裁框越界或与画面不同比例时拒绝', () => {
+    const bad = (broll: unknown): boolean => ShotSchema.safeParse({ start: 0, end: 2, layout: 'broll', broll }).success;
+    expect(bad({ ...BROLL, focal: { x: 1.2, y: 0.5 } })).toBe(false);
+    expect(bad({ ...BROLL, kenBurns: { from: { x: 0.2, y: 0, w: 0.9, h: 0.9 }, to: { x: 0, y: 0, w: 1, h: 1 } } })).toBe(false);
+    expect(bad({ ...BROLL, kenBurns: { from: { x: 0, y: 0, w: 0.9, h: 0.6 }, to: { x: 0, y: 0, w: 1, h: 1 } } })).toBe(false);
+    expect(bad({ ...BROLL, kind: 'gif' })).toBe(false);
+  });
+});
+
+describe('visualLayout：缺素材或缺内容时退回全屏', () => {
+  it('broll / pip 没有素材、overlay 既无卡片也无素材时按 full；其余原样', () => {
+    expect(visualLayout({ start: 0, end: 1, layout: 'broll' })).toBe('full');
+    expect(visualLayout({ start: 0, end: 1, layout: 'pip' })).toBe('full');
+    expect(visualLayout({ start: 0, end: 1, layout: 'overlay' })).toBe('full');
+    expect(visualLayout({ start: 0, end: 1, layout: 'broll', broll: BROLL })).toBe('broll');
+    expect(visualLayout({ start: 0, end: 1, layout: 'pip', broll: BROLL })).toBe('pip');
+    expect(visualLayout({ start: 0, end: 1, layout: 'overlay', broll: BROLL })).toBe('overlay');
+    expect(visualLayout({ start: 0, end: 1, layout: 'overlay', card: { template: 'title', props: { title: 't' } } })).toBe('overlay');
+    expect(visualLayout({ start: 0, end: 1, layout: 'split' })).toBe('split');
+  });
+});
+
+describe('字幕中心 y', () => {
+  it('分屏压在分界线上；全屏、全屏插入、画中画、浮层都在 y≈1400', () => {
+    expect(captionCenterY('split')).toBe(CANVAS.seam);
+    for (const l of ['full', 'broll', 'pip', 'overlay'] as const) expect(captionCenterY(l)).toBe(FULL_CAPTION_Y);
+    expect(FULL_CAPTION_Y).toBe(1400);
+  });
+});
+
+describe('J-cut：全屏插入的画面比声音晚 2 帧切入', () => {
+  const f = J_CUT_FRAMES / CANVAS.fps;
+  it('broll 镜头起点推后 2 帧，前一个镜头的画面延长 2 帧；其他镜头不变', () => {
+    const shots: Shot[] = [{ start: 0, end: 2, layout: 'full' }, { start: 2, end: 4, layout: 'broll', broll: BROLL }, { start: 4, end: 6, layout: 'pip', broll: BROLL }];
+    const vis = visualShots(shots);
+    expect(J_CUT_FRAMES).toBe(2);
+    expect(vis[0]).toEqual({ ...shots[0], end: 2 + f });
+    expect(vis[1]).toEqual({ ...shots[1], start: 2 + f });
+    expect(vis[2]).toEqual(shots[2]);
+  });
+  it('首个镜头、没有素材的 broll、不足 3 帧的镜头不做 J-cut；不改动入参', () => {
+    const first: Shot[] = [{ start: 0, end: 2, layout: 'broll', broll: BROLL }];
+    expect(visualShots(first)).toEqual(first);
+    const bare: Shot[] = [{ start: 0, end: 2, layout: 'full' }, { start: 2, end: 4, layout: 'broll' }];
+    expect(visualShots(bare)).toEqual(bare);
+    const tiny: Shot[] = [{ start: 0, end: 2, layout: 'full' }, { start: 2, end: 2 + f, layout: 'broll', broll: BROLL }];
+    expect(visualShots(tiny)).toEqual(tiny);
+    const frozen = Object.freeze([Object.freeze({ start: 0, end: 2, layout: 'full' as const }), Object.freeze({ start: 2, end: 4, layout: 'broll' as const, broll: BROLL })]);
+    expect(() => visualShots(frozen as Shot[])).not.toThrow();
+  });
+});
+
+describe('画中画人像', () => {
+  it('窗口 360×480，右缘对齐字幕安全线（x=960），底边在 2 行字幕上方', () => {
+    expect([PIP.w, PIP.h]).toEqual([360, 480]);
+    expect(PIP.x + PIP.w).toBe(960);
+    expect(PIP.y + PIP.h).toBeLessThanOrEqual(FULL_CAPTION_Y - 72 - 24);
+    expect(PIP.y).toBeGreaterThan(CANVAS.seam - 200);
+  });
+  it('竖屏原片：铺满窗口不露底，头顶落在窗口上方约 10% 处，窗口带圆角', () => {
+    const t = personTransform('pip', { top: 0.12, bottom: 1, left: 0.3, right: 0.7 }, 1080, 1920);
+    expect(t.clip).toEqual({ x: PIP.x, y: PIP.y, w: PIP.w, h: PIP.h, radius: PIP.radius });
+    const w = 1080 * t.scale;
+    const h = 1920 * t.scale;
+    expect(t.x).toBeLessThanOrEqual(PIP.x);
+    expect(t.x + w).toBeGreaterThanOrEqual(PIP.x + PIP.w);
+    expect(t.y).toBeLessThanOrEqual(PIP.y);
+    expect(t.y + h).toBeGreaterThanOrEqual(PIP.y + PIP.h);
+    expect(t.y + 0.12 * h - PIP.y).toBeCloseTo(PIP.h * 0.1, 0);
+  });
+  it('横屏原片、人物在最左：仍铺满窗口（x 夹住不露底）', () => {
+    const t = personTransform('pip', { top: 0.1, bottom: 1, left: 0, right: 0.1 }, 1280, 720);
+    expect(t.x).toBe(PIP.x);
+    expect(t.x + 1280 * t.scale).toBeGreaterThanOrEqual(PIP.x + PIP.w);
+    expect(t.y + 720 * t.scale).toBeGreaterThanOrEqual(PIP.y + PIP.h);
+  });
+  it('全屏、浮层、全屏插入的人像与 full 相同；全屏/分屏不带窗口字段（旧行为不变）', () => {
+    const full = personTransform('full', null, 1080, 1920);
+    expect(personTransform('overlay', null, 1080, 1920)).toEqual(full);
+    expect(personTransform('broll', null, 1080, 1920)).toEqual(full);
+    expect('clip' in full).toBe(false);
+    expect('clip' in personTransform('split', null, 1080, 1920)).toBe(false);
+  });
+  it('过渡插值：全屏 → 画中画的窗口从整张画布连续收拢到小窗', () => {
+    const a = personTransform('full', null, 1080, 1920);
+    const b = personTransform('pip', null, 1080, 1920);
+    const mid = blendTransform(a, b, 0.5);
+    expect(mid.clip).toEqual({ x: PIP.x / 2, y: PIP.y / 2, w: (1080 + PIP.w) / 2, h: (1920 + PIP.h) / 2, radius: PIP.radius / 2 });
+    expect(blendTransform(a, b, 1)).toEqual(b);
+    expect(blendTransform(a, a, 0.3)).toEqual(a);
+  });
+});
+
+describe('Ken Burns 起止裁框', () => {
+  it('焦点居中：同比例裁框、都在画面内，推近 8–12%', () => {
+    const kb = kenBurnsRects({ x: 0.5, y: 0.5 });
+    for (const r of [kb.from, kb.to]) {
+      expect(inside(r)).toBe(true);
+      expect(r.w).toBeCloseTo(r.h, 9);
+    }
+    const push = kb.from.w / kb.to.w - 1;
+    expect(push).toBeGreaterThanOrEqual(0.08);
+    expect(push).toBeLessThanOrEqual(0.12);
+    expect(KB_PUSH).toBeCloseTo(push, 9);
+  });
+  it('焦点在角落：推向主体（终点中心比起点更靠近焦点），裁框仍不出画', () => {
+    for (const focal of [{ x: 0.9, y: 0.15 }, { x: 0.05, y: 0.95 }, { x: 0.3, y: 0.6 }]) {
+      const kb = kenBurnsRects(focal);
+      expect(inside(kb.from) && inside(kb.to)).toBe(true);
+      expect(dist(center(kb.to), focal)).toBeLessThan(dist(center(kb.from), focal));
+    }
+  });
+  it('kenBurnsAt：两端等于起止裁框，中间 inOut 缓动（开头慢）', () => {
+    const kb = kenBurnsRects({ x: 0.7, y: 0.4 });
+    expect(kenBurnsAt(kb, 0)).toEqual(kb.from);
+    expect(kenBurnsAt(kb, 1)).toEqual(kb.to);
+    const early = kenBurnsAt(kb, 0.1);
+    expect(Math.abs(early.w - kb.from.w)).toBeLessThan(Math.abs(kb.to.w - kb.from.w) * 0.1);
+    const mid = kenBurnsAt(kb, 0.5);
+    expect(mid.w).toBeCloseTo((kb.from.w + kb.to.w) / 2, 6);
+    expect(kenBurnsAt(kb, -1)).toEqual(kb.from);
+    expect(kenBurnsAt(kb, 2)).toEqual(kb.to);
+  });
+});

@@ -151,6 +151,15 @@ describe('按镜头时长收拢节奏与版面估算', () => {
     expect(ctaColor('转发', 0)).toMatch(/^#[0-9A-F]{6}$/i);
     expect(ctaColor('转发', 0)).not.toBe(ctaColor('评论', 1));
   });
+  it('CardLayer：新版式——浮层有卡片或素材时画，全屏插入与画中画不画；分屏有素材时即使无卡片也画素材', () => {
+    const B = { file: 'broll/a.jpg', kind: 'photo' as const, focal: { x: 0.5, y: 0.5 } };
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'overlay', card: SAMPLES[1] }], sec: 1 })).not.toBeNull();
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'overlay', broll: B }], sec: 1 })).not.toBeNull();
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'overlay' }], sec: 1 })).toBeNull();
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'broll', broll: B, card: SAMPLES[1] }], sec: 1 })).toBeNull();
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'pip', broll: B, card: SAMPLES[1] }], sec: 1 })).toBeNull();
+    expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'split', broll: B }], sec: 1 })).not.toBeNull();
+  });
   it('CardLayer：全屏镜头只叠加 cta', () => {
     const cta: CardSpec = { template: 'cta', props: { actions: ['关注'] } };
     expect(CardLayer({ shots: [{ start: 0, end: 2, layout: 'full' }], sec: 1 })).toBeNull();

@@ -1,5 +1,6 @@
 import type { Mood } from '../assets/catalog.js';
 import { unifyListNumbering } from './numbering.js';
+import { visualLayout } from '../compose/layout.js';
 import { CANVAS, CoverTitleSchema, DEFAULT_MOOD, HOOK_WINDOW_SEC, MAX_SHOT_SEC, MIN_SHOT_SEC, MOODS, ShotSchema, type CardSpec, type CoverTitle, type Shot, type Storyboard } from './schema.js';
 
 export interface NormalizeResult {
@@ -20,6 +21,8 @@ const CTA_MIN_SEC = 2;
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const countCards = (shots: Shot[]): number => shots.filter((s) => s.card !== undefined).length;
 const plain = (s: Shot): Shot => ({ start: s.start, end: s.end, layout: 'full' });
+/** 画面上只有人物全屏的镜头（无卡片，也不显示 B-roll 素材）：可以互相合并 */
+const isPlain = (s: Shot): boolean => !s.card && visualLayout(s) === 'full';
 
 function omitKey<P extends object, K extends keyof P>(obj: P, key: K): Omit<P, K> {
   return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key)) as Omit<P, K>;
@@ -61,9 +64,9 @@ function sanitizeCard(card: CardSpec, files: Set<string>): CardSpec | null {
   }
 }
 
-/** 无卡片的 split 镜头变为全屏；full 镜头只有 cta 能显示卡片，带其他卡片的改为 split（保留内容，否则会为看不见的卡片白取素材）；卡片不可用则返回 null（镜头整体丢弃） */
+/** 无卡片的镜头除非有素材可显示（全屏插入、画中画、浮层、上半屏铺素材）否则变为全屏；full 镜头只有 cta 能显示卡片，带其他卡片的改为 split（保留内容，否则会为看不见的卡片白取素材）；卡片不可用则返回 null（镜头整体丢弃） */
 function sanitizeShot(shot: Shot, files: Set<string>): Shot | null {
-  if (!shot.card) return { ...shot, layout: 'full' };
+  if (!shot.card) return shot.broll && visualLayout(shot) !== 'full' ? shot : { ...shot, layout: 'full' };
   const card = sanitizeCard(shot.card, files);
   if (!card) return null;
   return { ...shot, card, layout: shot.layout === 'full' && card.template !== 'cta' ? 'split' : shot.layout };
@@ -149,11 +152,11 @@ function mergeShort(shots: Shot[]): Shot[] {
   }, []);
 }
 
-/** 相邻的无卡片全屏镜头合并成一个 */
+/** 相邻的纯人物全屏镜头合并成一个（带素材的镜头不参与） */
 function mergePlain(shots: Shot[]): Shot[] {
   return shots.reduce<Shot[]>((acc, s) => {
     const last = acc[acc.length - 1];
-    return last && !last.card && !s.card ? [...acc.slice(0, -1), { ...last, end: s.end }] : [...acc, s];
+    return last && isPlain(last) && isPlain(s) ? [...acc.slice(0, -1), { ...last, end: s.end }] : [...acc, s];
   }, []);
 }
 

@@ -52,8 +52,32 @@ export const CardSpecSchema = z.discriminatedUnion('template', [
 ]);
 export type CardSpec = z.infer<typeof CardSpecSchema>;
 
-export const ShotSchema = z.object({ start: z.number().finite(), end: z.number().finite(), layout: z.enum(['split', 'full']), card: CardSpecSchema.optional() });
-export type Shot = { start: number; end: number; layout: 'split' | 'full'; card?: CardSpec };
+/**
+ * 镜头版式：split 上卡下人、full 人物全屏、broll 素材全屏插入（人声继续）、pip 素材全屏 + 人物画中画、overlay 人物全屏 + 顶部浮层卡。
+ * broll/pip/overlay 由 B-roll 编排填写，缺素材时渲染层按 full 处理（见 compose/layout.ts 的 visualLayout）
+ */
+export const LAYOUTS = ['split', 'full', 'broll', 'pip', 'overlay'] as const;
+export type Layout = (typeof LAYOUTS)[number];
+
+const unit = z.number().min(0).max(1);
+/** 裁框容差：浮点误差内视为合法 */
+const RECT_EPS = 1e-6;
+/** Ken Burns 裁框：相对素材铺满画面后的归一化坐标（0–1）；w 必须等于 h（与画面同比例），且不出画 */
+const RectSchema = z.object({ x: unit, y: unit, w: z.number().gt(0).max(1), h: z.number().gt(0).max(1) })
+  .refine((r) => Math.abs(r.w - r.h) <= RECT_EPS, '裁框须与画面同比例（w 等于 h）')
+  .refine((r) => r.x + r.w <= 1 + RECT_EPS && r.y + r.h <= 1 + RECT_EPS, '裁框超出画面');
+export type Rect = z.infer<typeof RectSchema>;
+/** 镜头素材：file 相对工作目录；focal 为主体位置（0–1）；kenBurns 省略时由 focal 计算（只用于静图） */
+export const BrollSchema = z.object({
+  file: z.string().trim().min(1),
+  kind: z.enum(['video', 'photo']),
+  focal: z.object({ x: unit, y: unit }),
+  kenBurns: z.object({ from: RectSchema, to: RectSchema }).optional(),
+});
+export type Broll = z.infer<typeof BrollSchema>;
+
+export const ShotSchema = z.object({ start: z.number().finite(), end: z.number().finite(), layout: z.enum(LAYOUTS), card: CardSpecSchema.optional(), broll: BrollSchema.optional() });
+export type Shot = { start: number; end: number; layout: Layout; card?: CardSpec; broll?: Broll };
 /** 背景乐情绪；模型漏写或写错时按 chill */
 export const MOODS = ['chill', 'tech', 'upbeat'] as const satisfies readonly Mood[];
 export const DEFAULT_MOOD: Mood = 'chill';

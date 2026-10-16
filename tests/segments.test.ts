@@ -161,6 +161,26 @@ describe('盐值（素材与渲染代码指纹）', () => {
     const files = codeFiles().map((f) => f.replace(/\\/g, '/'));
     for (const tail of ['src/qa/contrast.ts', 'src/storyboard/schema.ts', 'src/captions/styles.ts', 'render/Talk.tsx', 'render/templates/Cta.tsx']) expect(files.some((f) => f.endsWith(tail)), tail).toBe(true);
   });
+  it('全屏插入素材：文件内容变只影响用到它的镜头；J-cut 的前 2 帧画面属于前一镜，前一镜的卡片变也影响插入镜头', async () => {
+    write('broll/b.jpg', 'b-v1');
+    const B = { file: 'broll/b.jpg', kind: 'photo' as const, focal: { x: 0.5, y: 0.5 } };
+    const p: TalkProps = { ...props, shots: SHOTS4.map((s, i) => (i === 2 ? { start: s.start, end: s.end, layout: 'broll' as const, broll: B } : s)) };
+    const base = await hashes(p);
+    write('broll/b.jpg', 'b-v2');
+    expect(changed(await hashes(p), base)).toEqual([false, false, true, false]);
+    write('broll/b.jpg', 'b-v1');
+    const prevCard: TalkProps = { ...p, shots: p.shots.map((s, i) => (i === 1 ? { ...s, card: title('换卡') } : s)) };
+    expect(changed(await hashes(prevCard), base)).toEqual([false, true, true, false]);
+  });
+  it('版式与素材字段进哈希：同一镜头 full → pip、焦点或 Ken Burns 变化都让该镜头变', async () => {
+    const B = { file: 'broll/b.jpg', kind: 'photo' as const, focal: { x: 0.5, y: 0.5 } };
+    const at = (shot: Partial<Shot>): TalkProps => ({ ...props, shots: SHOTS4.map((s, i) => (i === 3 ? { start: s.start, end: s.end, layout: 'full' as const, ...shot } : s)) });
+    const base = await hashes(at({}));
+    expect(changed(await hashes(at({ layout: 'pip', broll: B })), base)[3]).toBe(true);
+    const pip = await hashes(at({ layout: 'pip', broll: B }));
+    expect(changed(await hashes(at({ layout: 'pip', broll: { ...B, focal: { x: 0.2, y: 0.5 } } })), pip)[3]).toBe(true);
+    expect(changed(await hashes(at({ layout: 'pip', broll: { ...B, file: 'broll/a.png' } })), pip)[3]).toBe(true);
+  });
   it('默认代码指纹：40 位十六进制、重复计算稳定', () => {
     expect(createStamper(dir).code).toMatch(/^[0-9a-f]{40}$/);
     expect(createStamper(dir).code).toBe(createStamper(dir).code);

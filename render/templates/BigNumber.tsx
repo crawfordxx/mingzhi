@@ -62,7 +62,7 @@ export const BigNumber: React.FC<TemplateProps<'bigNumber'>> = ({ props, local }
   const chips = props.chips ?? [];
   const hot = new Set(props.highlight ?? []);
   return (
-    <SafeArea>
+    <SafeArea glass>
       <Reveal p={springAt(local, 0, fps)} dy={20}>
         <Header value={props.value} unit={props.unit} label={props.label} p={easeAt(local, COUNT_START, COUNT_SEC)} />
       </Reveal>

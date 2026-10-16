@@ -4,9 +4,9 @@ import type { TimedCaption } from '../captions/lines.js';
 import type { CoverStyleId } from '../cover/styles.js';
 import type { EditPlan as CutPlan, PlanOptions, TimeRange } from '../cut/plan.js';
 import type { AudioOptions } from '../pipeline/audio-step.js';
-import { CardSpecSchema, MOODS, type CardSpec, type Shot, type Storyboard, type Visual } from '../storyboard/schema.js';
+import { CardSpecSchema, MOODS, type CardSpec, type Layout, type Shot, type Storyboard, type Visual } from '../storyboard/schema.js';
 import type { SpaceSettings } from '../workspace/store.js';
-import { captionTooLong, checkCard } from './check.js';
+import { captionTooLong, checkCard, layoutBlocker } from './check.js';
 import { canonicalize, layoutProblem } from './layout-rules.js';
 import { VISUAL_SOURCES, type EditOp } from './ops.js';
 import { addRange, outputToSource, subtractRange } from './spans.js';
@@ -106,16 +106,14 @@ function replaceCard(state: VersionState, i: number, card: CardSpec): VersionSta
   return guardLayout(state, withShot(state, i, { ...shot, card: parsed.data, layout }));
 }
 
-function setLayout(state: VersionState, i: number, layout: 'split' | 'full'): VersionState {
+/** 改版式（约束见 layoutBlocker）：分屏、浮层保留卡片；全屏只保留 cta；全屏插入与画中画看不见卡片，一并去掉；素材字段始终保留 */
+function setLayout(state: VersionState, i: number, layout: Layout): VersionState {
   const shot = shotAt(state, i);
-  if (layout === 'split') {
-    if (!shot.card) throw new Error(`第 ${i} 个镜头没有卡片，不能改成分屏`);
-    if (shot.card.template === 'cta') throw new Error('cta 卡片只能全屏');
-    return guardLayout(state, withShot(state, i, { ...shot, layout }));
-  }
-  // 全屏镜头只有 cta 能显示卡片，其余卡片一并去掉
+  const blocked = layoutBlocker(layout, { template: shot.card?.template, broll: shot.broll !== undefined });
+  if (blocked) throw new Error(`第 ${i} 个镜头：${blocked}`);
+  const keepCard = layout === 'split' || layout === 'overlay' || (layout === 'full' && shot.card?.template === 'cta');
   const { card, ...rest } = shot;
-  return guardLayout(state, withShot(state, i, card?.template === 'cta' ? { ...shot, layout } : { ...rest, layout }));
+  return guardLayout(state, withShot(state, i, keepCard && card ? { ...shot, layout } : { ...rest, layout }));
 }
 
 function regenerateVisual(state: VersionState, i: number, visual: Visual): VersionState {

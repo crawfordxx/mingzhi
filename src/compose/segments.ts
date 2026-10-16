@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captionAt, shotAt } from './layout.js';
+import { captionAt, shotAt, visualShots, type PersonTransform } from './layout.js';
 import { renderAudioTrack, renderVideoSegment, withBundle, type SegmentRenderOptions } from './render.js';
 import { transformAt } from '../../render/layers/PersonLayer.js';
 import { DEFAULT_CAPTION_STYLE } from '../captions/styles.js';
@@ -31,18 +31,23 @@ export function segmentBounds(shots: Shot[], durationSec: number): FrameRange[] 
  *   镜头起点非整帧时，段边缘的帧可能属于相邻镜头，所以按帧而不是按镜头索引判断
  * - 人像位置：由本镜头版式、前一镜头版式与时长（0.4 秒过渡）、取景框、人像尺寸共同决定，直接用渲染用的 transformAt 逐帧算出
  * - 该帧显示的字幕文字（跨镜头边界的字幕会同时进入两段）
+ * - 画面按画面时间轴（visualShots）判断：全屏插入的 J-cut 前 2 帧仍是上一个镜头的画面；镜头的版式与素材字段（文件、焦点、Ken Burns）随镜头进入指纹
  */
 function frameFingerprints(props: Omit<TalkProps, 'shots'>, shots: Shot[], range: FrameRange): { shots: unknown[]; frames: string[] } {
-  const full: TalkProps = { ...props, shots };
+  const vis = visualShots(shots);
+  const full: TalkProps = { ...props, shots: vis };
   const secs = Array.from({ length: Math.max(0, range.end - range.start) }, (_, k) => (range.start + k) / CANVAS.fps);
-  const hits = secs.map((sec) => shotAt(shots, sec)?.index ?? -1);
+  const hits = secs.map((sec) => shotAt(vis, sec)?.index ?? -1);
   const seen = [...new Set(hits.filter((i) => i >= 0))];
   const frames = secs.map((sec, k) => {
-    const t = transformAt(shots, sec, full);
-    return `${hits[k] < 0 ? '-' : seen.indexOf(hits[k])}|${captionAt(props.captions, sec)?.text ?? ''}|${t.scale}|${t.x}|${t.y}`;
+    const t = transformAt(vis, sec, full);
+    return `${hits[k] < 0 ? '-' : seen.indexOf(hits[k])}|${captionAt(props.captions, sec)?.text ?? ''}|${t.scale}|${t.x}|${t.y}${clipStamp(t)}`;
   });
-  return { shots: seen.map((i) => ({ shot: shots[i], last: i === shots.length - 1 })), frames };
+  return { shots: seen.map((i) => ({ shot: vis[i], last: i === shots.length - 1 })), frames };
 }
+
+/** 画中画窗口进指纹；全屏/分屏没有窗口时为空串（与旧指纹格式一致） */
+const clipStamp = (t: PersonTransform): string => (t.clip ? `|${t.clip.x},${t.clip.y},${t.clip.w},${t.clip.h},${t.clip.radius}` : '');
 
 /**
  * 镜头缓存键。index 不参与哈希：镜头只是换了序号而画面没变时应复用缓存。
@@ -102,16 +107,17 @@ export function createStamper(workDir: string, code: string = codeStamp()): Stam
   return { code, file };
 }
 
-/** 卡片引用的素材（图片、视频），按镜头收集 */
+/** 镜头引用的素材（卡片的图片、视频与镜头的 B-roll 素材），按镜头收集 */
 function shotMedia(shot: Shot | undefined): string[] {
   const p = (shot?.card?.props ?? {}) as { image?: unknown; video?: unknown };
-  return [p.image, p.video].filter((v): v is string => typeof v === 'string');
+  return [p.image, p.video, shot?.broll?.file].filter((v): v is string => typeof v === 'string');
 }
 
-/** 本段帧区间里实际出现的镜头序号（卡片层每帧只画当前镜头，所以只有这些镜头的素材会进画面） */
+/** 本段帧区间里实际出现的镜头序号（按画面时间轴；各层每帧只画当前镜头，所以只有这些镜头的素材会进画面） */
 function shotsInRange(shots: Shot[], range: FrameRange): number[] {
+  const vis = visualShots(shots);
   const secs = Array.from({ length: Math.max(0, range.end - range.start) }, (_, k) => (range.start + k) / CANVAS.fps);
-  return [...new Set(secs.map((sec) => shotAt(shots, sec)?.index ?? -1).filter((i) => i >= 0))];
+  return [...new Set(secs.map((sec) => shotAt(vis, sec)?.index ?? -1).filter((i) => i >= 0))];
 }
 
 /**
