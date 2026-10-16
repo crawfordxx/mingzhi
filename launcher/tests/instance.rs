@@ -99,10 +99,8 @@ fn 名称分组与许可() {
             .unwrap();
         assert!(ff.name.contains("FFprobe"), "同许可应合并：{}", ff.name);
         assert!(ff.license.contains("GPL"), "{platform}");
-        assert_eq!(
-            list.iter().filter(|l| l.name.starts_with("配乐")).count(),
-            1
-        );
+        // 配乐如有，合并成一行（配乐项可能从清单移走，不要求一定有）
+        assert!(list.iter().filter(|l| l.name.starts_with("配乐")).count() <= 1);
         assert_eq!(list[0].license, "MIT");
         for item in m.for_platform(platform) {
             assert_ne!(name_of(&item.id), item.id, "{} 缺中文名", item.id);
@@ -123,4 +121,15 @@ fn 启动行解析() {
     assert_eq!(parse_ready("明知AI剪辑 已启动：http://evil.cn:80"), None);
     assert_eq!(parse_ready("明知AI剪辑 已启动：http://127.0.0.1:abc"), None);
     assert_eq!(parse_ready("别的日志"), None);
+}
+
+#[test]
+fn 弹窗文字作为参数传入而不拼进脚本() {
+    use mingzhi_launcher::notify::osascript_args;
+    let msg = "路径 \"C:\\x\" 里有引号'和 end run";
+    let args = osascript_args("标题\"", msg);
+    assert_eq!(args[args.len() - 2], msg);
+    assert_eq!(args[args.len() - 1], "标题\"");
+    // 脚本部分是固定的，不含用户文字
+    assert!(args[..args.len() - 2].iter().all(|a| !a.contains("引号")));
 }

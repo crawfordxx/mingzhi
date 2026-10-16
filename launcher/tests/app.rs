@@ -40,6 +40,7 @@ fn node_targz(mode: &str) -> Vec<u8> {
 
 struct Fx {
     server: TestServer,
+    done: std::thread::JoinHandle<()>,
     shared: Arc<Shared>,
     _tmp: tempfile::TempDir,
     _app: tempfile::TempDir,
@@ -115,8 +116,9 @@ fn launch(mode: &str, model_ok: bool) -> Fx {
         downloader: Arc::new(downloader),
     });
     let s = shared.clone();
-    std::thread::spawn(move || app::run(s, plan, rx));
+    let done = std::thread::spawn(move || app::run(s, plan, rx));
     Fx {
+        done,
         server,
         shared,
         _tmp: tmp,
@@ -220,4 +222,28 @@ fn 服务崩溃后显示原因并可重新启动() {
 
     fx.shared.send(Command::Restart);
     wait_until("重新启动", || fx.shared.stage() == Stage::Running);
+}
+
+#[test]
+fn 服务正常退出时启动器随之结束且不显示崩溃() {
+    let fx = launch("quit-later", true);
+    wait_until("主流程结束", || fx.done.is_finished());
+    assert_eq!(fx.shared.stage(), Stage::Running, "不应进入「意外退出」");
+    assert!(fx.shared.view()["error"].is_null());
+}
+
+#[test]
+fn 连点两次重新启动只重启一次() {
+    let fx = launch("crash-later", true);
+    wait_until("进入已退出", || fx.shared.stage() == Stage::Crashed);
+    let epoch = fx.shared.view()["epoch"].as_u64().unwrap();
+    fx.shared.send(Command::Restart);
+    fx.shared.send(Command::Restart);
+    wait_until("重新启动", || fx.shared.stage() == Stage::Running);
+    let running_epoch = fx.shared.view()["epoch"].as_u64().unwrap();
+    assert!(running_epoch > epoch);
+    // 陈旧的第二个「重新启动」若没被丢弃，服务会立刻被停掉重启，阶段计数会再涨；
+    // 假服务 400ms 后才会再崩，这 150ms 内阶段应纹丝不动
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(fx.shared.view()["epoch"].as_u64().unwrap(), running_epoch);
 }

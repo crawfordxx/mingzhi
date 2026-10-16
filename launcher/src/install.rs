@@ -14,14 +14,14 @@ use crate::fsx;
 use crate::hash::sha256_file;
 use crate::manifest::{Item, Manifest, UnpackKind};
 use crate::paths::AppRoot;
-use crate::progress::Phase;
+use crate::progress::{Phase, Progress};
+use crate::sched::{Outcomes, Sched};
 use crate::single::{extract_entry, set_executable, unpack_gz};
 use crate::state::{Check, State};
 use crate::unpack::{cleanup_stale, unpack};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Condvar, Mutex};
 
 /// 同时下载的项数
 pub const CONCURRENCY: usize = 2;
@@ -108,8 +108,6 @@ pub fn sync_with(
     filter: impl Fn(&Item) -> bool,
 ) -> Result<SyncReport> {
     root.ensure_dirs()?;
-    let state_path = root.state_file();
-    let state = State::load(&state_path)?;
     let progress = downloader.progress();
     let items: Vec<&Item> = manifest
         .for_platform(platform)
@@ -117,27 +115,71 @@ pub fn sync_with(
         .filter(|i| filter(i))
         .collect();
     progress.register(&items);
+    let jobs = build_jobs(root, &manifest.version, &items)?;
+    cleanup_leftovers(root, &jobs);
 
-    let mut jobs: Vec<Job> = Vec::new();
-    for item in items {
-        jobs.push(Job {
-            item,
-            dest: item.resolve_dest(root, &manifest.version)?,
-            footprint: item.footprint(root, &manifest.version)?,
-        });
+    let todo = decide(root, &jobs, progress)?;
+    let mut pending = Vec::new();
+    let mut skipped = Vec::new();
+    for (i, job) in jobs.iter().enumerate() {
+        if todo[i] {
+            pending.push(i);
+            progress.set_phase(&job.item.id, Phase::Waiting);
+        } else {
+            skipped.push(job.item.id.clone());
+            progress.set_phase(&job.item.id, Phase::Ready);
+        }
     }
-    // 清理上次崩溃遗留的临时目录
+    progress.set_total(pending.iter().map(|&i| jobs[i].item.size).sum());
+
+    let ctx = Ctx {
+        root,
+        version: &manifest.version,
+        ffmpeg: ffmpeg_path(root, platform),
+        downloader,
+    };
+    let deps = dependencies(&jobs, &pending, &ctx.ffmpeg);
+    let outcomes = install_all(&ctx, &jobs, Sched::new(pending, deps));
+    outcomes.into_report(skipped).map_err(Error::new)
+}
+
+/// 安装阶段共用的上下文。
+struct Ctx<'a> {
+    root: &'a AppRoot,
+    version: &'a str,
+    ffmpeg: PathBuf,
+    downloader: &'a Downloader,
+}
+
+fn build_jobs<'a>(root: &AppRoot, version: &str, items: &[&'a Item]) -> Result<Vec<Job<'a>>> {
+    items
+        .iter()
+        .map(|&item| {
+            Ok(Job {
+                item,
+                dest: item.resolve_dest(root, version)?,
+                footprint: item.footprint(root, version)?,
+            })
+        })
+        .collect()
+}
+
+/// 清理上次崩溃遗留的临时目录。
+fn cleanup_leftovers(root: &AppRoot, jobs: &[Job]) {
     let parents: HashSet<&Path> = jobs
         .iter()
         .flat_map(|j| j.footprint.iter().filter_map(|p| p.parent()))
         .collect();
     cleanup_stale(root.root());
     parents.into_iter().for_each(cleanup_stale);
+}
 
-    // 1. 判定哪些要装；需要算 sha 的大文件只在这里算一次
-    let mut todo: Vec<bool> = Vec::with_capacity(jobs.len());
+/// 判定哪些要装（需要算 sha 的大文件只在这里算一次，确认一致的补记进 state）。
+fn decide(root: &AppRoot, jobs: &[Job], progress: &Progress) -> Result<Vec<bool>> {
+    let state = State::load(&root.state_file())?;
+    let mut todo = Vec::with_capacity(jobs.len());
     let mut verified = Vec::new();
-    for job in &jobs {
+    for job in jobs {
         let item = job.item;
         let up_to_date = match state.check(item, &job.dest) {
             Check::UpToDate => outputs_present(job),
@@ -154,7 +196,17 @@ pub fn sync_with(
         };
         todo.push(!up_to_date);
     }
-    // 外层被重装时，内层已装项也要重装（外层替换目录会把它们带走）
+    force_nested(jobs, &mut todo);
+    State::update(&root.state_file(), |disk| {
+        verified.iter().fold(disk.clone(), |s, (id, rec)| {
+            s.with_installed(id, rec.clone())
+        })
+    })?;
+    Ok(todo)
+}
+
+/// 外层被重装时，内层已装项也要重装（外层替换目录会把它们带走）。
+fn force_nested(jobs: &[Job], todo: &mut [bool]) {
     loop {
         let mut changed = false;
         for outer in 0..jobs.len() {
@@ -169,31 +221,14 @@ pub fn sync_with(
             }
         }
         if !changed {
-            break;
+            return;
         }
     }
-    State::update(&state_path, |disk| {
-        verified.iter().fold(disk.clone(), |s, (id, rec)| {
-            s.with_installed(id, rec.clone())
-        })
-    })?;
+}
 
-    let mut report = SyncReport::default();
-    let mut pending = Vec::new();
-    for (i, job) in jobs.iter().enumerate() {
-        if todo[i] {
-            pending.push(i);
-            progress.set_phase(&job.item.id, Phase::Waiting);
-        } else {
-            report.skipped.push(job.item.id.clone());
-            progress.set_phase(&job.item.id, Phase::Ready);
-        }
-    }
-    progress.set_total(pending.iter().map(|&i| jobs[i].item.size).sum());
-
-    // 2. 依赖：嵌套在外层 dest 内、转码依赖 ffmpeg
-    let ffmpeg = ffmpeg_path(root, platform);
-    let deps: Vec<Vec<usize>> = (0..jobs.len())
+/// 依赖：嵌套在外层 dest 内的等外层；转码的等 ffmpeg。
+fn dependencies(jobs: &[Job], pending: &[usize], ffmpeg: &Path) -> Vec<Vec<usize>> {
+    (0..jobs.len())
         .map(|j| {
             pending
                 .iter()
@@ -201,127 +236,55 @@ pub fn sync_with(
                 .filter(|&i| {
                     i != j
                         && ((jobs[i].item.replaces_dir() && jobs[j].nested_in(&jobs[i].dest))
-                            || (jobs[j].needs_ffmpeg() && same_path(&jobs[i].dest, &ffmpeg)))
+                            || (jobs[j].needs_ffmpeg() && same_path(&jobs[i].dest, ffmpeg)))
                 })
                 .collect()
         })
-        .collect();
+        .collect()
+}
 
-    // 3. 并发安装
-    let sched = Mutex::new(Sched {
-        pending,
-        done: HashSet::new(),
-        running: 0,
-    });
-    let cv = Condvar::new();
-    let installed = Mutex::new(Vec::new());
-    let deferred = Mutex::new(Vec::new());
-    let errors = Mutex::new(Vec::new());
-
+/// 并发安装；依赖项失败而没能开始的项也记为失败。
+fn install_all(ctx: &Ctx, jobs: &[Job], sched: Sched) -> Outcomes {
+    let outcomes = Outcomes::default();
+    let progress = ctx.downloader.progress();
     std::thread::scope(|scope| {
         for _ in 0..CONCURRENCY {
             scope.spawn(|| {
-                while let Some(idx) = next_job(&sched, &cv, &deps) {
-                    let job = &jobs[idx];
-                    let id = &job.item.id;
-                    let outcome = install_one(root, &manifest.version, &ffmpeg, job, downloader)
-                        .and_then(|()| {
-                            // 每装完一项立即落盘（读-改-写，不覆盖别处写入的设置）
-                            let record = State::record_for(job.item, &job.dest);
-                            State::update(&state_path, |s| s.with_installed(id, record)).map(|_| ())
-                        });
-                    let ok = outcome.is_ok();
-                    match outcome {
-                        Ok(()) => {
-                            progress.set_phase(id, Phase::Done);
-                            push(&installed, id.clone());
-                        }
-                        Err(e) => {
-                            record_failure(job.item, &e.to_string(), progress, &deferred, &errors)
-                        }
-                    }
-                    finish_job(&sched, &cv, idx, ok);
+                while let Some(idx) = sched.next() {
+                    let ok = install_and_record(ctx, &jobs[idx], &outcomes);
+                    sched.finish(idx, ok);
                 }
             });
         }
     });
-
-    // 依赖项失败而没能开始的项
-    let left = sched.into_inner().map(|g| g.pending).unwrap_or_default();
-    for idx in left {
+    for idx in sched.leftover() {
         let msg = format!("{} 需要等前面的组件装好，本次没有安装", jobs[idx].item.id);
-        record_failure(jobs[idx].item, &msg, progress, &deferred, &errors);
+        outcomes.failed(jobs[idx].item, &msg, progress);
     }
-
-    report.installed = installed.into_inner().unwrap_or_default();
-    report.deferred = deferred.into_inner().unwrap_or_default();
-    let errors = errors.into_inner().unwrap_or_default();
-    match errors.first() {
-        Some(first) => Err(Error::new(first.clone())),
-        None => Ok(report),
-    }
+    outcomes
 }
 
-fn push(list: &Mutex<Vec<String>>, value: String) {
-    if let Ok(mut v) = list.lock() {
-        v.push(value);
-    }
-}
-
-/// 可选项失败记为「稍后补齐」，必需项失败记为错误。
-fn record_failure(
-    item: &Item,
-    msg: &str,
-    progress: &crate::progress::Progress,
-    deferred: &Mutex<Vec<String>>,
-    errors: &Mutex<Vec<String>>,
-) {
-    if item.optional {
-        progress.fail(&item.id, Phase::Deferred, msg);
-        push(deferred, item.id.clone());
-    } else {
-        progress.fail(&item.id, Phase::Failed, msg);
-        push(errors, msg.to_string());
-    }
-}
-
-struct Sched {
-    pending: Vec<usize>,
-    done: HashSet<usize>,
-    running: usize,
-}
-
-/// 取下一个依赖已满足的任务；没有可做的但还有任务在跑就等待；
-/// 全部做完、或剩下的都依赖失败项时返回 None。
-fn next_job(sched: &Mutex<Sched>, cv: &Condvar, deps: &[Vec<usize>]) -> Option<usize> {
-    let mut g = sched.lock().ok()?;
-    loop {
-        if g.pending.is_empty() {
-            return None;
+fn install_and_record(ctx: &Ctx, job: &Job, outcomes: &Outcomes) -> bool {
+    let progress = ctx.downloader.progress();
+    let outcome =
+        install_one(ctx.root, ctx.version, &ctx.ffmpeg, job, ctx.downloader).and_then(|()| {
+            // 每装完一项立即落盘（读-改-写，不覆盖别处写入的设置）
+            let record = State::record_for(job.item, &job.dest);
+            State::update(&ctx.root.state_file(), |s| {
+                s.with_installed(&job.item.id, record)
+            })
+            .map(|_| ())
+        });
+    match outcome {
+        Ok(()) => {
+            outcomes.installed(job.item, progress);
+            true
         }
-        let ready = g
-            .pending
-            .iter()
-            .position(|&i| deps[i].iter().all(|d| g.done.contains(d)));
-        if let Some(pos) = ready {
-            g.running += 1;
-            return Some(g.pending.remove(pos));
-        }
-        if g.running == 0 {
-            return None; // 剩下的都依赖失败项，满足不了
-        }
-        g = cv.wait(g).ok()?;
-    }
-}
-
-fn finish_job(sched: &Mutex<Sched>, cv: &Condvar, idx: usize, ok: bool) {
-    if let Ok(mut g) = sched.lock() {
-        g.running -= 1;
-        if ok {
-            g.done.insert(idx);
+        Err(e) => {
+            outcomes.failed(job.item, &e.to_string(), progress);
+            false
         }
     }
-    cv.notify_all();
 }
 
 fn ffmpeg_path(root: &AppRoot, platform: &str) -> PathBuf {

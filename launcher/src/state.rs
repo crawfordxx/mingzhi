@@ -88,11 +88,12 @@ impl State {
         Ok(next)
     }
 
-    /// 用户设置；缺失或格式不对时用默认值。
+    /// 用户设置；缺失或格式不对时用默认值；手改过的非法前缀会被清空。
     pub fn settings(&self) -> Settings {
         self.extra
             .get(SETTINGS_KEY)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .and_then(|v| serde_json::from_value::<Settings>(v.clone()).ok())
+            .map(Settings::sanitized)
             .unwrap_or_default()
     }
 

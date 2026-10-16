@@ -67,11 +67,13 @@ fn 代理前缀校验() {
         .github_prefix
         .is_empty());
     assert_eq!(
-        Settings::new(Mirror::Cn, " http://p.cn/x/ ")
+        Settings::new(Mirror::Cn, " https://p.cn/x/ ")
             .unwrap()
             .github_prefix,
-        "http://p.cn/x/"
+        "https://p.cn/x/"
     );
+    // 允许 ?u= 这类查询式代理
+    assert!(Settings::new(Mirror::Cn, "https://p.cn/get?u=").is_ok());
     for bad in [
         "ftp://p.cn/",
         "p.cn",
@@ -79,6 +81,26 @@ fn 代理前缀校验() {
         "https://a b.cn/",
         "javascript:alert(1)",
         "https://p.cn/\nx",
+        // 只收 https
+        "http://p.cn/",
+        // 本机与内网地址
+        "https://localhost/",
+        "https://LOCALHOST:8080/",
+        "https://a.localhost/",
+        "https://127.0.0.1/",
+        "https://127.8.9.1:443/",
+        "https://10.1.2.3/",
+        "https://192.168.1.1/",
+        "https://172.16.0.1/",
+        "https://172.31.255.255/",
+        "https://169.254.1.1/",
+        "https://0.0.0.0/",
+        "https://[::1]/",
+        "https://[fd00::1]/",
+        "https://[fe80::1]/",
+        // 带 # 的会把原地址截掉
+        "https://p.cn/#",
+        "https://p.cn/x#y/",
     ] {
         assert!(Settings::new(Mirror::Cn, bad).is_err(), "{bad:?} 应被拒绝");
     }
@@ -129,4 +151,30 @@ fn 清单的optional与license字段() {
     assert_eq!(m.items[0].license.as_deref(), Some("CC0 1.0"));
     assert!(!m.items[1].optional);
     assert_eq!(m.items[1].license, None);
+}
+
+#[test]
+fn 公网地址与172其它网段可用() {
+    for ok in [
+        "https://172.15.0.1/",
+        "https://172.32.0.1/",
+        "https://8.8.8.8/",
+        "https://gh.example.com:8443/p/",
+    ] {
+        assert!(Settings::new(Mirror::Cn, ok).is_ok(), "{ok}");
+    }
+}
+
+#[test]
+fn state里手改的非法前缀读回时退回默认() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.json");
+    std::fs::write(
+        &path,
+        r#"{"settings":{"mirror":"global","githubPrefix":"http://127.0.0.1:9/"}}"#,
+    )
+    .unwrap();
+    let st = State::load(&path).unwrap();
+    assert_eq!(st.settings().github_prefix, "");
+    assert_eq!(st.settings().mirror, Mirror::Global, "镜像设置保留");
 }

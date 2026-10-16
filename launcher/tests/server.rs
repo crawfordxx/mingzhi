@@ -1,6 +1,6 @@
 //! 进度页 HTTP 服务：页面与资源、状态 JSON、命令、设置保存、防跨站与 DNS 重绑定、端口顺延。
 
-use mingzhi_launcher::app::{Command, Info, Shared};
+use mingzhi_launcher::app::{Command, Info, Shared, Stage};
 use mingzhi_launcher::progress::Progress;
 use mingzhi_launcher::server;
 use mingzhi_launcher::settings::Settings;
@@ -12,6 +12,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 struct Fx {
+    shared: Arc<Shared>,
     url: String,
     port: u16,
     rx: Receiver<Command>,
@@ -32,8 +33,9 @@ fn start() -> Fx {
         tx,
     );
     // 用随机高位端口起步，避免与其它测试抢
-    let ui = server::start(shared, 0).unwrap();
+    let ui = server::start(shared.clone(), 0).unwrap();
     Fx {
+        shared,
         url: ui.url(),
         port: ui.port(),
         rx,
@@ -67,6 +69,14 @@ fn 页面与资源() {
         "{}",
         bytes.len()
     );
+
+    for (name, ct) in [("ui.css", "text/css"), ("ui.js", "text/javascript")] {
+        let r = ureq::get(&format!("{}/assets/{name}", fx.url))
+            .call()
+            .unwrap();
+        assert_eq!(r.content_type(), ct);
+        assert_eq!(r.header("Cache-Control"), Some("no-store"));
+    }
 
     let font = ureq::get(&format!("{}/assets/plex-serif-200i.woff2", fx.url))
         .call()
@@ -106,6 +116,13 @@ fn 命令要带自定义头() {
     }
     assert!(fx.rx.try_recv().is_err());
 
+    // 阶段不对的命令直接拒绝，不进队列
+    match post(&format!("{}/api/restart", fx.url), "") {
+        Err(ureq::Error::Status(409, _)) => {}
+        other => panic!("准备阶段重新启动应 409：{other:?}"),
+    }
+    assert!(fx.rx.try_recv().is_err());
+    fx.shared.set(Stage::Crashed, None, None);
     post(&format!("{}/api/retry", fx.url), "").unwrap();
     assert_eq!(
         fx.rx.recv_timeout(Duration::from_secs(1)).unwrap(),
@@ -198,4 +215,40 @@ fn 端口被占用时顺延() {
     let ui = server::start(shared, port).unwrap();
     assert!(ui.port() > port);
     assert!(ui.url().starts_with("http://127.0.0.1:"));
+}
+
+#[test]
+fn 慢连接不会卡住进度页() {
+    let fx = start();
+    // 声明了正文长度却一直不发
+    let mut slow = TcpStream::connect(("127.0.0.1", fx.port)).unwrap();
+    write!(
+        slow,
+        "POST /api/settings HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nX-Mingzhi: 1\r\nContent-Length: 4000\r\n\r\n{{",
+        fx.port
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    let started = std::time::Instant::now();
+    let ok = raw_get(fx.port, &format!("127.0.0.1:{}", fx.port), "/api/ping");
+    assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
+    assert!(started.elapsed() < Duration::from_secs(2));
+    drop(slow);
+}
+
+#[test]
+fn 运行中不接受重新启动() {
+    let fx = start();
+    fx.shared
+        .set(Stage::Running, None, Some("http://127.0.0.1:1".into()));
+    assert!(matches!(
+        post(&format!("{}/api/restart", fx.url), ""),
+        Err(ureq::Error::Status(409, _))
+    ));
+    // 运行中「重试」用来催后台补齐可选项，接受
+    post(&format!("{}/api/retry", fx.url), "").unwrap();
+    assert_eq!(
+        fx.rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        Command::Retry
+    );
 }

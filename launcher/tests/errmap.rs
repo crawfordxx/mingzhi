@@ -128,3 +128,53 @@ fn 本机能读到核数与内存() {
         assert!(spec.memory > 1024 * 1024 * 1024);
     }
 }
+
+// ---- 修复轮 1：更具体的规则优先；代理单独一类 ----
+
+#[test]
+fn socks代理警告加网络错误归为代理而不是端口() {
+    let raw = "chrome 下载失败，所有镜像均不可用（最后一次：https://x：网络错误：Connection refused (os error 61)）；暂不支持 socks5://127.0.0.1:7890 这种代理，已改为直连；请改用 HTTP 代理（http://地址:端口）";
+    let f = friendly(raw);
+    assert_eq!(f.kind, Kind::Proxy, "{raw}");
+    assert!(f.hint.contains("代理设置"), "{}", f.hint);
+}
+
+#[test]
+fn 经代理的网络错误归为代理() {
+    let raw = "node 下载失败，所有镜像均不可用（最后一次：https://x：网络错误（经代理 http://127.0.0.1:7897）：Connection Failed: tls connection init failed: unexpected end of file）";
+    assert_eq!(friendly(raw).kind, Kind::Proxy);
+    let raw = "https://x：45 秒没有收到数据，已换下一个地址（经代理 http://127.0.0.1:7897）";
+    assert_eq!(friendly(raw).kind, Kind::Proxy);
+}
+
+#[test]
+fn 只有端口字样不算端口冲突() {
+    assert_ne!(friendly("请填 http://地址:端口").kind, Kind::Port);
+    assert_eq!(
+        friendly("Error: listen EADDRINUSE 127.0.0.1:4321").kind,
+        Kind::Port
+    );
+    assert_eq!(
+        friendly("bind: Address already in use (os error 48)").kind,
+        Kind::Port
+    );
+}
+
+#[test]
+fn 更具体的规则优先() {
+    // 磁盘满发生在经代理下载时：仍是磁盘满
+    let raw = "网络错误（经代理 http://p:1）…；写入失败：No space left on device (os error 28)";
+    assert_eq!(friendly(raw).kind, Kind::DiskFull);
+    // 证书错误经代理：证书比代理更具体（多半是代理在中间改写了证书）
+    let raw = "网络错误（经代理 http://p:1）：invalid peer certificate: UnknownIssuer";
+    assert_eq!(friendly(raw).kind, Kind::Certificate);
+    // 校验不符不受代理字样影响
+    let raw = "u：下载完成但校验不符，已删除重下（经代理 http://p:1）";
+    assert_eq!(friendly(raw).kind, Kind::Corrupt);
+}
+
+#[test]
+fn 意外退出文案不提重试按钮() {
+    let f = friendly("某种奇怪的错误");
+    assert!(!f.hint.contains("「重试」"), "{}", f.hint);
+}

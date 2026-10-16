@@ -11,6 +11,7 @@ pub enum Kind {
     Certificate,
     Port,
     Corrupt,
+    Proxy,
     Network,
     Unavailable,
     Other,
@@ -24,9 +25,11 @@ pub struct Friendly {
     pub detail: String,
 }
 
-/// 按顺序匹配，先命中先用：磁盘满、占用这类「本机问题」排在网络之前，
-/// 因为写盘失败后会换镜像，最终信息里常常同时带着网络字样。
-const RULES: [(Kind, &[&str]); 7] = [
+/// 按顺序匹配，先命中先用，**越具体的越靠前**：
+/// 磁盘满、文件占用、端口冲突、证书、校验不符这些「明确的原因」优先；
+/// 其次是代理（失败信息里带「经代理」或代理警告）；最后才是笼统的网络不通 / 地址失效。
+/// 例：写盘失败后会换镜像，最终信息里常同时带网络字样，仍应判为磁盘满。
+const RULES: [(Kind, &[&str]); 8] = [
     (
         Kind::DiskFull,
         &[
@@ -50,7 +53,7 @@ const RULES: [(Kind, &[&str]); 7] = [
             "permission denied",
         ],
     ),
-    (Kind::Certificate, &["certificate", "unknownissuer", "证书"]),
+    // 只认明确的端口冲突错误，不认「端口」两个字（代理提示里也会出现）
     (
         Kind::Port,
         &[
@@ -58,10 +61,14 @@ const RULES: [(Kind, &[&str]); 7] = [
             "address already in use",
             "os error 48)",
             "os error 10048)",
-            "端口",
         ],
     ),
+    (Kind::Certificate, &["certificate", "unknownissuer", "证书"]),
     (Kind::Corrupt, &["校验不符", "压缩包内容异常", "sha256"]),
+    (
+        Kind::Proxy,
+        &["经代理", "这种代理", "socks", "proxy", "服务器返回 407"],
+    ),
     (
         Kind::Network,
         &[
@@ -126,6 +133,10 @@ pub fn friendly(raw: &str) -> Friendly {
             "下载的文件不完整",
             "已自动删掉坏文件。点「重试」重新下载，或在下载设置里换一个下载源。",
         ),
+        Kind::Proxy => (
+            "代理连不上下载服务器",
+            "请检查代理设置：代理软件是否开着、地址端口对不对；暂不支持 SOCKS 代理，请改用 HTTP 代理，或关掉代理直连。GitHub 上的文件也可以在下载设置里填代理前缀。",
+        ),
         Kind::Network => (
             "网络连不上下载服务器",
             "检查网络是否正常；如果在用代理或 VPN，可以在下载设置里换下载源，GitHub 上的文件可以填代理前缀。",
@@ -136,7 +147,7 @@ pub fn friendly(raw: &str) -> Friendly {
         ),
         Kind::Other => (
             "出了点意外",
-            "点「重试」再试一次；如果一直不行，把下面的详细信息发给我们。",
+            "再试一次；如果一直不行，请把下面的详细信息发到项目的 GitHub Issues。",
         ),
     };
     Friendly {

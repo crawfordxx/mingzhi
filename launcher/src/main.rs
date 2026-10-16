@@ -4,16 +4,18 @@
 //! - MINGZHI_APP_ROOT：应用根目录（默认 macOS ~/Library/Application Support/Mingzhi）
 //! - MINGZHI_MANIFEST：用这个清单文件代替编译进来的清单
 //! - MINGZHI_APP_DIR：用现成目录当应用本体（不下载 app 项）
-//! - MINGZHI_NO_BROWSER=1：不自动打开浏览器
+//! - MINGZHI_NO_BROWSER=1：不自动打开浏览器，也不弹出错误对话框（只打印）
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use mingzhi_launcher::app::{self, Info, Plan, Shared};
 use mingzhi_launcher::browser;
 use mingzhi_launcher::catalog::licenses;
 use mingzhi_launcher::download::Downloader;
+use mingzhi_launcher::errmap::friendly;
 use mingzhi_launcher::error::{Error, Result};
-use mingzhi_launcher::instance::{self, Acquire};
+use mingzhi_launcher::instance::{self, Acquire, InstanceGuard};
 use mingzhi_launcher::manifest::{current_platform, Manifest};
+use mingzhi_launcher::notify;
 use mingzhi_launcher::paths::AppRoot;
 use mingzhi_launcher::progress::Progress;
 use mingzhi_launcher::proxy::ProxyConfig;
@@ -45,17 +47,28 @@ fn load_manifest() -> Result<Manifest> {
     Manifest::parse(&value.to_string())
 }
 
-fn run() -> Result<()> {
-    let root = AppRoot::resolve()?;
-    let guard = match instance::acquire(root.root(), SECONDARY_WAIT)? {
-        Acquire::Primary(g) => g,
+/// 抢单实例锁；已有启动器在运行时打开它的进度页（或提示），返回 None。
+fn primary_or_hand_off(root: &AppRoot) -> Result<Option<InstanceGuard>> {
+    match instance::acquire(root.root(), SECONDARY_WAIT)? {
+        Acquire::Primary(g) => Ok(Some(g)),
         Acquire::Secondary(Some(url)) => {
-            browser::open(&url);
-            return Ok(());
+            open_page(&url);
+            Ok(None)
         }
         Acquire::Secondary(None) => {
-            return Err(Error::new("明知AI剪辑 已经在运行，但没有响应，请稍后再试"));
+            notify::alert(
+                "明知AI剪辑 已经在运行",
+                "已经有一个明知AI剪辑在启动中，但暂时没有响应。请等几秒再双击一次；一直这样的话，重启电脑后再试。",
+            );
+            Ok(None)
         }
+    }
+}
+
+fn run() -> Result<()> {
+    let root = AppRoot::resolve()?;
+    let Some(guard) = primary_or_hand_off(&root)? else {
+        return Ok(());
     };
 
     let manifest = load_manifest()?;
@@ -85,7 +98,7 @@ fn run() -> Result<()> {
     let ui = server::start(shared.clone(), UI_PORT)?;
     guard.publish(&ui.url())?;
     eprintln!("进度页：{}", ui.url());
-    browser::open(&ui.url());
+    open_page(&ui.url());
 
     // 主流程常驻；启动器退出时工作台服务随之退出
     app::run(shared, plan, rx);
@@ -93,11 +106,26 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+/// 打开进度页；打不开浏览器时弹窗告诉用户手动访问的地址。
+fn open_page(url: &str) {
+    if let Err(e) = browser::open(url) {
+        notify::alert(
+            "请手动打开浏览器",
+            &format!("没能自动打开浏览器（{e}）。请在浏览器地址栏输入：\n{url}"),
+        );
+    }
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("明知AI剪辑 启动失败：{e}");
+            // 进度页还没出来，用户看不到 stderr：弹窗说明原因与建议
+            let f = friendly(&e.to_string());
+            notify::alert(
+                "明知AI剪辑 没能启动",
+                &format!("{}\n\n{}\n\n详细信息：{}", f.title, f.hint, f.detail),
+            );
             ExitCode::FAILURE
         }
     }

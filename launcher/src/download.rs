@@ -218,10 +218,10 @@ impl Downloader {
                 return Err(FetchError::NextMirror(format!("服务器返回 {code}")))
             }
             Err(ureq::Error::Transport(t)) if is_timeout(&t) => {
-                return Err(FetchError::NextMirror(self.stall_message()))
+                return Err(FetchError::NextMirror(self.stall_message(url)))
             }
             Err(ureq::Error::Transport(t)) => {
-                return Err(FetchError::Retry(format!("网络错误：{t}")))
+                return Err(FetchError::Retry(format!("网络错误{}：{t}", self.via(url))))
             }
         };
 
@@ -267,9 +267,9 @@ impl Downloader {
         loop {
             let n = reader.read(&mut buf).map_err(|e| {
                 if is_io_timeout(&e) {
-                    FetchError::NextMirror(self.stall_message())
+                    FetchError::NextMirror(self.stall_message(url))
                 } else {
-                    FetchError::Retry(format!("连接中断：{e}"))
+                    FetchError::Retry(format!("连接中断{}：{e}", self.via(url)))
                 }
             })?;
             if n == 0 {
@@ -291,11 +291,20 @@ impl Downloader {
 }
 
 impl Downloader {
-    fn stall_message(&self) -> String {
+    fn stall_message(&self, url: &str) -> String {
         format!(
-            "{} 秒没有收到数据，已换下一个地址",
-            self.stall_timeout.as_secs().max(1)
+            "{} 秒没有收到数据，已换下一个地址{}",
+            self.stall_timeout.as_secs().max(1),
+            self.via(url)
         )
+    }
+
+    /// 走了代理时在错误里注明（界面据此提示「检查代理设置」）。
+    fn via(&self, url: &str) -> String {
+        self.proxy
+            .proxy_for(url)
+            .map(|p| format!("（经代理 {}）", redact(p)))
+            .unwrap_or_default()
     }
 }
 

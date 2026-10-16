@@ -434,7 +434,11 @@ fn 代理前缀与镜像顺序按设置生效() {
     let settings = Arc::new(RwLock::new(Settings::default()));
     let dl = downloader().with_settings(settings.clone());
     // 设置在下载器建好之后才改，也要生效
-    *settings.write().unwrap() = Settings::new(Mirror::Cn, &proxy.url("/p/")).unwrap();
+    // 测试服务器是 http 本机地址，校验不收，直接构造（只测下载器的展开逻辑）
+    *settings.write().unwrap() = Settings {
+        mirror: Mirror::Cn,
+        github_prefix: proxy.url("/p/"),
+    };
     dl.download(&it, &dir.path().join("f.part")).unwrap();
     assert_eq!(proxy.requests(&format!("/p/{gh}")).len(), 1);
 }
@@ -456,4 +460,30 @@ fn 单项进度按项计数() {
     dl.progress().register(&[&it]);
     dl.download(&it, &dir.path().join("f.part")).unwrap();
     assert_eq!(dl.progress().items()[0].downloaded, data.len() as u64);
+}
+
+#[test]
+fn 经代理失败时错误里注明代理() {
+    // 代理地址上没人监听
+    let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = format!("http://{}", dead.local_addr().unwrap());
+    drop(dead);
+    let cfg = ProxyConfig::from_sources(|k| (k == "HTTP_PROXY").then(|| addr.clone()), || None);
+    let it = item(
+        "m",
+        b"abc",
+        "data/m.bin",
+        vec!["http://files.example.invalid/x.bin".into()],
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    let err = Downloader::new(cfg, Progress::new())
+        .with_retry_delay(Duration::ZERO)
+        .download(&it, &tmp.path().join("m.part"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("经代理"), "{err}");
+    assert_eq!(
+        mingzhi_launcher::errmap::classify(&err),
+        mingzhi_launcher::errmap::Kind::Proxy
+    );
 }

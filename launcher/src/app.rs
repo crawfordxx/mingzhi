@@ -1,4 +1,4 @@
-//! 启动器的共享状态（进度页读取）与主流程（控制线程）。
+//! 启动器的共享状态（进度页读取）；主流程（控制线程）在 flow.rs，这里转出 `run`。
 //!
 //! 主流程：装必需项 → 起服务 → 进度页跳转 → 后台补可选项；
 //! 失败停在「出错」等用户点重试，服务崩溃停在「已退出」等用户点重新启动。
@@ -7,26 +7,16 @@ use crate::catalog::{group_of, name_of, License};
 use crate::download::Downloader;
 use crate::errmap::{friendly, Friendly};
 use crate::error::Result;
-use crate::install::sync_with;
 use crate::manifest::{Item, Manifest};
 use crate::paths::AppRoot;
 use crate::progress::{ItemSnapshot, Phase, Progress};
-use crate::run::{service_spec, Service};
 use crate::settings::{Mirror, Settings};
 use crate::state::State;
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
-
-/// 可选项后台补齐失败后的等待间隔（之后一直按最后一个间隔重试）
-const OPTIONAL_BACKOFF: [Duration; 3] = [
-    Duration::from_secs(30),
-    Duration::from_secs(120),
-    Duration::from_secs(600),
-];
-const MONITOR_TICK: Duration = Duration::from_millis(300);
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +45,8 @@ struct Status {
     stage: Stage,
     error: Option<Friendly>,
     url: Option<String>,
+    /// 每次切换阶段加一，进度页据此判断按钮能否再次点击
+    epoch: u64,
 }
 
 /// 页面上不变的信息。
@@ -127,6 +119,7 @@ impl Shared {
                 stage: Stage::Preparing,
                 error: None,
                 url: None,
+                epoch: 0,
             }),
             commands: Mutex::new(commands),
             info,
@@ -134,10 +127,29 @@ impl Shared {
         })
     }
 
-    fn set(&self, stage: Stage, error: Option<Friendly>, url: Option<String>) {
+    /// 切换阶段（主流程用；测试里也用它摆出各个阶段）。
+    pub fn set(&self, stage: Stage, error: Option<Friendly>, url: Option<String>) {
         if let Ok(mut s) = self.status.lock() {
-            *s = Status { stage, error, url };
+            let epoch = s.epoch + 1;
+            *s = Status {
+                stage,
+                error,
+                url,
+                epoch,
+            };
         }
+    }
+
+    /// 当前阶段下这个命令有没有意义（进度页发来的陈旧命令直接拒绝，不进队列）。
+    pub fn accepts(&self, cmd: Command) -> bool {
+        matches!(
+            (cmd, self.stage()),
+            (
+                Command::Retry,
+                Stage::Failed | Stage::Crashed | Stage::Running
+            ) | (Command::Restart, Stage::Crashed)
+                | (Command::SettingsChanged, _)
+        )
     }
 
     pub fn stage(&self) -> Stage {
@@ -190,6 +202,7 @@ impl Shared {
             "stage": status.as_ref().map(|s| s.stage).unwrap_or(Stage::Preparing),
             "error": status.as_ref().and_then(|s| s.error.clone()),
             "url": status.as_ref().and_then(|s| s.url.clone()),
+            "epoch": status.as_ref().map(|s| s.epoch).unwrap_or(0),
             "items": items,
             "total": required,
             "optionalTotal": optional,
@@ -221,111 +234,9 @@ impl Plan {
             .collect()
     }
 
-    fn includes(&self, item: &Item) -> bool {
+    pub(crate) fn includes(&self, item: &Item) -> bool {
         !(self.app_dir.is_some() && item.kind == "app")
     }
 }
 
-/// 控制线程主循环；`rx` 收进度页的命令。永不返回（随进程结束）。
-pub fn run(shared: Arc<Shared>, plan: Arc<Plan>, rx: Receiver<Command>) {
-    shared.progress.register(&plan.items());
-    let mut optional: Option<Sender<()>> = None;
-    loop {
-        shared.set(Stage::Preparing, None, None);
-        let required = sync_with(
-            &plan.root,
-            &plan.manifest,
-            &plan.platform,
-            &plan.downloader,
-            |i| plan.includes(i) && !i.optional,
-        );
-        if let Err(e) = required {
-            shared.set(Stage::Failed, Some(friendly(&e.to_string())), None);
-            wait_for(&rx, &[Command::Retry]);
-            continue;
-        }
-
-        shared.set(Stage::Starting, None, None);
-        let started = service_spec(
-            &plan.root,
-            &plan.manifest,
-            &plan.platform,
-            plan.app_dir.clone(),
-        )
-        .and_then(|spec| Service::start(&spec));
-        let mut service = match started {
-            Ok(s) => s,
-            Err(e) => {
-                shared.set(Stage::Crashed, Some(friendly(&e.to_string())), None);
-                wait_for(&rx, &[Command::Restart, Command::Retry]);
-                continue;
-            }
-        };
-        shared.set(Stage::Running, None, Some(service.url().to_string()));
-        eprintln!("工作台已就绪：{}", service.url());
-
-        // 服务起来后在后台补可选项（只开一个后台线程）
-        let kick = optional.get_or_insert_with(|| spawn_optional(plan.clone()));
-        let _ = kick.send(());
-
-        // 守着服务：崩溃 → 等重新启动；重试/改设置 → 催一下后台补齐
-        loop {
-            match rx.recv_timeout(MONITOR_TICK) {
-                Ok(Command::Restart) => {
-                    service.stop();
-                    break;
-                }
-                Ok(Command::Retry | Command::SettingsChanged) => {
-                    let _ = kick.send(());
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return,
-            }
-            if let Some(reason) = service.exited() {
-                let mut problem = friendly(&reason);
-                problem.title = format!("工作台意外退出了：{}", problem.title);
-                shared.set(Stage::Crashed, Some(problem), None);
-                wait_for(&rx, &[Command::Restart, Command::Retry]);
-                break;
-            }
-        }
-    }
-}
-
-/// 阻塞到收到指定命令之一；通道断开（进程退出中）时直接返回。
-fn wait_for(rx: &Receiver<Command>, wanted: &[Command]) {
-    while let Ok(cmd) = rx.recv() {
-        if wanted.contains(&cmd) {
-            return;
-        }
-    }
-}
-
-/// 后台补齐可选项：失败按间隔重试，收到「催一下」立即再试；全部装好后退出。
-fn spawn_optional(plan: Arc<Plan>) -> Sender<()> {
-    let (tx, rx) = mpsc::channel::<()>();
-    std::thread::spawn(move || {
-        let mut attempt = 0usize;
-        loop {
-            let report = sync_with(
-                &plan.root,
-                &plan.manifest,
-                &plan.platform,
-                &plan.downloader,
-                |i| plan.includes(i) && i.optional,
-            );
-            if matches!(&report, Ok(r) if r.deferred.is_empty()) {
-                return;
-            }
-            let wait = OPTIONAL_BACKOFF[attempt.min(OPTIONAL_BACKOFF.len() - 1)];
-            attempt += 1;
-            // 丢掉排队中的「催一下」，然后等下一轮
-            while rx.try_recv().is_ok() {}
-            match rx.recv_timeout(wait) {
-                Ok(()) | Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return,
-            }
-        }
-    });
-    tx
-}
+pub use crate::flow::run;

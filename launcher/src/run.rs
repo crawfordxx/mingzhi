@@ -4,7 +4,10 @@
 //! - 端口被占用由服务自己顺延，实际地址从 stdout 的「明知AI剪辑 已启动：http://127.0.0.1:PORT」读取
 //! - 就绪判定：GET /api/status 返回 200
 //! - 启动器退出（含被强杀）时子进程跟着退出：子进程的 stdin 接在启动器上，
-//!   额外 `--import` 一段看门狗代码，stdin 关闭（启动器没了）就退出。
+//!   额外 `--import` 一段看门狗代码，stdin 关闭（启动器没了）就触发服务自己的 SIGTERM 处理
+//!   优雅收尾，4 秒内没退出再强制退出；Windows 另把子进程放进 Job Object，整棵进程树随启动器结束。
+//! - 正常停止：先关 stdin（即上面的优雅停止），等 5 秒还在就强杀（Windows 结束整个 Job）。
+//! - 服务以退出码 0 退出视为用户主动退出（工作台里点「退出」），启动器随之退出。
 
 use crate::error::{Error, Result};
 use crate::manifest::Manifest;
@@ -19,16 +22,35 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_PORT: u16 = 4321;
-/// 首次启动 tsx 要编译源码，给足时间
-pub const READY_TIMEOUT: Duration = Duration::from_secs(90);
+/// 首次启动 tsx 要编译源码，Windows 上杀毒软件还会扫一遍 node_modules，给足时间
+pub const READY_TIMEOUT: Duration = Duration::from_secs(180);
 const READY_MARK: &str = "已启动：";
 const ENTRY: &str = "src/server/index.ts";
-/// 看门狗：stdin 结束（启动器退出）即退出
-const WATCHDOG: &str =
-    "--import=data:text/javascript,process.stdin.on('end',()=>process.exit(0)).resume();";
+/// 看门狗：stdin 结束（启动器退出或要求停止）→ 触发服务已有的 SIGTERM 处理（emit，Windows 上
+/// 发信号不会触发监听器）；没有监听器就直接退出；4 秒兜底强制退出。
+/// 写进 data: URL，不能含空格、`?`、`#`。
+pub const WATCHDOG: &str = "--import=data:text/javascript,process.stdin.on('end',()=>{setTimeout(()=>process.exit(0),4e3).unref();process.emit('SIGTERM')||process.exit(0)}).resume();";
 /// 保留的子进程输出行数（崩溃时取原因）
 const LOG_LINES: usize = 60;
-const STOP_GRACE: Duration = Duration::from_secs(3);
+/// 单行输出最多保留的字符数
+const LINE_MAX: usize = 2000;
+/// 优雅停止的等待时间，过了就强杀
+const STOP_GRACE: Duration = Duration::from_secs(5);
+
+/// 服务进程的退出情况。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exit {
+    pub code: Option<i32>,
+    /// 最后几行输出 + 退出码，给界面当原因
+    pub reason: String,
+}
+
+impl Exit {
+    /// 退出码 0：用户在工作台里主动退出，不算崩溃。
+    pub fn is_user_quit(&self) -> bool {
+        self.code == Some(0)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ServiceSpec {
@@ -89,6 +111,8 @@ type Log = Arc<Mutex<VecDeque<String>>>;
 pub struct Service {
     child: Child,
     stdin: Option<ChildStdin>,
+    #[cfg(windows)]
+    job: Option<crate::winjob::Job>,
     url: String,
     log: Log,
 }
@@ -119,6 +143,8 @@ impl Service {
             pump(err, log.clone(), None);
         }
         let mut svc = Service {
+            #[cfg(windows)]
+            job: crate::winjob::Job::attach(&child),
             stdin: child.stdin.take(),
             child,
             url: String::new(),
@@ -140,8 +166,8 @@ impl Service {
     fn wait_ready(&mut self, rx: &mpsc::Receiver<String>, deadline: Instant) -> Result<String> {
         // 1. 等 stdout 里的地址
         let url = loop {
-            if let Some(reason) = self.exited() {
-                return Err(Error::new(format!("工作台服务启动失败：{reason}")));
+            if let Some(exit) = self.exited() {
+                return Err(Error::new(format!("工作台服务启动失败：{}", exit.reason)));
             }
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(url) => break url,
@@ -149,8 +175,8 @@ impl Service {
                 Err(_) => {
                     // 通道断开（stdout 关闭）也可能是进程刚退出，再确认一次
                     std::thread::sleep(Duration::from_millis(100));
-                    if let Some(reason) = self.exited() {
-                        return Err(Error::new(format!("工作台服务启动失败：{reason}")));
+                    if let Some(exit) = self.exited() {
+                        return Err(Error::new(format!("工作台服务启动失败：{}", exit.reason)));
                     }
                     if Instant::now() >= deadline {
                         return Err(self.timeout_error());
@@ -164,8 +190,8 @@ impl Service {
             .build();
         let status = format!("{url}/api/status");
         loop {
-            if let Some(reason) = self.exited() {
-                return Err(Error::new(format!("工作台服务启动失败：{reason}")));
+            if let Some(exit) = self.exited() {
+                return Err(Error::new(format!("工作台服务启动失败：{}", exit.reason)));
             }
             if matches!(agent.get(&status).call(), Ok(r) if r.status() == 200) {
                 return Ok(url);
@@ -193,15 +219,18 @@ impl Service {
     }
 
     /// 子进程已退出时返回原因（退出码 + 最后几行输出），仍在运行返回 None。
-    pub fn exited(&mut self) -> Option<String> {
+    pub fn exited(&mut self) -> Option<Exit> {
         let status = self.child.try_wait().ok()??;
         // 给输出线程一点时间把最后几行读完
         std::thread::sleep(Duration::from_millis(50));
-        let code = status
-            .code()
+        let code = status.code();
+        let label = code
             .map(|c| format!("退出码 {c}"))
             .unwrap_or_else(|| "被系统结束".to_string());
-        Some(format!("{}（{code}）", self.tail(4)))
+        Some(Exit {
+            code,
+            reason: format!("{}（{label}）", self.tail(4)),
+        })
     }
 
     /// 最后 n 行输出，优先挑带错误字样的行。
@@ -234,13 +263,22 @@ impl Service {
 
     /// 结束子进程：先关 stdin 让看门狗正常退出，等一会儿还在就强制结束。
     pub fn stop(&mut self) {
+        self.stop_within(STOP_GRACE);
+    }
+
+    /// 关 stdin 触发优雅停止，`grace` 内没退出就强杀（Windows 连同子进程树）。
+    pub fn stop_within(&mut self, grace: Duration) {
         drop(self.stdin.take());
-        let deadline = Instant::now() + STOP_GRACE;
+        let deadline = Instant::now() + grace;
         while Instant::now() < deadline {
             if matches!(self.child.try_wait(), Ok(Some(_))) {
                 return;
             }
             std::thread::sleep(Duration::from_millis(50));
+        }
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            job.terminate();
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -258,9 +296,20 @@ impl Drop for Service {
 /// 逐行读子进程输出存进环形日志；stdout 那一路发现启动地址就发给 `tx`。
 fn pump(stream: impl Read + Send + 'static, log: Log, tx: Option<mpsc::Sender<String>>) {
     std::thread::spawn(move || {
-        let reader = BufReader::new(stream);
-        for line in reader.split(b'\n').map_while(|l| l.ok()) {
-            let line = String::from_utf8_lossy(&line).trim_end().to_string();
+        let mut reader = BufReader::new(stream);
+        let mut buf = Vec::new();
+        loop {
+            buf.clear();
+            // 每次最多读 LINE_MAX 字节，超长的行被切成几段，内存有上限
+            match reader
+                .by_ref()
+                .take(LINE_MAX as u64)
+                .read_until(b'\n', &mut buf)
+            {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+            let line = String::from_utf8_lossy(&buf).trim_end().to_string();
             if let (Some(tx), Some(url)) = (&tx, parse_ready(&line)) {
                 let _ = tx.send(url);
             }

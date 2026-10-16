@@ -5,7 +5,7 @@
 //! - GET  /api/ping             单实例确认
 //! - POST /api/retry|restart    重试下载 / 重新启动工作台
 //! - POST /api/settings         保存镜像与 GitHub 代理前缀
-//! - GET  /assets/*             油画、字体
+//! - GET  /assets/*             页面样式与脚本、油画、字体
 //!
 //! 安全：Host 必须是本机地址（防 DNS 重绑定）；POST 必须带 `X-Mingzhi: 1`
 //! （跨站页面带不了自定义头而不触发预检，我们不应答预检），且 Origin 若有必须是本页。
@@ -19,31 +19,53 @@ use std::io::Read;
 use std::sync::Arc;
 use tiny_http::{Header, Method, Request, Response, Server};
 
-const PAGE: &str = include_str!("ui.html");
-const ASSETS: [(&str, &str, &[u8]); 5] = [
+const PAGE: &str = include_str!("ui/index.html");
+/// 页面脚本与样式随启动器版本变化，不缓存；油画与字体不变，缓存一天
+const NO_STORE: &str = "no-store";
+const CACHE_DAY: &str = "public, max-age=86400";
+/// (名称, Content-Type, Cache-Control, 内容)
+type Asset = (&'static str, &'static str, &'static str, &'static [u8]);
+const ASSETS: [Asset; 7] = [
+    (
+        "ui.css",
+        "text/css; charset=utf-8",
+        NO_STORE,
+        include_bytes!("ui/ui.css"),
+    ),
+    (
+        "ui.js",
+        "text/javascript; charset=utf-8",
+        NO_STORE,
+        include_bytes!("ui/ui.js"),
+    ),
     (
         "art.webp",
         "image/webp",
+        CACHE_DAY,
         include_bytes!("../assets/art.webp"),
     ),
     (
         "plex-serif-200i.woff2",
         "font/woff2",
+        CACHE_DAY,
         include_bytes!("../assets/plex-serif-200i.woff2"),
     ),
     (
         "plex-serif-300i.woff2",
         "font/woff2",
+        CACHE_DAY,
         include_bytes!("../assets/plex-serif-300i.woff2"),
     ),
     (
         "plex-mono-400.woff2",
         "font/woff2",
+        CACHE_DAY,
         include_bytes!("../assets/plex-mono-400.woff2"),
     ),
     (
         "plex-mono-500.woff2",
         "font/woff2",
+        CACHE_DAY,
         include_bytes!("../assets/plex-mono-500.woff2"),
     ),
 ];
@@ -73,8 +95,10 @@ pub fn start(shared: Arc<Shared>, base_port: u16) -> Result<UiServer> {
         .map(|a| a.port())
         .ok_or_else(|| Error::new("进度页服务地址异常"))?;
     std::thread::spawn(move || {
+        // 每个请求一个线程：单个慢连接（例如声明了长度却迟迟不发正文）卡不住整个进度页
         for req in server.incoming_requests() {
-            handle(&shared, port, req);
+            let shared = shared.clone();
+            std::thread::spawn(move || handle(&shared, port, req));
         }
     });
     Ok(UiServer { port })
@@ -168,7 +192,7 @@ fn route(shared: &Shared, port: u16, req: &mut Request) -> Resp {
         )
         .with_header(header(
             "Content-Security-Policy",
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+            "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
         )),
         (Method::Get, "/api/state") => json(200, &shared.view()),
         (Method::Get, "/api/ping") => text(200, PING_REPLY),
@@ -182,13 +206,19 @@ fn route(shared: &Shared, port: u16, req: &mut Request) -> Resp {
 }
 
 fn asset(name: &str) -> Resp {
-    match ASSETS.iter().find(|(n, _, _)| *n == name) {
-        Some((_, ct, data)) => bytes(200, ct, data.to_vec(), "public, max-age=86400"),
+    match ASSETS.iter().find(|(n, _, _, _)| *n == name) {
+        Some((_, ct, cache, data)) => bytes(200, ct, data.to_vec(), cache),
         None => text(404, "not found"),
     }
 }
 
 fn command(shared: &Shared, cmd: Command) -> Resp {
+    if !shared.accepts(cmd) {
+        return json(
+            409,
+            &serde_json::json!({ "error": "现在不能这样做，页面状态已经变了" }),
+        );
+    }
     shared.send(cmd);
     json(200, &serde_json::json!({ "ok": true }))
 }

@@ -3,6 +3,7 @@
 //! - 镜像：清单 urls 的顺序是「国内镜像优先」；选「官方源优先」时倒序尝试。
 //! - GitHub 代理前缀：github.com / raw.githubusercontent.com / objects.githubusercontent.com 的地址
 //!   先试 `<前缀><原地址>`，再试原地址兜底。不内置任何第三方代理。
+//!   前缀只收 https，且不能指向本机 / 内网地址。
 
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,15 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// 重新校验（从 state.json 读回时用）：前缀不合法就清空，镜像保留。
+    pub fn sanitized(self) -> Self {
+        let github_prefix = normalize_prefix(&self.github_prefix).unwrap_or_default();
+        Self {
+            github_prefix,
+            ..self
+        }
+    }
+
     /// 校验并规范化用户输入的前缀。
     pub fn new(mirror: Mirror, github_prefix: &str) -> Result<Self> {
         Ok(Self {
@@ -69,26 +79,57 @@ fn normalize_prefix(raw: &str) -> Result<String> {
     }
     let invalid = || {
         Error::new(
-            "代理前缀格式不对，应形如 https://代理地址/（填完整的 http:// 或 https:// 开头的地址）",
+            "代理前缀格式不对，应形如 https://代理地址/（只支持 https，不能是本机或内网地址）",
         )
     };
-    if p.len() > MAX_PREFIX_LEN || p.chars().any(|c| c.is_whitespace() || c.is_control()) {
+    // `#` 之后的内容不会发给服务器，拼上去的原地址会丢
+    if p.len() > MAX_PREFIX_LEN
+        || p.chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '#')
+    {
         return Err(invalid());
     }
-    let lower = p.to_ascii_lowercase();
-    let rest = lower
-        .strip_prefix("https://")
-        .or_else(|| lower.strip_prefix("http://"))
+    let rest = p
+        .get(..8)
+        .filter(|s| s.eq_ignore_ascii_case("https://"))
+        .map(|_| &p[8..])
         .ok_or_else(invalid)?;
-    let host = rest.split('/').next().unwrap_or("");
-    if host.is_empty() || host.contains(['@', '?', '#']) {
+    let authority = rest.split(['/', '?']).next().unwrap_or("");
+    if authority.is_empty() || authority.contains('@') || is_private_host(&host_part(authority)) {
         return Err(invalid());
     }
-    Ok(if p.ends_with('/') {
+    Ok(if p.ends_with('/') || p.ends_with('=') {
         p.to_string()
     } else {
         format!("{p}/")
     })
+}
+
+/// 去掉端口，IPv6 去掉方括号，转小写。
+fn host_part(authority: &str) -> String {
+    let lower = authority.to_ascii_lowercase();
+    if let Some(v6) = lower.strip_prefix('[') {
+        return v6.split(']').next().unwrap_or("").to_string();
+    }
+    lower.split(':').next().unwrap_or("").to_string()
+}
+
+/// 本机、回环、内网、链路本地地址：不允许当代理前缀（避免对本机端口发请求）。
+fn is_private_host(host: &str) -> bool {
+    if host.is_empty() || host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    if let Ok(v4) = host.parse::<std::net::Ipv4Addr>() {
+        return v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified();
+    }
+    if let Ok(v6) = host.parse::<std::net::Ipv6Addr>() {
+        let first = v6.segments()[0];
+        return v6.is_loopback()
+            || v6.is_unspecified()
+            || (first & 0xfe00) == 0xfc00 // 唯一本地 fc00::/7
+            || (first & 0xffc0) == 0xfe80; // 链路本地 fe80::/10
+    }
+    false
 }
 
 /// 地址的主机是否为需要套代理前缀的 GitHub 域名。

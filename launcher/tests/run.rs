@@ -4,7 +4,7 @@
 
 use mingzhi_launcher::manifest::Manifest;
 use mingzhi_launcher::paths::AppRoot;
-use mingzhi_launcher::run::{service_spec, Service, ServiceSpec, DEFAULT_PORT};
+use mingzhi_launcher::run::{service_spec, Service, ServiceSpec, DEFAULT_PORT, WATCHDOG};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -169,8 +169,10 @@ fn 运行中崩溃能拿到原因() {
     let mut svc = Service::start(&spec).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     let reason = loop {
-        if let Some(r) = svc.exited() {
-            break r;
+        if let Some(exit) = svc.exited() {
+            assert_eq!(exit.code, Some(3));
+            assert!(!exit.is_user_quit());
+            break exit.reason;
         }
         assert!(Instant::now() < deadline, "应检测到退出");
         std::thread::sleep(Duration::from_millis(50));
@@ -190,4 +192,69 @@ fn 停止或丢弃时结束子进程() {
         assert!(Instant::now() < deadline, "子进程应已结束");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn 退出码0视为用户主动退出() {
+    let (_dir, spec) = fake_spec("quit-later", 0);
+    let mut svc = Service::start(&spec).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let exit = loop {
+        if let Some(e) = svc.exited() {
+            break e;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(exit.is_user_quit(), "{exit:?}");
+}
+
+/// 用系统 node 跑真实的看门狗参数：stdin 关闭后触发服务自己的 SIGTERM 处理。
+fn watchdog_run(script: &str) -> (Duration, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let js = dir.path().join("svc.mjs");
+    fs::write(&js, script).unwrap();
+    let mut child = std::process::Command::new("node")
+        .arg(WATCHDOG)
+        .arg(&js)
+        .current_dir(dir.path())
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("需要系统里有 node");
+    std::thread::sleep(Duration::from_millis(400));
+    let started = Instant::now();
+    drop(child.stdin.take());
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while child.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "看门狗应让进程退出");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let out = fs::read_to_string(dir.path().join("out.txt")).unwrap_or_default();
+    (started.elapsed(), out)
+}
+
+#[test]
+fn 看门狗触发服务自己的sigterm处理() {
+    let (_, out) = watchdog_run(
+        "import { writeFileSync } from 'node:fs';\n\
+         process.on('SIGTERM', () => { writeFileSync('out.txt', 'graceful'); process.exit(0); });\n\
+         setInterval(() => {}, 1000);\n",
+    );
+    assert_eq!(out, "graceful");
+}
+
+#[test]
+fn 看门狗在没有sigterm处理时直接退出() {
+    let (took, _) = watchdog_run("setInterval(() => {}, 1000);\n");
+    assert!(took < Duration::from_secs(2), "{took:?}");
+}
+
+#[test]
+fn 看门狗在服务收尾卡住时4秒兜底退出() {
+    let (took, _) =
+        watchdog_run("process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);\n");
+    assert!(
+        took >= Duration::from_secs(3) && took < Duration::from_secs(7),
+        "{took:?}"
+    );
 }

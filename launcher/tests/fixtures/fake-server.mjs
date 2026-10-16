@@ -1,5 +1,5 @@
 // 测试用假服务：模拟 `node --import tsx src/server/index.ts` 的 stdout 与 /api/status。
-// 行为由环境变量 FAKE_MODE 决定：ok | crash | crash-later | silent | not-ready
+// 行为由环境变量 FAKE_MODE 决定：ok | crash | crash-later | quit-later | silent | not-ready
 import { createServer } from 'node:http';
 import { writeFileSync } from 'node:fs';
 
@@ -27,6 +27,10 @@ else {
     server.listen(port, '127.0.0.1', () => {
       console.log('一些无关的日志');
       console.log(`明知AI剪辑 已启动：http://127.0.0.1:${server.address().port}`);
+      if (mode === 'quit-later') {
+        // 模拟用户在工作台里点「退出」：正常退出，退出码 0
+        setTimeout(() => process.exit(0), 400);
+      }
       if (mode === 'crash-later') {
         setTimeout(() => {
           console.error('Error: boom 渲染进程崩了');
